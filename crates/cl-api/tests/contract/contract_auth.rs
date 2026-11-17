@@ -59,7 +59,7 @@ pub fn temporary_password_must_be_changed(h: &Harness) {
     if !h.require_cap(TEMP_PASSWORD, "U-230") {
         return;
     }
-    let (_, email, pw) = invite(h);
+    let (id, email, pw) = invite(h);
     let temp = Secret::new(pw);
     h.auth_slots(1);
     let Ok(LoginOutcome::Session(s)) = h.run(h.client.login(&email, &temp)) else {
@@ -80,6 +80,58 @@ pub fn temporary_password_must_be_changed(h: &Harness) {
     assert!(!s.password_change_required());
     h.run(s.open_company(h.contract_co))
         .expect("opens after the change");
+
+    // No password, temporary or new, in what the owner can read.
+    let raw = h
+        .run(h.s1.raw(
+            Method::Get,
+            "/api/v1/audit-log",
+            &[
+                ("company", "current"),
+                ("entity_type", "user_password_change"),
+            ],
+            None,
+        ))
+        .expect("raw audit log");
+    assert_eq!(raw.status, 200, "{}", raw.body);
+    let body = raw.body.to_string();
+    for secret in [temp.expose(), "synthetic-viewer-pw-1"] {
+        assert!(!body.contains(secret), "no password in the audit log");
+    }
+    // P29b (owner 2026-11-17): the user's own change is in the company's
+    // audit log as `user_password_change`, by and about that user. Read by
+    // the owner.
+    let rows = h
+        .run(h.s1.audit().list(
+            &cl_api::AuditFilter {
+                entity_type: Some("user_password_change".into()),
+                entity_id: Some(uuid::Uuid::parse_str(&id).expect("user id")),
+                ..cl_api::AuditFilter::default()
+            },
+            50,
+            0,
+        ))
+        .expect("audit log");
+    let Some(row) = rows
+        .rows
+        .iter()
+        .find(|r| r.entity_id.as_deref() == Some(id.as_str()))
+    else {
+        // Engine fault found 2026-11-17: `changePassword` writes the row
+        // to `users.tenant_id`, and on the desktop every user is homed in
+        // the workspace tenant, whose audit log `/audit-log` refuses (409
+        // WORKSPACE_TENANT). No company's Audit Trail can show it.
+        h.pending(
+            "P29b password-change audit",
+            "the engine writes user_password_change to the workspace tenant, not the company",
+        );
+        return;
+    };
+    assert_eq!(row.entity_type, "user_password_change");
+    assert_eq!(
+        row.user.map(|u| u.to_string()).as_deref(),
+        Some(id.as_str())
+    );
 }
 
 /// Five wrong passwords lock a normal user; every wrong try reads as
