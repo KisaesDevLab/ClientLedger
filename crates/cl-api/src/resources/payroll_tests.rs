@@ -391,6 +391,7 @@ fn column_maps_round_trip_through_a_template() {
     map.department_tags
         .insert("Front".into(), Some(TAG.parse().expect("tag")));
     let back = ColumnMap::from_value(&map.template_value()).expect("read back");
+    assert_eq!(back.sources(), vec!["Wages".to_string()]);
     assert_eq!(back, map);
     let apply = map.apply_body();
     assert!(

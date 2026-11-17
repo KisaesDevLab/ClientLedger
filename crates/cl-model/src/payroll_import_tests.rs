@@ -207,6 +207,81 @@ proptest! {
     }
 }
 
+fn saved(id: u8, provider: &str, cols: &[(&'static str, &str)], updated: &str) -> SavedLayout<u8> {
+    SavedLayout {
+        id,
+        name: format!("Layout {id}"),
+        provider_key: provider.into(),
+        is_system: false,
+        updated_at: Some(updated.into()),
+        layout: manual_layout(
+            &cols
+                .iter()
+                .map(|(f, h)| (*f, (*h).to_string()))
+                .collect::<Vec<_>>(),
+            None,
+        ),
+        department_tags: BTreeMap::new(),
+    }
+}
+
+#[test]
+fn layouts_are_remembered_per_provider_and_by_headers_for_generic_files() {
+    let generic = headers(&["Worker", "Paid On", "Wages", "Take Home"]);
+    let mine = saved(
+        1,
+        "custom",
+        &[
+            ("employee_name", "Worker"),
+            ("gross_pay", "Wages"),
+            ("net_pay", "Take Home"),
+        ],
+        "2025-07-12T00:00:00Z",
+    );
+    let gusto_own = saved(
+        2,
+        "gusto",
+        &[
+            ("employee_name", "Employee Name"),
+            ("gross_pay", "Gross Pay"),
+            ("net_pay", "Net Pay"),
+        ],
+        "2025-01-11T00:00:00Z",
+    );
+    let list = vec![mine, gusto_own];
+    // A2: the second generic file of the same shape needs no Map step.
+    assert_eq!(
+        choose_layout(Provider::GenericCsv, &generic, &list),
+        LayoutChoice::Saved(1)
+    );
+    assert_eq!(
+        choose_layout(Provider::Rippling, &generic, &list),
+        LayoutChoice::Saved(1)
+    );
+    assert_eq!(
+        choose_layout(Provider::GenericCsv, &headers(&["Other"]), &list),
+        LayoutChoice::Manual
+    );
+    let gusto_file = headers(&["Employee Name", "Gross Pay", "Net Pay", "Department"]);
+    assert_eq!(
+        choose_layout(Provider::Gusto, &gusto_file, &list),
+        LayoutChoice::Saved(2)
+    );
+    assert_eq!(
+        choose_layout(Provider::Gusto, &headers(&["Employee Name"]), &list),
+        LayoutChoice::Builtin,
+        "a saved layout that doesn't fit falls back to the built-in one"
+    );
+    assert_eq!(
+        choose_layout(Provider::AdpRun, &gusto_file, &list),
+        LayoutChoice::NotNeeded
+    );
+    assert_eq!(mappable_field("gross_pay"), Some("gross_pay"));
+    assert_eq!(mappable_field("employee_ssn"), None);
+    assert_eq!(guess_date_format(["07/11/2025"]), "MM/DD/YYYY");
+    assert_eq!(guess_date_format(["2025-07-11"]), "YYYY-MM-DD");
+}
+
 #[test]
 fn the_gate_refuses_an_untagged_line_when_required_and_names_it() {
     let plan = TagPlan::new(

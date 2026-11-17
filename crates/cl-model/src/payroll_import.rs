@@ -500,6 +500,138 @@ pub fn builtin_mapping(p: Provider) -> Option<ColumnLayout> {
     }
 }
 
+/// A layout the company saved (an engine template read back by cl-ui).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SavedLayout<T> {
+    /// The template's id.
+    pub id: T,
+    /// The owner's name for it.
+    pub name: String,
+    /// The engine provider key it was saved for (`custom` = generic).
+    pub provider_key: String,
+    /// Built into the engine (never applied by the desktop).
+    pub is_system: bool,
+    /// When it last changed (RFC 3339 text).
+    pub updated_at: Option<String>,
+    /// The columns.
+    pub layout: ColumnLayout,
+    /// Department (as in the file) → tag, remembered with the layout.
+    pub department_tags: BTreeMap<String, Option<TagId>>,
+}
+
+/// Which layout the Map step starts from (WP3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum LayoutChoice<T> {
+    /// The company's saved layout (`id`). For a generic file the Map step
+    /// is skipped with a "Using your saved layout" banner (A2).
+    Saved(T),
+    /// The desktop's own layout for this provider.
+    Builtin,
+    /// No layout fits: the owner maps the columns.
+    Manual,
+    /// A ready-made journal file: no columns to map.
+    NotNeeded,
+}
+
+/// Picks the layout for a file of provider `p` with `headers`:
+///
+/// - a ready-made file needs none;
+/// - a known provider uses the company's own saved layout for it when it
+///   fits the file (the newest), else the desktop's built-in one;
+/// - a generic file (and Rippling) uses [`template_for_headers`] over the
+///   company's generic layouts, else the owner maps it.
+#[must_use]
+pub fn choose_layout<T: Clone>(
+    p: Provider,
+    headers: &[String],
+    saved: &[SavedLayout<T>],
+) -> LayoutChoice<T> {
+    if p.mode() == FileMode::Prebuilt {
+        return LayoutChoice::NotNeeded;
+    }
+    let candidates: Vec<TemplateCandidate<T>> = saved
+        .iter()
+        .filter(|s| s.provider_key == p.engine_key())
+        .map(|s| TemplateCandidate {
+            id: s.id.clone(),
+            sources: s.layout.columns.iter().map(|c| c.header.clone()).collect(),
+            updated_at: s.updated_at.clone(),
+            is_system: s.is_system,
+        })
+        .collect();
+    if p.is_generic() {
+        return template_for_headers(headers, &candidates)
+            .map_or(LayoutChoice::Manual, |t| LayoutChoice::Saved(t.id.clone()));
+    }
+    let own = candidates
+        .iter()
+        .filter(|c| !c.is_system)
+        .filter(|c| {
+            let have: Vec<String> = headers.iter().map(|h| normalize_header(h)).collect();
+            c.sources
+                .iter()
+                .all(|s| have.contains(&normalize_header(s)))
+        })
+        .max_by(|a, b| a.updated_at.cmp(&b.updated_at));
+    match own {
+        Some(c) => LayoutChoice::Saved(c.id.clone()),
+        None if builtin_mapping(p).is_some() => LayoutChoice::Builtin,
+        None => LayoutChoice::Manual,
+    }
+}
+
+/// The name a saved layout gets ("Gusto layout", "Generic layout 3 columns"
+/// is the caller's i18n; this is the stable part used to find it again).
+#[must_use]
+pub fn layout_name_key(p: Provider) -> &'static str {
+    if p.is_generic() {
+        "payroll.layout.name_generic"
+    } else {
+        "payroll.layout.name_provider"
+    }
+}
+
+/// The engine field for a field name read back from a saved layout
+/// (unknown fields are dropped: the desktop saves only these).
+#[must_use]
+pub fn mappable_field(name: &str) -> Option<&'static str> {
+    MAPPABLE_FIELDS.iter().copied().find(|f| *f == name)
+}
+
+/// A layout from the owner's Map step: header row 0, no total rows
+/// unless the worker column says so, and the pairs chosen.
+#[must_use]
+pub fn manual_layout(
+    pairs: &[(&'static str, String)],
+    date_format: Option<&'static str>,
+) -> ColumnLayout {
+    ColumnLayout {
+        header_row: 0,
+        data_start_row: 1,
+        skip_footer_rows: 0,
+        date_format,
+        columns: pairs
+            .iter()
+            .map(|(f, h)| FieldColumn {
+                field: f,
+                header: h.clone(),
+            })
+            .collect(),
+        total_rows: vec!["Total", "Totals", "Grand Total"],
+    }
+}
+
+/// Guesses a date format from sample date cells (`MM/DD/YYYY` when they
+/// use slashes, else ISO).
+#[must_use]
+pub fn guess_date_format<'a>(samples: impl IntoIterator<Item = &'a str>) -> &'static str {
+    if samples.into_iter().any(|s| s.contains('/')) {
+        "MM/DD/YYYY"
+    } else {
+        "YYYY-MM-DD"
+    }
+}
+
 /// One preview line as the tag plan sees it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlanLine {

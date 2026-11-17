@@ -372,6 +372,12 @@ pub struct ColumnMap {
 }
 
 impl ColumnMap {
+    /// The file columns this layout maps (to find it again for a file).
+    #[must_use]
+    pub fn sources(&self) -> Vec<String> {
+        self.mappings.values().map(|s| s.source.clone()).collect()
+    }
+
     /// The `apply-mapping` body (without the department tags).
     #[must_use]
     pub fn apply_body(&self) -> Value {
