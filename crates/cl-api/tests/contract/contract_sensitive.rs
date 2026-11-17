@@ -241,7 +241,11 @@ pub fn doors_match_the_engine(h: &Harness) {
     assert_eq!(none, Some(SensitiveDoors::none()));
     assert_eq!(before, Some(SensitiveDoors::none()), "nothing marked yet");
     let owner_after = h.run(owner.sensitive_doors()).expect("owner doors");
-    assert_eq!(owner_after, Some(SensitiveDoors::none()), "an Admin sees all");
+    assert_eq!(
+        owner_after,
+        Some(SensitiveDoors::none()),
+        "an Admin sees all"
+    );
     let doors = h
         .run(bk.sensitive_doors())
         .expect("doors")
