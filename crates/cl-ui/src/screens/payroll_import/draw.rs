@@ -272,6 +272,9 @@ impl PayrollImportScreen {
                     self.try_again();
                 }
             });
+            if self.view == View::Import && self.post_unsettled {
+                note(ui, tokens, &t("payroll.unknown_kept"));
+            }
         }
         if matches!(
             tr,
@@ -385,6 +388,8 @@ impl PayrollImportScreen {
         self.layout_choice = None;
         self.department_tags.clear();
         self.departments.clear();
+        self.file_departments = None;
+        self.departments_truncated = false;
     }
 
     fn map_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -409,11 +414,25 @@ impl PayrollImportScreen {
             Some(LayoutChoice::Builtin) => note(ui, tokens, &t("payroll.map.builtin_banner")),
             _ => {}
         }
+        if !self.new_columns.is_empty() {
+            // S4: column names only (never cell text).
+            warn(
+                ui,
+                tokens,
+                &t_with(
+                    "payroll.map.new_columns",
+                    &[("columns", &self.new_columns.join(", "))],
+                ),
+            );
+        }
         let headers = self
             .upload
             .as_ref()
             .map(|u| u.headers.clone())
             .unwrap_or_default();
+        // The column list shows every column of a typical file without
+        // scrolling (egui's default fits about six), capped to the window.
+        let list_height = column_list_height(ui, headers.len());
         egui::Grid::new("payroll.map.grid")
             .num_columns(3)
             .striped(true)
@@ -433,6 +452,7 @@ impl PayrollImportScreen {
                                 .unwrap_or_else(|| t("payroll.map.no_column")),
                         )
                         .width(220.0)
+                        .height(list_height)
                         .show_ui(ui, |ui| {
                             if ui
                                 .selectable_label(current.is_none(), t("payroll.map.no_column"))
@@ -471,20 +491,32 @@ impl PayrollImportScreen {
             );
         }
         ui.checkbox(&mut self.save_layout, t("payroll.map.save_layout"));
-        if !self.departments.is_empty() {
-            ui.add_space(10.0);
-            heading(ui, tokens, "payroll.map.departments");
-            note(ui, tokens, &t("payroll.map.department_hint"));
-            for d in self.departments.clone() {
-                ui.horizontal(|ui| {
-                    let current = self.department_tags.get(&d).copied().flatten();
-                    if let Some(c) =
-                        tag_combo(ui, ("payroll.dept", &d), &d, &self.tags, current, true)
-                    {
-                        self.department_tags.insert(d.clone(), c);
-                    }
-                });
-            }
+        self.departments_ui(ui, tokens);
+    }
+
+    /// Department → tag (Map, from the sample rows; Check, every department
+    /// in the file when the engine lists them, S3).
+    fn departments_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        if self.departments.is_empty() || self.layout.column("department").is_none() {
+            return;
+        }
+        ui.add_space(10.0);
+        heading(ui, tokens, "payroll.map.departments");
+        note(ui, tokens, &t("payroll.map.department_hint"));
+        if self.file_departments.is_none() && self.step == Step::Map {
+            note(ui, tokens, &t("payroll.map.departments_more"));
+        }
+        if self.departments_truncated {
+            warn(ui, tokens, &t("payroll.map.departments_truncated"));
+        }
+        for d in self.departments.clone() {
+            ui.horizontal(|ui| {
+                let current = self.department_tags.get(&d).copied().flatten();
+                if let Some(c) = tag_combo(ui, ("payroll.dept", &d), &d, &self.tags, current, true)
+                {
+                    self.department_tags.insert(d.clone(), c);
+                }
+            });
         }
     }
 
@@ -521,7 +553,7 @@ impl PayrollImportScreen {
                     &t_with("payroll.map.saved_banner", &[("name", &name)]),
                 );
                 if ui.button(t("payroll.map.change")).clicked() {
-                    self.go(Step::Map);
+                    self.match_again();
                 }
             });
         }
@@ -629,6 +661,11 @@ impl PayrollImportScreen {
             for m in warnings.iter().take(50) {
                 ui.label(line(m));
             }
+        }
+        // S3: every department in the file (the Map step saw only the
+        // first rows), tagged before the entries are made.
+        if self.file_departments.is_some() {
+            self.departments_ui(ui, tokens);
         }
     }
 
@@ -834,14 +871,27 @@ impl PayrollImportScreen {
                     ui.label(t(status));
                     ui.label(s.entries.len().to_string());
                     ui.horizontal(|ui| {
+                        // S2: no new reverse while one is outstanding.
                         if s.status == SessionStatus::Posted
-                            && ui.button(t("payroll.history.reverse")).clicked()
+                            && ui
+                                .add_enabled(
+                                    !self.reverse_outstanding(),
+                                    egui::Button::new(t("payroll.history.reverse")),
+                                )
+                                .clicked()
                         {
                             self.password = None;
                             self.reversing = Some((s.id, t("payroll.history.reason_default")));
                         }
+                        // B1: this window's own draft is never discarded
+                        // while its post is out or unconfirmed.
                         if s.status.is_unposted_draft()
-                            && ui.button(t("payroll.history.discard")).clicked()
+                            && ui
+                                .add_enabled(
+                                    self.may_discard_session(s.id),
+                                    egui::Button::new(t("payroll.history.discard")),
+                                )
+                                .clicked()
                         {
                             self.discard(s.id);
                         }
@@ -853,14 +903,26 @@ impl PayrollImportScreen {
             && self.asking_password.is_none()
         {
             ui.add_space(8.0);
+            // S2: the reason is part of the keyed body; it is locked while
+            // an answer is outstanding (Try again resends it as sent).
+            let open = !self.reverse_outstanding();
             ui.horizontal(|ui| {
                 let l = ui.label(t("payroll.history.reason"));
-                ui.add(egui::TextEdit::singleline(&mut reason).desired_width(280.0))
-                    .labelled_by(l.id);
-                if ui.button(t("payroll.history.reverse_confirm")).clicked() {
+                ui.add_enabled(
+                    open,
+                    egui::TextEdit::singleline(&mut reason).desired_width(280.0),
+                )
+                .labelled_by(l.id);
+                if ui
+                    .add_enabled(open, egui::Button::new(t("payroll.history.reverse_confirm")))
+                    .clicked()
+                {
                     self.reverse(id, &reason);
                 }
-                if ui.button(t("payroll.cancel")).clicked() {
+                if ui
+                    .add_enabled(open, egui::Button::new(t("payroll.cancel")))
+                    .clicked()
+                {
                     self.reversing = None;
                     return;
                 }
@@ -957,19 +1019,49 @@ impl PayrollImportScreen {
             if r.clicked() {
                 self.next();
             }
-            if ui.button(t("payroll.cancel")).clicked() {
+            // B1: nothing discards or leaves the import while a post or
+            // reverse is out.
+            let settled = !self.in_flight();
+            if ui
+                .add_enabled(settled, egui::Button::new(t("payroll.cancel")))
+                .clicked()
+            {
                 self.cancel();
             }
             if self.step != Step::Choose
                 && ui
-                    .button(t("payroll.back"))
+                    .add_enabled(settled, egui::Button::new(t("payroll.back")))
                     .on_hover_text(shortcut_hint("form.step_back"))
                     .clicked()
             {
                 self.back();
             }
+            // S4: back to Match columns from a later step, even when the
+            // saved layout was applied without it.
+            if self.provider.mode() == FileMode::EmployeeLevel
+                && matches!(self.step, Step::Accounts | Step::Check | Step::Preview)
+                && ui
+                    .add_enabled(
+                        self.can_match_again(),
+                        egui::Button::new(t("payroll.map.match_again")),
+                    )
+                    .clicked()
+            {
+                self.match_again();
+            }
         });
     }
+}
+
+/// The height of a column list: every column (plus "none") when it fits in
+/// most of the window, else the most that do (the list scrolls).
+#[allow(clippy::float_arithmetic)] // pixels for egui, never money (M10)
+fn column_list_height(ui: &Ui, columns: usize) -> f32 {
+    let row = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
+    let rows = u16::try_from(columns.saturating_add(1)).unwrap_or(u16::MAX);
+    let all = f32::from(rows) * row + ui.spacing().menu_margin.sum().y;
+    let room = ui.ctx().content_rect().height() * 0.45;
+    all.min(room).max(ui.spacing().combo_height)
 }
 
 /// The day of the engine's `postedAt` (an ISO timestamp, U-244; a bare

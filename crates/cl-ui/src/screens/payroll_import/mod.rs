@@ -24,6 +24,10 @@
 //! Control-channel state: steps, counts, flags and the provider key only;
 //! never amounts, names, departments, file names or cell text.
 
+// M10: no floating point in payroll code (money is `rust_decimal`); the
+// drawing's pixel sums are allowed where they are, one function each.
+#![deny(clippy::float_arithmetic)]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use std::sync::mpsc::Receiver;
@@ -213,6 +217,27 @@ struct BodyPrint {
 
 type LineTagPrint = (usize, usize, Option<TagId>);
 
+/// A reverse body's identity for its key (S2): the import, the reason and
+/// a hash of the closing-date password (never the password; no Debug, so
+/// it can't reach a log).
+#[derive(Clone, PartialEq, Eq)]
+struct ReversePrint {
+    id: PayrollSessionId,
+    reason: String,
+    password: Option<[u8; 32]>,
+}
+
+impl ReversePrint {
+    fn of(id: PayrollSessionId, reason: &str, password: Option<&Secret>) -> ReversePrint {
+        use sha2::Digest as _;
+        ReversePrint {
+            id,
+            reason: reason.to_string(),
+            password: password.map(|p| sha2::Sha256::digest(p.expose().as_bytes()).into()),
+        }
+    }
+}
+
 /// The Import Payroll window.
 pub struct PayrollImportScreen {
     link: Arc<CompanyLink>,
@@ -239,7 +264,14 @@ pub struct PayrollImportScreen {
     pub(crate) layout: ColumnLayout,
     pub(crate) layout_choice: Option<LayoutChoice<uuid::Uuid>>,
     pub(crate) save_layout: bool,
+    /// Columns with amounts the saved layout doesn't cover (S4): the file
+    /// stopped on Match columns instead of applying it silently.
+    pub(crate) new_columns: Vec<String>,
     pub(crate) departments: Vec<String>,
+    /// Every department in the file, from the check (S3); `None` until
+    /// then or from an engine without the list.
+    pub(crate) file_departments: Option<Vec<String>>,
+    pub(crate) departments_truncated: bool,
     pub(crate) department_tags: BTreeMap<String, Option<TagId>>,
     map_job: Option<Job<()>>,
     // Accounts.
@@ -275,13 +307,20 @@ pub struct PayrollImportScreen {
     pub(crate) trouble: Option<Trouble>,
     pub(crate) posted: Option<Vec<TransactionId>>,
     pub(crate) posts_sent: u32,
+    /// A post's answer was lost: it may still post, so this window never
+    /// discards the draft (B1). Cleared only by a definite answer to the
+    /// post itself, or Check status saying it posted.
+    pub(crate) post_unsettled: bool,
     // History.
     history_job: Option<Job<SessionPage>>,
     pub(crate) history: Option<SessionPage>,
     pub(crate) unposted_only: bool,
     pub(crate) reversing: Option<(PayrollSessionId, String)>,
-    reverse_key: Option<(PayrollSessionId, bool, IdempotencyKey)>,
+    reverse_key: Option<(ReversePrint, IdempotencyKey)>,
     reverse_job: Option<Job<ReverseOutcome>>,
+    /// A reverse's answer was lost (S2): its body is locked until a
+    /// definite answer, so Try again resends exactly what was sent.
+    pub(crate) reverse_unsettled: bool,
     pub(crate) reversed: Option<u64>,
     discard_job: Option<Job<()>>,
 }
@@ -301,8 +340,13 @@ pub(crate) fn show_date(d: CalendarDate) -> String {
     format!("{:02}/{:02}/{:04}", d.month(), d.day(), d.year())
 }
 
-/// The ColumnMap the engine takes for a layout.
-fn column_map(l: &ColumnLayout, departments: &BTreeMap<String, Option<TagId>>) -> ColumnMap {
+/// The ColumnMap the engine takes for a layout; the file's other columns
+/// (`headers` not matched) are saved as left out (S4).
+fn column_map(
+    l: &ColumnLayout,
+    departments: &BTreeMap<String, Option<TagId>>,
+    headers: &[String],
+) -> ColumnMap {
     let mut mappings = BTreeMap::new();
     for c in &l.columns {
         let format = matches!(
@@ -336,6 +380,7 @@ fn column_map(l: &ColumnLayout, departments: &BTreeMap<String, Option<TagId>>) -
             },
         ],
         department_tags: departments.clone(),
+        left_out: Some(cl_model::payroll_import::unmatched_columns(l, headers)),
     }
 }
 
@@ -372,6 +417,7 @@ fn saved_layout(t: &PayrollTemplate) -> Option<SavedLayout<uuid::Uuid>> {
             total_rows: vec!["Total", "Totals", "Grand Total"],
         },
         department_tags: m.department_tags.clone(),
+        left_out: m.left_out.clone(),
     })
 }
 
@@ -402,7 +448,10 @@ impl PayrollImportScreen {
             layout: ColumnLayout::default(),
             layout_choice: None,
             save_layout: true,
+            new_columns: Vec::new(),
             departments: Vec::new(),
+            file_departments: None,
+            departments_truncated: false,
             department_tags: BTreeMap::new(),
             map_job: None,
             chart_job: None,
@@ -432,12 +481,14 @@ impl PayrollImportScreen {
             trouble: None,
             posted: None,
             posts_sent: 0,
+            post_unsettled: false,
             history_job: None,
             history: None,
             unposted_only: false,
             reversing: None,
             reverse_key: None,
             reverse_job: None,
+            reverse_unsettled: false,
             reversed: None,
             discard_job: None,
         };
@@ -610,6 +661,7 @@ impl PayrollImportScreen {
         if let Some(r) = poll(&mut self.validate_job) {
             match r {
                 Ok(v) => {
+                    self.take_file_departments(&v);
                     self.validation = Some(v);
                     self.go(Step::Check);
                 }
@@ -632,19 +684,39 @@ impl PayrollImportScreen {
                     self.finish(s.entries);
                 }
                 Ok(_) => {
+                    // Not posted yet, but the lost post may still land:
+                    // Try again (same key) stays offered (M2), and nothing
+                    // discards the draft (B1).
                     self.status_answer = Some(false);
-                    self.trouble = None;
+                    self.clear_trouble();
                 }
                 Err(e) => self.trouble = Some(Trouble::of(&e)),
             }
         }
         if let Some(r) = poll(&mut self.history_job) {
             match r {
-                Ok(p) => self.history = Some(p),
+                Ok(p) => {
+                    // Check status after a lost reverse: reversed now is
+                    // settled (nothing to send again).
+                    if self.reverse_unsettled
+                        && let Some((id, _)) = &self.reversing
+                        && p.sessions
+                            .iter()
+                            .any(|s| s.id == *id && s.status == SessionStatus::Cancelled)
+                    {
+                        self.reverse_unsettled = false;
+                        self.reversing = None;
+                        self.reverse_key = None;
+                        self.password = None;
+                        self.trouble = None;
+                    }
+                    self.history = Some(p);
+                }
                 Err(e) => self.trouble = Some(Trouble::of(&e)),
             }
         }
         if let Some(r) = poll(&mut self.reverse_job) {
+            self.reverse_unsettled = matches!(r, Err(ApiError::OutcomeUnknown { .. }));
             match r {
                 Ok(o) => {
                     self.reversed = Some(o.reversed);
@@ -690,7 +762,36 @@ impl PayrollImportScreen {
     pub(crate) fn go(&mut self, step: Step) {
         self.step = step;
         self.visited.insert(step);
-        self.trouble = None;
+        self.clear_trouble();
+    }
+
+    /// Clears the shown problem, except a post whose answer was lost: its
+    /// "Check status" and "Try again" stay until it is settled.
+    fn clear_trouble(&mut self) {
+        self.trouble = self.post_unsettled.then_some(Trouble::Unknown);
+    }
+
+    /// A post or reverse is out and not answered, or a post's answer was
+    /// lost: nothing may discard this import and Cancel/Back wait (B1).
+    pub(crate) fn in_flight(&self) -> bool {
+        self.post_job.is_some() || self.reverse_job.is_some()
+    }
+
+    /// The draft may be discarded: not posted, no post out, and no post
+    /// whose answer was lost (it may still commit, B1).
+    fn may_discard(&self) -> bool {
+        self.posted.is_none() && self.post_job.is_none() && !self.post_unsettled
+    }
+
+    /// Lets go of the uploaded draft: discarded when that is safe, else
+    /// kept for History's "Check status" (the lost post may have posted).
+    fn release_upload(&mut self) {
+        let safe = self.may_discard();
+        if let Some(u) = self.upload.take()
+            && safe
+        {
+            self.discard(u.session);
+        }
     }
 
     // ---- Step 1 -----------------------------------------------------------
@@ -730,9 +831,13 @@ impl PayrollImportScreen {
     }
 
     fn forget_upload(&mut self) {
-        if let Some(u) = self.upload.take() {
-            self.discard(u.session);
-        }
+        // A draft whose post's answer was lost is kept (History's Check
+        // status settles it); this window lets go of it.
+        self.release_upload();
+        self.post_unsettled = false;
+        self.status_answer = None;
+        self.file_departments = None;
+        self.departments_truncated = false;
         self.preview = None;
         self.validation = None;
         self.posted = None;
@@ -829,9 +934,33 @@ impl PayrollImportScreen {
             }
         };
         self.refresh_departments();
-        let skip = self.provider.is_generic() && matches!(choice, LayoutChoice::Saved(_));
+        // S4: a saved layout applies silently only when the file has no
+        // amount columns it neither matches nor left out.
+        self.new_columns = match &choice {
+            LayoutChoice::Saved(id) => saved
+                .iter()
+                .find(|s| s.id == *id)
+                .map(|s| {
+                    let rows = self
+                        .upload
+                        .as_ref()
+                        .map(|u| u.samples.0.clone())
+                        .unwrap_or_default();
+                    cl_model::payroll_import::new_amount_columns(s, &headers, &rows)
+                })
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        let skip = self.provider.is_generic()
+            && matches!(choice, LayoutChoice::Saved(_))
+            && self.new_columns.is_empty();
         self.layout_choice = Some(choice);
-        if skip {
+        if !self.new_columns.is_empty() {
+            tracing::info!(target: "payroll", new_columns = self.new_columns.len(), "saved layout stops on new columns");
+            // The owner's answer updates the saved layout.
+            self.save_layout = true;
+            self.go(Step::Map);
+        } else if skip {
             // A2: a generic file whose saved layout fits needs no Map step.
             self.save_layout = false;
             self.apply_mapping();
@@ -893,12 +1022,14 @@ impl PayrollImportScreen {
             self.departments.clear();
             return;
         };
+        let full = self.file_departments.clone().unwrap_or_default();
         let mut v: Vec<String> = self
             .upload
             .iter()
             .flat_map(|u| u.samples.0.iter())
             .filter_map(|r| r.get(i))
             .map(|c| c.trim().to_string())
+            .chain(full)
             .filter(|c| !c.is_empty() && c.chars().count() <= cl_api::payroll::MAX_DEPARTMENT_CHARS)
             .collect();
         v.sort();
@@ -906,8 +1037,30 @@ impl PayrollImportScreen {
         for d in &v {
             self.department_tags.entry(d.clone()).or_insert(None);
         }
-        self.department_tags.retain(|d, _| v.contains(d));
+        // S3: a saved layout's mapping for a department the sample rows
+        // don't show is kept (it may be further down the file).
         self.departments = v;
+    }
+
+    /// The check listed every department in the file (S3): the engine has
+    /// `payroll-import-review-v1` (the demo plays it).
+    fn take_file_departments(&mut self, v: &ValidationSummary) {
+        let listed = self.link.is_demo()
+            || self
+                .link
+                .capabilities()
+                .has(cl_api::Capabilities::PAYROLL_IMPORT_REVIEW);
+        if !listed || self.layout.column("department").is_none() {
+            return;
+        }
+        let Some(all) = v.departments.clone() else {
+            return;
+        };
+        let before = self.departments.len();
+        self.file_departments = Some(all);
+        self.departments_truncated = v.departments_truncated;
+        self.refresh_departments();
+        tracing::info!(target: "payroll", departments = self.departments.len(), added = self.departments.len().saturating_sub(before), truncated = v.departments_truncated, "departments listed");
     }
 
     /// Sets the column for `field` (`None` clears it).
@@ -942,7 +1095,12 @@ impl PayrollImportScreen {
         let Some(id) = self.upload.as_ref().map(|u| u.session) else {
             return;
         };
-        let map = column_map(&self.layout, &self.department_tags);
+        let headers = self
+            .upload
+            .as_ref()
+            .map(|u| u.headers.clone())
+            .unwrap_or_default();
+        let map = column_map(&self.layout, &self.department_tags, &headers);
         if self.save_layout {
             let existing = match &self.layout_choice {
                 Some(LayoutChoice::Saved(t)) => Some(*t),
@@ -956,7 +1114,7 @@ impl PayrollImportScreen {
                 )],
             );
             let key = self.provider.engine_key();
-            let (m2, n2) = (map.clone(), name.clone());
+            let (m1, m2, n2) = (map.clone(), map.clone(), name.clone());
             let now = crate::company::demo::DemoState::now().to_wire();
             // The layout is saved alongside; a failure here doesn't stop
             // the import (the owner maps again next time).
@@ -964,14 +1122,11 @@ impl PayrollImportScreen {
                 "orphan.payroll_upload",
                 None,
                 move |d| Ok(d.payroll.save_template(existing, &n2, key, &m2, now)),
-                move |s| {
-                    let m = map.clone();
-                    async move { s.payroll().save_template(existing, &name, key, &m).await }
-                },
+                move |s| async move { s.payroll().save_template(existing, &name, key, &m1).await },
             );
             self.template_job = Some(job);
         }
-        let map = column_map(&self.layout, &self.department_tags);
+        self.new_columns.clear();
         let m2 = map.clone();
         self.map_job = Some(self.write(
             "orphan.payroll_upload",
@@ -1123,12 +1278,69 @@ impl PayrollImportScreen {
 
     // ---- Step 5 -----------------------------------------------------------
 
+    /// The department → tag map sent with the entries and the post: the
+    /// departments in the file when the check listed them all (a saved
+    /// mapping for one not in this file stays saved, unsent), else every
+    /// mapping known (S3).
     fn departments_sent(&self) -> BTreeMap<String, Option<TagId>> {
         if self.provider.mode() == FileMode::Prebuilt || self.layout.column("department").is_none()
         {
-            BTreeMap::new()
-        } else {
-            self.department_tags.clone()
+            return BTreeMap::new();
+        }
+        match &self.file_departments {
+            Some(all) if !self.departments_truncated => self
+                .department_tags
+                .iter()
+                .filter(|(d, _)| all.contains(d))
+                .map(|(d, t)| (d.clone(), *t))
+                .collect(),
+            _ => self.department_tags.clone(),
+        }
+    }
+
+    /// Department tags chosen after the layout was saved (the Check step
+    /// lists departments past the sample rows): saved with it, so the next
+    /// file maps them too (S3).
+    fn save_department_tags(&mut self) {
+        let Some(tpl) = self.current_template() else {
+            return;
+        };
+        let Some(mut map) = tpl.column_map.clone() else {
+            return;
+        };
+        if map.department_tags == self.department_tags {
+            return;
+        }
+        map.department_tags.clone_from(&self.department_tags);
+        let (id, name, key) = (tpl.id, tpl.name.clone(), tpl.provider_key.clone());
+        let (m2, n2, k2) = (map.clone(), name.clone(), key.clone());
+        let now = crate::company::demo::DemoState::now().to_wire();
+        self.template_job = Some(self.write(
+            "orphan.payroll_upload",
+            None,
+            move |d| Ok(d.payroll.save_template(Some(id), &n2, &k2, &m2, now)),
+            move |s| async move { s.payroll().save_template(Some(id), &name, &key, &map).await },
+        ));
+    }
+
+    /// The saved layout this import uses or just saved.
+    fn current_template(&self) -> Option<&PayrollTemplate> {
+        let key = self.provider.engine_key();
+        match &self.layout_choice {
+            Some(LayoutChoice::Saved(id)) => self.templates.iter().find(|t| t.id == *id),
+            _ if self.save_layout => self
+                .templates
+                .iter()
+                .filter(|t| !t.is_system && t.provider_key == key)
+                .filter(|t| {
+                    t.column_map.as_ref().is_some_and(|m| {
+                        m.mappings
+                            .iter()
+                            .all(|(f, s)| self.layout.column(f) == Some(s.source.as_str()))
+                    })
+                })
+                .max_by(|a, b| a.updated_at.cmp(&b.updated_at)),
+            _ => None,
         }
     }
 
@@ -1136,6 +1348,7 @@ impl PayrollImportScreen {
         let Some(id) = self.upload.as_ref().map(|u| u.session) else {
             return;
         };
+        self.save_department_tags();
         let depts = self.departments_sent();
         let d2 = depts.clone();
         let chart = self.chart.clone();
@@ -1265,23 +1478,33 @@ impl PayrollImportScreen {
     /// "Try again" after a lost answer: the same body and key, on the
     /// owner's click only.
     pub(crate) fn try_again(&mut self) {
-        if self.trouble != Some(Trouble::Unknown) {
-            return;
-        }
         match (self.view, self.reversing.clone()) {
-            (View::History, Some((id, reason))) => self.reverse(id, &reason),
-            (View::Import, _) => self.post(),
-            (View::History, None) => {}
+            (View::History, Some((id, reason))) if self.reverse_unsettled => {
+                self.reverse(id, &reason);
+            }
+            (View::Import, _) if self.post_unsettled => self.post(),
+            _ => {}
         }
     }
 
-    /// Back to the wizard: a reverse in progress in History is dropped.
+    /// Back to the wizard: a reverse in progress in History is dropped —
+    /// unless its answer is outstanding (S2: it stays, reason locked, for
+    /// Check status and Try again).
     pub(crate) fn show_import(&mut self) {
         self.view = View::Import;
+        if self.reverse_outstanding() {
+            return;
+        }
         self.reversing = None;
         self.reverse_key = None;
         self.password = None;
         self.asking_password = None;
+    }
+
+    /// A reverse is out, or its answer was lost (S2): its reason and the
+    /// row buttons are locked until it is settled.
+    pub(crate) fn reverse_outstanding(&self) -> bool {
+        self.reverse_job.is_some() || self.reverse_unsettled
     }
 
     /// "Check status" after a lost answer.
@@ -1307,6 +1530,9 @@ impl PayrollImportScreen {
     }
 
     fn after_post(&mut self, r: Result<PostOutcome, ApiError>) {
+        // Only a lost answer leaves the post unsettled; any other answer
+        // (posted, a question, a refusal) is the engine's definite word.
+        self.post_unsettled = matches!(r, Err(ApiError::OutcomeUnknown { .. }));
         match r {
             Ok(PostOutcome::Posted { entries, .. }) => self.finish(entries),
             Ok(PostOutcome::NeedsConfirmation { overlaps }) => self.overlaps = Some(overlaps),
@@ -1377,6 +1603,7 @@ impl PayrollImportScreen {
     fn finish(&mut self, entries: Vec<TransactionId>) {
         tracing::info!(target: "payroll", provider = self.provider.key(), entries = entries.len(), "payroll posted");
         self.posted = Some(entries);
+        self.post_unsettled = false;
         self.upload_done();
         self.password = None;
         self.trouble = None;
@@ -1423,22 +1650,48 @@ impl PayrollImportScreen {
         self.load_history();
     }
 
+    /// History: every page (M1); unposted only asks the engine for each
+    /// draft status (it filters one status at a time).
     pub(crate) fn load_history(&mut self) {
-        let status = self.unposted_only.then_some(SessionStatus::Uploaded);
-        let only = self.unposted_only;
+        let statuses: Vec<Option<SessionStatus>> = if self.unposted_only {
+            [
+                SessionStatus::Uploaded,
+                SessionStatus::Mapped,
+                SessionStatus::Validated,
+            ]
+            .into_iter()
+            .map(Some)
+            .collect()
+        } else {
+            vec![None]
+        };
+        let demo_statuses = statuses.clone();
         self.history_job = Some(self.read(
             move |d| {
-                let mut p = d.payroll.sessions(None);
-                if only {
-                    p.sessions.retain(|s| s.status.is_unposted_draft());
-                    p.total = p.sessions.len() as u64;
+                let mut p = SessionPage {
+                    total: 0,
+                    sessions: Vec::new(),
+                };
+                for st in demo_statuses {
+                    p.sessions.extend(d.payroll.sessions(st).sessions);
                 }
+                p.total = p.sessions.len() as u64;
                 Ok(p)
             },
             move |s| async move {
-                let mut p = s.payroll().sessions(status.filter(|_| false), 0).await?;
-                if only {
-                    p.sessions.retain(|s| s.status.is_unposted_draft());
+                let several = statuses.len() > 1;
+                let mut p = SessionPage {
+                    total: 0,
+                    sessions: Vec::new(),
+                };
+                for st in statuses {
+                    let page = s.payroll().sessions_all(st).await?;
+                    p.total += page.total;
+                    p.sessions.extend(page.sessions);
+                }
+                if several {
+                    // Newest pay first across the draft statuses.
+                    p.sessions.sort_by(|a, b| b.check_date.cmp(&a.check_date));
                 }
                 Ok(p)
             },
@@ -1451,12 +1704,14 @@ impl PayrollImportScreen {
         if self.reverse_job.is_some() {
             return;
         }
-        let with_pw = self.password.is_some();
+        // S2: the same body keeps its key; another reason or password is
+        // another body (the engine would refuse a reused key).
+        let print = ReversePrint::of(id, reason, self.password.as_ref());
         let key = match &self.reverse_key {
-            Some((i, p, k)) if *i == id && *p == with_pw => k.clone(),
+            Some((p, k)) if *p == print => k.clone(),
             _ => {
                 let k = IdempotencyKey::new();
-                self.reverse_key = Some((id, with_pw, k.clone()));
+                self.reverse_key = Some((print, k.clone()));
                 k
             }
         };
@@ -1481,8 +1736,17 @@ impl PayrollImportScreen {
         ));
     }
 
+    /// History may discard `id`: not this window's own draft while its post
+    /// is out or its answer was lost (B1).
+    pub(crate) fn may_discard_session(&self, id: PayrollSessionId) -> bool {
+        self.upload.as_ref().is_none_or(|u| u.session != id) || self.may_discard()
+    }
+
     /// Discards an unposted draft (Cancel, History, Home).
     pub(crate) fn discard(&mut self, id: PayrollSessionId) {
+        if !self.may_discard_session(id) {
+            return;
+        }
         self.discard_job = Some(self.write(
             "orphan.payroll_upload",
             None,
@@ -1511,6 +1775,34 @@ impl PayrollImportScreen {
         }
     }
 
+    /// "Match columns again" (S4): back to Match columns from a later step,
+    /// even when the saved layout was applied without it. The answer is
+    /// saved to the layout; the check and entries are made again.
+    pub(crate) fn can_match_again(&self) -> bool {
+        self.provider.mode() == FileMode::EmployeeLevel
+            && matches!(self.step, Step::Accounts | Step::Check | Step::Preview)
+            && self.upload.is_some()
+            && !self.busy()
+            && !self.in_flight()
+            && !self.post_unsettled
+            && self.overlaps.is_none()
+            && self.asking_password.is_none()
+    }
+
+    pub(crate) fn match_again(&mut self) {
+        if !self.can_match_again() {
+            return;
+        }
+        self.save_layout = true;
+        self.validation = None;
+        self.preview = None;
+        self.plan = TagPlan::default();
+        self.untagged = None;
+        self.key = None;
+        self.force = false;
+        self.go(Step::Map);
+    }
+
     pub(crate) fn skip_map(&self) -> bool {
         self.provider.mode() == FileMode::Prebuilt
             || (self.provider.is_generic()
@@ -1519,7 +1811,7 @@ impl PayrollImportScreen {
     }
 
     pub(crate) fn back(&mut self) {
-        if self.busy() {
+        if self.busy() || self.in_flight() {
             return;
         }
         if let Some(s) = self.step.back(self.skip_map()) {
@@ -1527,20 +1819,22 @@ impl PayrollImportScreen {
                 self.forget_upload();
             }
             self.step = s;
-            self.trouble = None;
+            self.clear_trouble();
             self.untagged = None;
         }
     }
 
-    /// Cancel: a draft uploaded and not posted is discarded (Q-P30c).
+    /// Cancel: a draft uploaded and not posted is discarded (Q-P30c) — but
+    /// never while a post or reverse is out (Cancel is disabled then), nor
+    /// after a post's answer was lost: that draft is kept for History's
+    /// "Check status" (B1).
     pub(crate) fn cancel(&mut self) {
-        if self.posted.is_none()
-            && let Some(u) = self.upload.take()
-        {
-            self.discard(u.session);
-            // The demo answers at once; the engine's answer is not waited for.
-            let _ = poll(&mut self.discard_job);
+        if self.in_flight() {
+            return;
         }
+        self.release_upload();
+        // The demo answers at once; the engine's answer is not waited for.
+        let _ = poll(&mut self.discard_job);
         self.link
             .push(CompanyEvent::CloseWindow(CommandId::new(KIND)));
     }
@@ -1608,12 +1902,10 @@ impl Drop for PayrollImportScreen {
     /// Closing the window (the close prompt answered "Don't save", or the
     /// app quitting) is Cancel: a draft uploaded and not posted is
     /// discarded (Q-P30c). The write outlives the window (an orphan write).
+    /// A post out or whose answer was lost keeps the draft (B1): the close
+    /// prompt said it may be posted; History's "Check status" settles it.
     fn drop(&mut self) {
-        if self.posted.is_none()
-            && let Some(u) = self.upload.take()
-        {
-            self.discard(u.session);
-        }
+        self.release_upload();
     }
 }
 
@@ -1629,6 +1921,12 @@ impl Screen for PayrollImportScreen {
     /// An uploaded file not yet posted: closing asks first.
     fn dirty(&self) -> bool {
         self.upload.is_some() && self.posted.is_none()
+    }
+
+    /// A post is out or its answer was lost: the close prompt says the
+    /// import may already be posted and that closing keeps it (B1).
+    fn save_unconfirmed(&self) -> bool {
+        self.upload.is_some() && self.posted.is_none() && !self.may_discard()
     }
 
     fn can_save(&self) -> bool {
@@ -1738,6 +2036,17 @@ impl Screen for PayrollImportScreen {
                 d.default_tag = None;
                 true
             }
+            // Scenarios: the saved layouts forget their left-out columns (as
+            // one saved before S4), so the next file's unmatched amount
+            // columns count as new.
+            "dev.payroll_demo_forget_left_out" => {
+                let Some(mut d) = self.link.demo_state() else {
+                    return false;
+                };
+                d.payroll.forget_left_out();
+                self.templates = d.payroll.templates();
+                true
+            }
             "dev.payroll_start_over" => {
                 self.start_over();
                 true
@@ -1784,7 +2093,11 @@ impl Screen for PayrollImportScreen {
                 LayoutChoice::Manual => "manual",
                 LayoutChoice::NotNeeded => "not_needed",
             }),
+            "new_columns": self.new_columns.len(),
+            "can_match_again": self.can_match_again(),
             "departments": self.departments.len(),
+            "departments_from_check": self.file_departments.is_some(),
+            "departments_truncated": self.departments_truncated,
             "departments_tagged": self.department_tags.values().filter(|t| t.is_some()).count(),
             "accounts_complete": self.accounts_complete(),
             "net_pay_from_bank": self.net_pay_from_bank(),
@@ -1798,6 +2111,8 @@ impl Screen for PayrollImportScreen {
             "posted": self.posted.as_ref().map(Vec::len),
             "expected_withdrawals": self.posted.as_ref().map(|_| self.expected_withdrawals()),
             "posts_sent": self.posts_sent,
+            "post_unsettled": self.post_unsettled,
+            "in_flight": self.in_flight(),
             "allowed": self.allowed(),
             "history": self.history.as_ref().map(|h| json!({
                 "rows": h.sessions.len(),

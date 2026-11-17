@@ -286,6 +286,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("window.prompt.discard", "Discard changes"),
     ("window.prompt.keep", "Keep editing"),
     ("window.prompt.message_unsent", "\"{title}\" has a file that wasn't sent to the Bank Feed yet. Close it anyway?"),
+    ("window.prompt.message_unsettled", "We couldn't confirm whether \"{title}\" finished posting. It may already be in the books. Closing keeps the import so you can check it later in History with Check status. Close anyway?"),
     ("window.prompt.close_anyway", "Close anyway"),
     // Status bar
     ("status.not_signed_in", "Not signed in"),

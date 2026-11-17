@@ -150,6 +150,58 @@ fn gusto_departments_split_expenses_and_tag_them() {
     }
 }
 
+/// S3: departments past the sample rows come from the check and can be
+/// tagged there; a saved mapping for a department the samples don't show is
+/// kept and sent.
+#[test]
+fn every_department_in_the_file_is_listed_and_tagged() {
+    let f = fixture();
+    // The demo passes the tag id through (the engine checks it exists).
+    let tag: TagId = "4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02".parse().expect("tag");
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_gusto");
+    next_to(&mut s, Step::Map);
+    // As if neither department were in the first rows, with a mapping the
+    // saved layout remembers for Front.
+    s.department_tags.insert("Front".into(), Some(tag));
+    if let Some(u) = &mut s.upload {
+        u.samples.0.clear();
+    }
+    s.refresh_departments();
+    assert!(s.departments.is_empty());
+    assert_eq!(
+        s.department_tags.get("Front"),
+        Some(&Some(tag)),
+        "kept though the samples don't show it"
+    );
+    next_to(&mut s, Step::Check);
+    assert_eq!(s.departments, ["Front", "Kitchen"]);
+    assert_eq!(s.state()["departments_from_check"], true);
+    s.department_tags.insert("Kitchen".into(), Some(tag));
+    let sent = s.departments_sent();
+    assert_eq!(sent.len(), 2);
+    next_to(&mut s, Step::Preview);
+    let p = s.preview.clone().expect("preview");
+    for d in ["Front", "Kitchen"] {
+        assert!(
+            p.entries
+                .iter()
+                .flat_map(|e| &e.lines)
+                .any(|l| l.department.as_deref() == Some(d) && l.tag == Some(tag)),
+            "{d} tagged"
+        );
+    }
+    // The tags chosen on Check are saved with the layout.
+    let saved = s
+        .templates_list()
+        .iter()
+        .find_map(|t| t.column_map.as_ref())
+        .map(|m| m.department_tags.clone())
+        .expect("saved layout");
+    assert_eq!(saved.get("Kitchen"), Some(&Some(tag)));
+    assert!(!state_text(&s).contains("Kitchen"), "counts only");
+}
+
 #[test]
 fn the_tag_gate_refuses_when_required_and_posts_when_off_or_defaulted() {
     let f = fixture();
@@ -276,6 +328,73 @@ fn a_generic_file_re_imports_without_remapping() {
     assert!(!visited.contains("map"), "{visited}");
 }
 
+/// S4: a saved layout that doesn't cover a file's amount columns stops on
+/// Match columns and names them; the answer is saved, so the next file of
+/// that shape skips the step; "Match columns again" returns to it from a
+/// later step even when the layout was applied without it.
+#[test]
+fn new_amount_columns_stop_on_match_columns() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_generic_period1");
+    s.next();
+    s.poll();
+    for (field, header) in [
+        ("employee_name", "Worker"),
+        ("check_date", "Paid On"),
+        ("gross_pay", "Wages"),
+        ("net_pay", "Take Home"),
+    ] {
+        s.set_column(field, Some(header.into()));
+    }
+    next_to(&mut s, Step::Done);
+    // As a layout saved before left-out columns were kept.
+    cmd(&mut s, "dev.payroll_demo_forget_left_out");
+    cmd(&mut s, "dev.payroll_start_over");
+    cmd(&mut s, "dev.payroll_demo_file_generic_period2");
+    s.next();
+    s.poll();
+    assert_eq!(s.step, Step::Map, "{}", state_text(&s));
+    assert_eq!(s.state()["layout"], "saved");
+    assert_eq!(
+        s.new_columns,
+        ["Fed WH", "State WH", "SS EE", "Medicare EE", "SS ER", "Medicare ER"]
+    );
+    assert!(s.save_layout, "the answer is saved with the layout");
+    assert!(!state_text(&s).contains("SS ER"), "counts only in state");
+    s.set_column("social_security_er", Some("SS ER".into()));
+    s.next();
+    s.poll();
+    assert_eq!(s.step, Step::Accounts);
+    assert!(s.new_columns.is_empty());
+    let t = s.templates_list()[0].column_map.clone().expect("map");
+    assert_eq!(
+        t.left_out.as_deref().map(<[String]>::len),
+        Some(5),
+        "the other new columns are remembered as left out"
+    );
+    s.cancel();
+    // The same shape again: the layout applies with no stop.
+    cmd(&mut s, "dev.payroll_start_over");
+    cmd(&mut s, "dev.payroll_demo_file_generic_period2");
+    s.next();
+    s.poll();
+    assert_eq!(s.step, Step::Accounts, "{}", state_text(&s));
+    assert!(!s.visited.contains(&Step::Map));
+    // Match columns again, from the entries.
+    next_to(&mut s, Step::Preview);
+    assert!(s.can_match_again());
+    s.match_again();
+    assert_eq!(s.step, Step::Map);
+    assert!(s.save_layout && s.preview.is_none() && s.validation.is_none());
+    next_to(&mut s, Step::Preview);
+    // Not while a post is out.
+    s.post_job = Some(Job::Done(None));
+    assert!(!s.can_match_again());
+    s.match_again();
+    assert_eq!(s.step, Step::Preview);
+}
+
 #[test]
 fn a_closed_period_asks_for_the_password() {
     let f = fixture();
@@ -319,34 +438,197 @@ fn a_closed_period_asks_for_the_password() {
     assert_eq!(s.reversed, Some(1));
 }
 
+fn lost() -> ApiError {
+    ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000002")
+            .expect("id"),
+        idempotency_key: Some(IdempotencyKey::new()),
+        keyed: true,
+    }
+}
+
+/// A post that is out: a request that never answers.
+fn post_in_flight(s: &mut PayrollImportScreen) {
+    s.post_job = Some(Job::Done(None));
+    s.posts_sent += 1;
+}
+
+fn discards(f: &Fixture) -> u32 {
+    f.link.demo_state().expect("demo").payroll.discards_received
+}
+
+/// M3: the lost answer comes through the post's own answer path (not set
+/// by hand); nothing is sent again without a click; Try again reuses the
+/// key, and Check status saying "not posted" keeps Try again (M2).
 #[test]
 fn a_lost_answer_is_never_sent_again_on_its_own() {
+    // 1. The answer was lost after the engine posted: Check status finds
+    // it posted (nothing sent again).
     let f = fixture();
     let mut s = screen(&f);
     cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
     next_to(&mut s, Step::Preview);
-    // As if the first answer was lost.
-    s.trouble = Some(Trouble::Unknown);
+    s.post();
+    let _ = s.post_job.take();
+    s.after_post(Err(lost()));
+    assert_eq!(s.state()["trouble"], "unknown");
+    assert!(s.post_unsettled);
     for _ in 0..5 {
         s.poll();
     }
-    assert_eq!(s.posts_sent, 0, "nothing goes out without a click");
+    assert_eq!(s.posts_sent, 1, "nothing goes out without a click");
+    assert_eq!(f.link.demo_state().expect("demo").payroll.posts_received, 1);
+    s.check_status();
+    s.poll();
+    assert_eq!(s.status_answer, Some(true));
+    assert_eq!(s.step, Step::Done);
+    assert!(!s.post_unsettled);
+    s.try_again();
+    s.poll();
+    assert_eq!(s.posts_sent, 1, "settled: Try again sends nothing");
+
+    // 2. Lost before it reached the engine: Check status says not posted,
+    // and Try again stays offered (M2) and posts once.
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    s.posts_sent += 1;
+    s.after_post(Err(lost()));
+    s.check_status();
+    s.poll();
+    assert_eq!(s.status_answer, Some(false));
+    assert_eq!(s.state()["trouble"], "unknown", "Try again is still shown");
+    assert!(s.post_unsettled, "the lost post may still land");
     assert_eq!(f.link.demo_state().expect("demo").payroll.posts_received, 0);
     s.try_again();
+    let key = s.key.as_ref().map(|k| k.1.clone()).expect("key");
     s.poll();
-    assert_eq!(s.posts_sent, 1);
     assert_eq!(s.step, Step::Done);
-    s.trouble = Some(Trouble::Unknown);
-    s.try_again();
-    s.poll();
-    assert_eq!(s.posts_sent, 2);
-    assert_eq!(f.link.demo_state().expect("demo").payroll.posts_received, 2);
+    assert_eq!(f.link.demo_state().expect("demo").payroll.posts_received, 1);
+    // A replay with the same key answers the same: one import, posted once.
     let o = f.link.demo_state().expect("demo").payroll.sessions(None);
-    assert_eq!(
-        o.sessions.len(),
-        1,
-        "the same key replays: one import, posted once"
-    );
+    assert_eq!(o.sessions.len(), 1, "one import, posted once");
+    assert_eq!(s.key.as_ref().map(|k| k.1.clone()), Some(key));
+}
+
+/// B1: while a post is out, Cancel, Back, closing the window and History's
+/// Discard send no DELETE; the close prompt says it may be posted.
+#[test]
+fn a_post_in_flight_is_never_discarded() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    post_in_flight(&mut s);
+    assert!(s.in_flight());
+    assert!(s.save_unconfirmed(), "the close prompt warns");
+    s.back();
+    assert_eq!(s.step, Step::Preview, "Back waits for the answer");
+    s.cancel();
+    assert!(s.upload.is_some(), "Cancel waits for the answer");
+    let id = s.upload.as_ref().map(|u| u.session).expect("upload");
+    assert!(!s.may_discard_session(id));
+    s.discard(id);
+    assert_eq!(discards(&f), 0);
+    // The window closes (prompt "Close anyway", or quit) with the post out.
+    drop(s);
+    assert_eq!(discards(&f), 0, "no DELETE while a post is out");
+    assert_eq!(f.link.demo_state().expect("demo").payroll.unposted(), 1);
+}
+
+/// B1: after a lost answer, Cancel, Back to the file step and closing keep
+/// the draft (History's Check status settles it).
+#[test]
+fn a_lost_answer_keeps_the_draft_on_cancel_back_and_close() {
+    for how in ["cancel", "back", "close", "check_then_close"] {
+        let f = fixture();
+        let mut s = screen(&f);
+        cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+        next_to(&mut s, Step::Preview);
+        post_in_flight(&mut s);
+        let _ = s.post_job.take();
+        s.after_post(Err(lost()));
+        assert!(!s.in_flight());
+        assert!(s.save_unconfirmed(), "{how}: the close prompt warns");
+        match how {
+            "cancel" => s.cancel(),
+            "back" => {
+                for _ in 0..4 {
+                    s.back();
+                }
+                assert_eq!(s.step, Step::Choose, "{how}");
+                assert!(s.upload.is_none(), "{how}: this window lets go");
+            }
+            "check_then_close" => {
+                s.check_status();
+                s.poll();
+                assert_eq!(s.status_answer, Some(false));
+                drop(s);
+            }
+            _ => drop(s),
+        }
+        assert_eq!(discards(&f), 0, "{how}: no DELETE");
+        assert_eq!(
+            f.link.demo_state().expect("demo").payroll.unposted(),
+            1,
+            "{how}: kept for History"
+        );
+    }
+}
+
+/// S2: the reverse key covers the reason and the password (as a hash); a
+/// lost answer locks the reason and Try again resends the same body.
+#[test]
+fn a_reverse_key_covers_reason_and_password() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Done);
+    s.show_history();
+    s.poll();
+    let id = s.history.as_ref().expect("history").sessions[0].id;
+    let key_of = |s: &PayrollImportScreen| s.reverse_key.as_ref().map(|k| k.1.clone());
+    // The first reverse's answer is lost.
+    s.reverse(id, "Wrong file");
+    let first = key_of(&s).expect("key");
+    let _ = s.reverse_job.take();
+    s.reverse_job = Some(Job::Done(Some(Err(lost()))));
+    s.poll();
+    assert!(s.reverse_unsettled && s.reverse_outstanding());
+    // Leaving for the wizard keeps it (reason locked).
+    s.show_import();
+    s.view = View::History;
+    assert_eq!(s.reversing.as_ref().map(|r| r.1.as_str()), Some("Wrong file"));
+    s.try_again();
+    assert_eq!(key_of(&s), Some(first), "Try again: the same body and key");
+    s.poll();
+    assert_eq!(key_of(&s), None, "settled: reversed");
+    assert_eq!(s.reversed, Some(1));
+    assert!(!s.reverse_outstanding());
+    // Same import and password, another reason: another key.
+    let a = ReversePrint::of(id, "Wrong file", None);
+    let b = ReversePrint::of(id, "Duplicate", None);
+    assert!(a != b);
+    let pw = |p: &str| Secret::new(p.to_string());
+    let c = ReversePrint::of(id, "Wrong file", Some(&pw("one")));
+    let d = ReversePrint::of(id, "Wrong file", Some(&pw("two")));
+    assert!(c != d && a != c);
+    assert!(c == ReversePrint::of(id, "Wrong file", Some(&pw("one"))));
+}
+
+/// A definite refusal settles the post: Cancel discards again.
+#[test]
+fn a_definite_answer_lets_cancel_discard() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    s.after_post(Err(lost()));
+    s.after_post(Err(ApiError::ClosingPasswordRejected));
+    assert!(!s.post_unsettled);
+    s.cancel();
+    assert_eq!(discards(&f), 1);
 }
 
 #[test]

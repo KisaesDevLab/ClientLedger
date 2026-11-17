@@ -15,6 +15,9 @@
 //! lines. Without a department map the demo merges the golden's department
 //! lines per line type (the engine's U-246 "no map" output).
 
+// M10: no floating point in payroll code (money is `rust_decimal`).
+#![deny(clippy::float_arithmetic)]
+
 use std::collections::BTreeMap;
 
 use cl_api::payroll::{
@@ -165,6 +168,8 @@ pub struct DemoPayroll {
     next: u64,
     /// Posts and reverses received (control channel: never sent twice).
     pub posts_received: u32,
+    /// Discards received (B1: none while a post is out or unconfirmed).
+    pub discards_received: u32,
 }
 
 fn conflict(code: &str, details: Value) -> ApiError {
@@ -340,8 +345,20 @@ impl DemoPayroll {
             .lines()
             .count()
             .saturating_sub(f.header_row + 1);
+        // `payroll-import-review-v1` (S3): every department in the file
+        // (the golden's, which are the file's).
+        let departments = (f.mode == ImportMode::EmployeeLevel).then(|| {
+            let (_, golden) = golden_of(f);
+            golden
+                .iter()
+                .flat_map(|e| e.lines.iter().filter_map(|l| l.department.clone()))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        });
         Ok(ValidationSummary {
             total_rows: u64::try_from(rows).unwrap_or(0),
+            departments,
             ..ValidationSummary::default()
         })
     }
@@ -384,11 +401,16 @@ impl DemoPayroll {
                         && f.mode == ImportMode::EmployeeLevel
                 }) {
                     // No department map: one line per line type (U-246).
-                    if l.debit {
-                        same.debit = same.debit.checked_add(l.amount).unwrap_or(same.debit);
+                    // M4: an overflow is refused as the engine refuses a
+                    // bad amount, never hidden.
+                    let side = if l.debit {
+                        &mut same.debit
                     } else {
-                        same.credit = same.credit.checked_add(l.amount).unwrap_or(same.credit);
-                    }
+                        &mut same.credit
+                    };
+                    *side = side
+                        .checked_add(l.amount)
+                        .map_err(|_| refused("PAYROLL_AMOUNT_INVALID", json!({})))?;
                     continue;
                 }
                 let account = self.account_for(&provider, &l.line_type, f.mode);
@@ -413,13 +435,18 @@ impl DemoPayroll {
                     tag,
                 });
             }
+            // M4: the memo names the service as the owner knows it.
+            let shown = cl_model::payroll_import::Provider::from_engine_key(&provider).map_or_else(
+                || provider.clone(),
+                |p| crate::i18n::t(&format!("payroll.provider.{}", p.key())),
+            );
             entries.push(PreviewEntry {
                 date: e.date,
                 memo: format!(
                     "Payroll {}–{} — {} — pay date {}",
                     s.period.0.to_wire(),
                     s.period.1.to_wire(),
-                    provider,
+                    shown,
                     e.date.to_wire()
                 ),
                 lines,
@@ -568,6 +595,7 @@ impl DemoPayroll {
     /// # Errors
     /// `Validation` for a posted one.
     pub fn discard(&mut self, id: PayrollSessionId) -> Result<(), ApiError> {
+        self.discards_received += 1;
         if self.session(id)?.status == SessionStatus::Posted {
             return Err(refused("PAYROLL_POSTED", json!({})));
         }
@@ -619,6 +647,16 @@ impl DemoPayroll {
     #[must_use]
     pub fn templates(&self) -> Vec<PayrollTemplate> {
         self.templates.clone()
+    }
+
+    /// Drops every layout's left-out columns (scenarios: a layout saved
+    /// before they were kept).
+    pub fn forget_left_out(&mut self) {
+        for t in &mut self.templates {
+            if let Some(m) = &mut t.column_map {
+                m.left_out = None;
+            }
+        }
     }
 
     /// Saves or changes a layout.

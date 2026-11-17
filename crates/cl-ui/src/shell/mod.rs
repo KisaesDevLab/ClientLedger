@@ -1900,7 +1900,10 @@ impl Shell {
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label(if !can_save {
+                ui.label(if !can_save && unconfirmed {
+                    // An import whose post is out or lost: closing keeps it.
+                    crate::i18n::t_with("window.prompt.message_unsettled", &[("title", &title)])
+                } else if !can_save {
                     crate::i18n::t_with("window.prompt.message_unsent", &[("title", &title)])
                 } else if unconfirmed {
                     crate::windows::prompt_message_unconfirmed(&title)
