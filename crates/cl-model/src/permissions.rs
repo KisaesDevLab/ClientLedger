@@ -701,6 +701,8 @@ pub enum Door {
     ReorderReport,
     /// AI usage counts and the AI task switches.
     AiUsage,
+    /// Preferences › AI: the company's AI settings, models and test.
+    AiSettings,
 }
 
 impl Door {
@@ -717,6 +719,7 @@ impl Door {
         Door::ExemptionsExpiring,
         Door::ReorderReport,
         Door::AiUsage,
+        Door::AiSettings,
     ];
 
     /// The engine routes behind it (method, route template).
@@ -751,6 +754,14 @@ impl Door {
                 ("GET", "/api/v1/ai/usage/summary"),
                 ("PATCH", "/api/v1/ai/consent/{companyId}/tasks"),
             ],
+            Door::AiSettings => &[
+                ("GET", "/api/v1/ai/admin/config"),
+                ("PUT", "/api/v1/ai/admin/config"),
+                ("GET", "/api/v1/ai/admin/disclosure"),
+                ("POST", "/api/v1/ai/admin/disclosure/accept"),
+                ("POST", "/api/v1/ai/admin/test/{provider}"),
+                ("GET", "/api/v1/ai/admin/models/{provider}"),
+            ],
         }
     }
 }
@@ -764,16 +775,10 @@ pub fn command_door(id: CommandId) -> Option<Door> {
     }
 }
 
-/// Admin-only desktop screens: their routes may stay refused for others
-/// (an Admin is never refused).
-pub const ADMIN_ONLY_ROUTES: &[(&str, &str)] = &[
-    ("GET", "/api/v1/ai/admin/config"),
-    ("PUT", "/api/v1/ai/admin/config"),
-    ("GET", "/api/v1/ai/admin/disclosure"),
-    ("POST", "/api/v1/ai/admin/disclosure/accept"),
-    ("POST", "/api/v1/ai/admin/test/{provider}"),
-    ("GET", "/api/v1/ai/admin/models/{provider}"),
-];
+/// Admin-only desktop screens whose routes may stay refused for others (an
+/// Admin is never refused). None today: Preferences › AI is offered to
+/// every user, so its routes are [`Door::AiSettings`].
+pub const ADMIN_ONLY_ROUTES: &[(&str, &str)] = &[];
 
 /// Built-in roles the Users screen offers (plan §1 table, Q-P29v). Admin
 /// and View-only are engine roles; the others are a `bookkeeper` with a

@@ -584,13 +584,26 @@ impl PreferencesScreen {
         // Only an Admin reads them (a bookkeeper's read could be refused,
         // and only an Admin may change them).
         let read_1099 = self.thresholds_on_engine() && self.link.rights().is_admin();
+        // P29 review B2: not asked while the engine refuses them to this
+        // role (an account hidden from it); the AI panel says why.
+        let rights = self.link.rights();
+        let ai_ok = rights.door_open(cl_model::permissions::Door::AiSettings);
+        let usage_ok = rights.door_open(cl_model::permissions::Door::AiUsage);
         let pending = group.read(&session, move |s| async move {
             let mut l = Loaded {
                 settings: s.company_settings().await.ok(),
-                ai: s.ai_config().await.ok(),
+                ai: if ai_ok {
+                    s.ai_config().await.ok()
+                } else {
+                    None
+                },
                 consent: s.company_ai_disclosure().await.ok(),
                 smtp: s.smtp_settings().await.ok(),
-                usage: s.ai_usage(1).await.ok(),
+                usage: if usage_ok {
+                    s.ai_usage(1).await.ok()
+                } else {
+                    None
+                },
                 incomes: income_accounts(&s).await,
                 expenses: expense_accounts(&s).await,
                 sales_taxes: s
@@ -1471,6 +1484,16 @@ impl PreferencesScreen {
                 }
             }
             Category::Inventory => company::inventory(ui, tokens, &mut self.edits),
+            Category::Ai
+                if !self
+                    .link
+                    .rights()
+                    .door_open(cl_model::permissions::Door::AiSettings) =>
+            {
+                // P29 review B2: refused while an account is hidden from
+                // this role.
+                ui.label(t("sensitive.door_closed"));
+            }
             Category::Ai => {
                 let action = ai::panel(
                     ui,

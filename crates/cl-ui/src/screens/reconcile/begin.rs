@@ -316,11 +316,16 @@ fn buttons(s: &mut ReconcileScreen, ui: &mut Ui, tokens: &Tokens) {
                 s.open_undo();
             }
         }
+        let open = s.reports_open();
         let disc = ui.add_enabled(
-            s.discrepancy_supported(),
+            s.discrepancy_supported() && open,
             egui::Button::new(t("reconcile.reports.discrepancy")),
         );
-        let disc = disc.on_disabled_hover_text(t("reconcile.reports.needs_update"));
+        let disc = disc.on_disabled_hover_text(if open {
+            t("reconcile.reports.needs_update")
+        } else {
+            t("sensitive.door_closed")
+        });
         if disc.clicked() {
             s.open_discrepancy();
         }

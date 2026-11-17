@@ -1166,11 +1166,22 @@ impl ReconcileScreen {
         );
     }
 
+    /// P29 review B2: the detail and discrepancy reports are refused by
+    /// the engine while an account is hidden from this role.
+    pub(crate) fn reports_open(&self) -> bool {
+        self.link
+            .rights()
+            .door_open(cl_model::permissions::Door::ReconcileReports)
+    }
+
     /// The discrepancy report of the account.
     pub(crate) fn open_discrepancy(&mut self) {
         let Some(a) = self.form.account else {
             return;
         };
+        if !self.reports_open() {
+            return;
+        }
         self.dialog = Some(Dialog::Discrepancy);
         self.discrepancy = None;
         self.disc_job = Some(engine::read(
