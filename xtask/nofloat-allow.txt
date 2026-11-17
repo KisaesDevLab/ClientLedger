@@ -1,4 +1,4 @@
 # Exceptions to the no-float scan (cargo xtask nofloat).
 # Format: <path relative to the repo root>:<line>:<reason>
 # Every entry needs a reason. The scan covers crates/cl-core/src and crates/cl-api/src.
-crates/cl-model/src/audit_view.rs:315:test fixture only: a non-integer JSON `count` (not money) checks the audit diff shows a changed number as the engine sent it
+crates/cl-model/src/audit_view.rs:346:test fixture only: a non-integer JSON `count` (not money) checks the audit diff shows a changed number as the engine sent it
