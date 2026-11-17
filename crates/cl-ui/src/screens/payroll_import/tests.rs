@@ -358,7 +358,14 @@ fn new_amount_columns_stop_on_match_columns() {
     assert_eq!(s.state()["layout"], "saved");
     assert_eq!(
         s.new_columns,
-        ["Fed WH", "State WH", "SS EE", "Medicare EE", "SS ER", "Medicare ER"]
+        [
+            "Fed WH",
+            "State WH",
+            "SS EE",
+            "Medicare EE",
+            "SS ER",
+            "Medicare ER"
+        ]
     );
     assert!(s.save_layout, "the answer is saved with the layout");
     assert!(!state_text(&s).contains("SS ER"), "counts only in state");
@@ -599,7 +606,10 @@ fn a_reverse_key_covers_reason_and_password() {
     // Leaving for the wizard keeps it (reason locked).
     s.show_import();
     s.view = View::History;
-    assert_eq!(s.reversing.as_ref().map(|r| r.1.as_str()), Some("Wrong file"));
+    assert_eq!(
+        s.reversing.as_ref().map(|r| r.1.as_str()),
+        Some("Wrong file")
+    );
     s.try_again();
     assert_eq!(key_of(&s), Some(first), "Try again: the same body and key");
     s.poll();

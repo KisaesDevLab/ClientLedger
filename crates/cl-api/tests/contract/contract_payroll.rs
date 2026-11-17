@@ -883,7 +883,11 @@ pub fn duplicates_overlap_concurrency_and_reverse(h: &Harness) {
 /// The engine's P30 review fixes (`payroll-import-review-v1`): pending
 /// until the pin has them.
 fn review_caps(h: &Harness) -> bool {
-    caps(h) && h.require_cap(Capabilities::PAYROLL_IMPORT_REVIEW, "P30 review B1/S1/S3/S5")
+    caps(h)
+        && h.require_cap(
+            Capabilities::PAYROLL_IMPORT_REVIEW,
+            "P30 review B1/S1/S3/S5",
+        )
 }
 
 /// Engine S1: two drafts of the same file posted at once — exactly one
@@ -911,7 +915,10 @@ pub fn two_drafts_of_one_file_post_once(h: &Harness) {
         .filter(|r| matches!(r, Ok(PostOutcome::Posted { .. })))
         .count();
     assert_eq!(oks, 1, "{x:?} {y:?}");
-    let refused = [x, y].into_iter().find_map(Result::err).expect("one refused");
+    let refused = [x, y]
+        .into_iter()
+        .find_map(Result::err)
+        .expect("one refused");
     assert!(
         matches!(
             payroll_refusal(&refused),
@@ -934,14 +941,12 @@ pub fn a_discard_racing_a_post_keeps_the_posted_import(h: &Harness) {
     let mut req = p.request();
     req.force_post = true;
     let (p1, p2) = (s.payroll(), s.payroll());
-    let (posted_r, discard_r) = h.run(async {
-        tokio::join!(
-            p1.post(p.id, &req, IdempotencyKey::new()),
-            p2.discard(p.id)
-        )
-    });
+    let (posted_r, discard_r) =
+        h.run(async { tokio::join!(p1.post(p.id, &req, IdempotencyKey::new()), p2.discard(p.id)) });
     if let Ok(PostOutcome::Posted { entries, .. }) = &posted_r {
-        let sess = h.run(s.payroll().session(p.id)).expect("the import survives");
+        let sess = h
+            .run(s.payroll().session(p.id))
+            .expect("the import survives");
         assert_eq!(sess.status, SessionStatus::Posted, "{discard_r:?}");
         assert_eq!(&sess.entries, entries);
         let listed = h

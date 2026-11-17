@@ -247,7 +247,15 @@ fn new_amount_columns_are_named_before_a_layout_applies() {
         "2025-07-12T00:00:00Z",
     );
     layout.left_out = Some(vec!["Fed WH".into()]);
-    let h = headers(&["Worker", "Wages", "Fed WH", "Take Home", "Notes", "SS ER", "medicare  er"]);
+    let h = headers(&[
+        "Worker",
+        "Wages",
+        "Fed WH",
+        "Take Home",
+        "Notes",
+        "SS ER",
+        "medicare  er",
+    ]);
     let r = rows(&[&[
         "Test Worker 01",
         "1,000.00",
@@ -267,7 +275,10 @@ fn new_amount_columns_are_named_before_a_layout_applies() {
     // A layout saved before left-out columns were kept: every unmatched
     // amount column is new (stop once on Match columns).
     layout.left_out = None;
-    assert_eq!(new_amount_columns(&layout, &same, &r), vec!["Fed WH".to_string()]);
+    assert_eq!(
+        new_amount_columns(&layout, &same, &r),
+        vec!["Fed WH".to_string()]
+    );
     assert_eq!(
         unmatched_columns(&layout.layout, &h),
         vec!["Fed WH", "Notes", "SS ER", "medicare  er"]

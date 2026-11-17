@@ -349,7 +349,9 @@ fn looks_like_ssn(c: &str) -> bool {
     let groups: Vec<&str> = c.split(['-', ' ']).collect();
     groups.len() == 3
         && groups.iter().map(|g| g.len()).eq([3, 2, 4])
-        && groups.iter().all(|g| g.chars().all(|ch| ch.is_ascii_digit()))
+        && groups
+            .iter()
+            .all(|g| g.chars().all(|ch| ch.is_ascii_digit()))
 }
 
 /// One column → field pair of a layout.
@@ -566,13 +568,7 @@ pub fn new_amount_columns<T>(
         .columns
         .iter()
         .map(|c| normalize_header(&c.header))
-        .chain(
-            saved
-                .left_out
-                .iter()
-                .flatten()
-                .map(|h| normalize_header(h)),
-        )
+        .chain(saved.left_out.iter().flatten().map(|h| normalize_header(h)))
         .collect();
     headers
         .iter()

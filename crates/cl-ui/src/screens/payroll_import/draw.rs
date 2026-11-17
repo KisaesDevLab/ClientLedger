@@ -914,7 +914,10 @@ impl PayrollImportScreen {
                 )
                 .labelled_by(l.id);
                 if ui
-                    .add_enabled(open, egui::Button::new(t("payroll.history.reverse_confirm")))
+                    .add_enabled(
+                        open,
+                        egui::Button::new(t("payroll.history.reverse_confirm")),
+                    )
                     .clicked()
                 {
                     self.reverse(id, &reason);

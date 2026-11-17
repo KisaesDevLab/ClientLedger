@@ -119,7 +119,9 @@ async fn a_missing_preview_token_is_a_contract_break() {
             Err(ApiError::Decode { .. })
         ));
         assert_eq!(
-            preview_from(missing.as_bytes(), false).expect("older").token,
+            preview_from(missing.as_bytes(), false)
+                .expect("older")
+                .token,
             None
         );
         let server = MockServer::start().await;
