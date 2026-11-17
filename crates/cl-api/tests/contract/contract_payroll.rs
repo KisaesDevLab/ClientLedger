@@ -455,44 +455,6 @@ fn no_names_left(h: &Harness, s: &Session, stem: &str, id: PayrollSessionId) {
     assert_eq!(r.body["detailDiscarded"], json!(true), "{stem}");
 }
 
-/// U-252 (engine fault, found in the P30 live pass): `apply-mapping`
-/// updates only the rows it kept, so a row dropped by a skip rule or the
-/// footer count (a Total row) keeps no mapped data, and `validate` reads
-/// it from the raw cells (`payroll-validation.service.ts:180`) and fails
-/// it with `MISSING_REQUIRED`. `true` only on that exact signature: an
-/// error on a row past the file's worker rows, with the workers' own rows
-/// clean. Any other failure, or the signature gone, runs the full check.
-fn skipped_rows_still_validated(h: &Harness, s: &Session, stem: &str) -> bool {
-    let Some(map) = column_map(stem) else {
-        return false;
-    };
-    let workers = worker_names(stem).len();
-    let g = payroll_expect::golden(stem);
-    let up = h
-        .run(s.payroll().upload(&UploadRequest {
-            mode: ImportMode::EmployeeLevel,
-            bytes: payroll_expect::fixture_bytes(&format!("{stem}.csv")),
-            file_name: format!("{stem}.csv"),
-            period_start: day(&g.period_start),
-            period_end: day(&g.period_end),
-            check_date: day(&g.check_date),
-        }))
-        .expect("upload");
-    h.run(s.payroll().apply_mapping(up.session, &map))
-        .expect("mapping");
-    let v = h.run(s.payroll().validate(up.session)).expect("validate");
-    h.run(s.payroll().discard(up.session)).expect("discard");
-    let errors: Vec<_> = v.messages.iter().filter(|m| m.is_error).collect();
-    let past = |m: &&&cl_api::payroll::ValidationMessage| {
-        m.row_number
-            .is_some_and(|r| usize::try_from(r).is_ok_and(|r| r > workers))
-    };
-    !errors.is_empty()
-        && errors
-            .iter()
-            .all(|m| past(&m) && m.code == "MISSING_REQUIRED")
-}
-
 /// A1: every provider fixture, each in a fresh company, posts balanced
 /// entries equal to the expectation computed from its CSV.
 pub fn providers_post_their_expected_entries(h: &Harness) {
@@ -513,13 +475,8 @@ pub fn providers_post_their_expected_entries(h: &Harness) {
         let one = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let s = fresh_company(h, &format!("Payroll {stem}"));
             let a = map_accounts(h, &s);
-            if skipped_rows_still_validated(h, &s, stem) {
-                h.pending(
-                    "U-252",
-                    "the engine validates the Total row that skip rules dropped",
-                );
-                return;
-            }
+            // U-252 (engine PR #70, merged): a Total row dropped at
+            // apply-mapping is no longer validated, so QuickBooks runs in full.
             let p = prepare(h, &s, stem, a);
             let entries = posted(
                 h.run(s.payroll().post(p.id, &p.request(), IdempotencyKey::new()))
