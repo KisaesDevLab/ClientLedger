@@ -362,7 +362,8 @@ impl PriceLevelsScreen {
         if let Some(e) = &self.error {
             form::inline_error(ui, &tokens, e);
         }
-        if ui.button(t("price_levels.new")).clicked() {
+        let write = super::can_change(&self.link, KIND);
+        if super::change_button(ui, write, t("price_levels.new"), t("price_levels.new")).clicked() {
             self.new_level();
         }
         let mut open = None;

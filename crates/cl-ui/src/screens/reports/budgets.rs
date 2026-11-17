@@ -596,6 +596,12 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
     if !w.budgets.open {
         return;
     }
+    // P29 review B2: Fill, Adjust and Copy are refused by the engine while
+    // an account is hidden from this role; shown disabled with the reason.
+    let tools_open = w
+        .link
+        .rights()
+        .door_open(cl_model::permissions::Door::BudgetTools);
     let style = MoneyStyle {
         symbol: false,
         ..crate::grid_env::shell_frame(ui.ctx()).money_style
@@ -681,7 +687,10 @@ pub(super) fn ui(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
             }
             return;
         };
-        let can_whole = !p.has_unsaved() && p.action.is_none() && !p.stale;
+        let can_whole = tools_open && !p.has_unsaved() && p.action.is_none() && !p.stale;
+        if !tools_open {
+            form::hint(ui, tokens, &t("sensitive.door_closed"));
+        }
         ui.horizontal_wrapped(|ui| {
             if ui
                 .add_enabled(can_whole, egui::Button::new(t("reports.budget.fill")))

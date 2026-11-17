@@ -26,6 +26,13 @@ pub mod statements;
 use cl_core::report::{Cell, ColumnHead, ColumnKind, ReportRow, RowKind, RowPath};
 
 /// A column with no dates of its own.
+/// The engine left accounts hidden for this role out of the answer (U-33:
+/// top-level `hiddenNotice: true`; absent or `null` otherwise).
+#[must_use]
+pub fn hidden_notice(v: &serde_json::Value) -> bool {
+    v.get("hiddenNotice") == Some(&serde_json::Value::Bool(true))
+}
+
 pub(crate) fn col(key: &str, caption: &str, kind: ColumnKind) -> ColumnHead {
     ColumnHead {
         key: key.to_string(),

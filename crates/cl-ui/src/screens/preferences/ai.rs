@@ -571,6 +571,7 @@ impl AiSavePlan {
             consent,
             intake: None,
             cloud_reading: None,
+            thresholds: None,
         })
     }
 }

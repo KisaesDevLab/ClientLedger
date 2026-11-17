@@ -10,9 +10,11 @@
 //!   process outlives the binary even when a test panics.
 //! - Missing engine or `PostgreSQL` binaries: `SKIPPED` locally, a failure
 //!   when `CL_API_REQUIRE=1` (CI).
-//! - Logs in once per session (the engine rate-limits logins: 10/15 min per
-//!   email, 10/min per IP) and fails the binary after more than 8 calls to
-//!   rate-limited auth routes.
+//! - Logs in once per session and once per shared team member
+//!   ([`Member`]); the engine rate-limits logins (10/15 min per email,
+//!   10/min per address), so sign-in helpers wait for a free slot
+//!   ([`Harness::auth_slots`]) and an auth call over 9 in a 62 s window
+//!   fails its test.
 //! - Capability-gated assertions print `PENDING(U-xx)` and are listed in
 //!   `target/<binary>-pending.txt`; `CL_API_REQUIRE_CAPS=a,b` turns a missing
 //!   capability into a failure.
@@ -48,11 +50,22 @@ use cl_host::{AdminAccount, CompanySeed, HostConfig, HostState, OfflineSetting, 
 pub const OWNER_EMAIL: &str = "owner@example.com";
 /// The company created by `/desktop/initialize`.
 pub const CONTRACT_CO: &str = "Contract Co";
-/// Calls to rate-limited auth routes allowed per binary (limit 10/min/IP).
-/// 9 since P23 WP-4: the P23 tests create one company of their own ("Sales
-/// Tax Co"); still under the engine's 10 even if every call fell in one
-/// minute.
-const AUTH_LIMIT: u64 = 9;
+/// Calls to rate-limited auth routes allowed in any [`AUTH_WINDOW`]. The
+/// engine's per-address limiter (`authLimiter`, routes/auth.routes.ts) allows
+/// 10 a minute on login, TFA and create-tenant, in memory (the desktop never
+/// uses the Redis store); one under it, over a window two seconds longer
+/// than the engine's, so send-time skew never matters. Before P29 this was
+/// a total for the whole run (9), which every new signed-in role ran into.
+const AUTH_PER_WINDOW: usize = 9;
+/// The window [`AUTH_PER_WINDOW`] counts in.
+const AUTH_WINDOW: Duration = Duration::from_secs(62);
+
+/// True for a route the engine's per-address auth limiter counts.
+fn auth_limited_route(route: &str) -> bool {
+    route.ends_with("/api/v1/auth/login")
+        || route.contains("/api/v1/auth/tfa/")
+        || route.ends_with("/api/v1/auth/create-tenant")
+}
 
 fn env_is(key: &str, value: &str) -> bool {
     std::env::var(key).as_deref() == Ok(value)
@@ -120,6 +133,8 @@ pub struct Observer {
     on_drop: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     /// Replies per route that carried `Idempotent-Replayed: true` (U-18).
     replayed: Mutex<BTreeMap<String, u64>>,
+    /// When each rate-limited auth call went out, inside [`AUTH_WINDOW`].
+    auth_sent: Mutex<std::collections::VecDeque<Instant>>,
 }
 
 fn key(method: Method, route: &str) -> String {
@@ -190,13 +205,31 @@ impl Observer {
     fn auth_limited(&self) -> u64 {
         let sent = self.sent.lock().unwrap_or_else(PoisonError::into_inner);
         sent.iter()
-            .filter(|(k, _)| {
-                k.ends_with("/api/v1/auth/login")
-                    || k.contains("/api/v1/auth/tfa/")
-                    || k.ends_with("/api/v1/auth/create-tenant")
-            })
+            .filter(|(k, _)| auth_limited_route(k))
             .map(|(_, v)| *v)
             .sum()
+    }
+
+    /// How long until `n` more rate-limited auth calls fit in the window.
+    fn auth_wait(&self, n: usize) -> Duration {
+        let mut q = self
+            .auth_sent
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let now = Instant::now();
+        while q
+            .front()
+            .is_some_and(|t| now.duration_since(*t) >= AUTH_WINDOW)
+        {
+            q.pop_front();
+        }
+        let n = n.min(AUTH_PER_WINDOW);
+        if q.len() + n <= AUTH_PER_WINDOW {
+            return Duration::ZERO;
+        }
+        // The call that must leave the window before `n` more fit.
+        let oldest = q[q.len() + n - AUTH_PER_WINDOW - 1];
+        (oldest + AUTH_WINDOW).saturating_duration_since(now) + Duration::from_millis(50)
     }
 }
 
@@ -208,10 +241,29 @@ impl RequestObserver for Observer {
             .unwrap_or_else(PoisonError::into_inner)
             .entry(key(method, route))
             .or_default() += 1;
-        let used = self.auth_limited();
+        if !auth_limited_route(route) {
+            return;
+        }
+        // Checked on the auth call itself only: an over-eager test fails
+        // alone instead of every later request.
+        let mut q = self
+            .auth_sent
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let now = Instant::now();
+        while q
+            .front()
+            .is_some_and(|t| now.duration_since(*t) >= AUTH_WINDOW)
+        {
+            q.pop_front();
+        }
+        q.push_back(now);
+        let used = q.len();
+        drop(q);
         assert!(
-            used <= AUTH_LIMIT,
-            "the contract run made {used} rate-limited auth calls (budget {AUTH_LIMIT})"
+            used <= AUTH_PER_WINDOW,
+            "{used} rate-limited auth calls within {AUTH_WINDOW:?} (at most {AUTH_PER_WINDOW}; \
+             call Harness::auth_slots first)"
         );
     }
 
@@ -369,8 +421,140 @@ pub struct Harness {
     s2: Mutex<Option<Session>>,
     s3: Mutex<Option<Session>>,
     tenant_b: Mutex<Option<TenantId>>,
-    bookkeeper: Mutex<Option<(String, Session)>>,
+    /// The signed-in members of Contract Co, one per [`Member`], made on
+    /// first use: `(user id, session)`.
+    members: Mutex<BTreeMap<Member, (String, Session)>>,
     scratch: Scratch,
+}
+
+/// A signed-in team member of Contract Co the harness shares across tests,
+/// so the run signs in once per role (the engine rate-limits sign-ins).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Member {
+    /// A `bookkeeper` without a permission row; each test sets the
+    /// overrides it needs.
+    Bookkeeper,
+    /// A `bookkeeper` whose overrides are the Accounts payable built-in
+    /// ([`payables_map`]), set once.
+    Payables,
+    /// A `bookkeeper` whose overrides are the Accounts receivable built-in
+    /// ([`receivables_map`]), set once.
+    Receivables,
+    /// The engine's `readonly` role.
+    ViewOnly,
+}
+
+impl Member {
+    fn engine_role(self) -> &'static str {
+        match self {
+            Member::ViewOnly => "readonly",
+            _ => "bookkeeper",
+        }
+    }
+
+    fn tag(self) -> &'static str {
+        match self {
+            Member::Bookkeeper => "bk",
+            Member::Payables => "ap",
+            Member::Receivables => "ar",
+            Member::ViewOnly => "vo",
+        }
+    }
+}
+
+/// Every key of the engine's matrix at `none`, then `rights` on top;
+/// `financial_reports` only for an engine with `report-areas-v1`.
+fn builtin_map(rights: &[(&str, &str)], report_areas: bool) -> serde_json::Value {
+    const KEYS: &[&str] = &[
+        "transactions",
+        "batch_entry",
+        "recurring",
+        "duplicates",
+        "bulk_import",
+        "invoices",
+        "receive_payment",
+        "estimates",
+        "items",
+        "sales_tax",
+        "bills",
+        "pay_bills",
+        "vendor_credits",
+        "payroll_import",
+        "checks",
+        "banking",
+        "daily_sales",
+        "reports",
+        "budgets",
+        "dashboard",
+        "trial_balance",
+        "tax_estimator",
+        "accounts",
+        "contacts",
+        "attachments",
+        "tags",
+        "company_settings",
+        "ai_chat",
+        "audit_log",
+    ];
+    let mut m = serde_json::Map::new();
+    for k in KEYS {
+        m.insert((*k).into(), "none".into());
+    }
+    if report_areas {
+        m.insert("financial_reports".into(), "none".into());
+    }
+    for (k, v) in rights {
+        m.insert((*k).into(), (*v).into());
+    }
+    serde_json::Value::Object(m)
+}
+
+/// The Accounts payable built-in (`cl-model::permissions::BuiltinRole::
+/// Payables`, plan §1 table), every key listed.
+pub fn payables_map(report_areas: bool) -> serde_json::Value {
+    builtin_map(
+        &[
+            ("contacts", "full"),
+            ("attachments", "full"),
+            ("recurring", "full"),
+            ("checks", "full"),
+            ("bills", "full"),
+            ("pay_bills", "full"),
+            ("vendor_credits", "full"),
+            ("tags", "view"),
+            ("items", "view"),
+            ("accounts", "view"),
+            ("reports", "view"),
+            ("dashboard", "view"),
+            ("company_settings", "view"),
+        ],
+        report_areas,
+    )
+}
+
+/// The Accounts receivable built-in (`BuiltinRole::Receivables`), every key
+/// listed.
+pub fn receivables_map(report_areas: bool) -> serde_json::Value {
+    builtin_map(
+        &[
+            ("transactions", "full"),
+            ("recurring", "full"),
+            ("contacts", "full"),
+            ("attachments", "full"),
+            ("invoices", "full"),
+            ("receive_payment", "full"),
+            ("estimates", "full"),
+            ("sales_tax", "full"),
+            ("daily_sales", "full"),
+            ("tags", "view"),
+            ("items", "view"),
+            ("accounts", "view"),
+            ("reports", "view"),
+            ("dashboard", "view"),
+            ("company_settings", "view"),
+        ],
+        report_areas,
+    )
 }
 
 fn random_password() -> Secret {
@@ -490,7 +674,7 @@ impl Harness {
             s2: Mutex::new(None),
             s3: Mutex::new(None),
             tenant_b: Mutex::new(None),
-            bookkeeper: Mutex::new(None),
+            members: Mutex::new(BTreeMap::new()),
             scratch,
         })
     }
@@ -516,8 +700,22 @@ impl Harness {
         }
     }
 
+    /// Waits (outside any test budget) until `n` more rate-limited auth
+    /// calls (sign-in, two-step, create company) fit under the engine's
+    /// per-minute limit. Every harness helper that signs in or creates a
+    /// company calls it; a test that calls those routes itself calls it
+    /// first.
+    pub fn auth_slots(&self, n: usize) {
+        let wait = self.observer.auth_wait(n);
+        if !wait.is_zero() {
+            eprintln!("    (waiting {wait:.1?} for the engine's sign-in limit)");
+            std::thread::sleep(wait);
+        }
+    }
+
     /// Log the owner in again (a new session; at most 3 live per user).
     pub fn login(&self) -> Session {
+        self.auth_slots(1);
         self.run(login(&self.client, &self.password))
             .unwrap_or_else(|e| panic!("{e}"))
     }
@@ -543,6 +741,7 @@ impl Harness {
     pub fn tenant_b(&self) -> TenantId {
         let mut slot = self.tenant_b.lock().unwrap_or_else(PoisonError::into_inner);
         *slot.get_or_insert_with(|| {
+            self.auth_slots(1);
             let made = self
                 .run(self.s1.create_company(&cl_api::NewCompany {
                     company_name: unique("Tenant B"),
@@ -569,43 +768,80 @@ impl Harness {
     }
 
     /// A bookkeeper of Contract Co (invited by S1) with the company open:
-    /// `(user id, session)`. One per run, logged in on first use, so the
-    /// rate-limited login budget holds; each test sets the permission
-    /// overrides it needs.
+    /// `(user id, session)`. One per run, logged in on first use; each test
+    /// sets the permission overrides it needs.
     pub fn bookkeeper(&self) -> (String, Session) {
-        let mut slot = self
-            .bookkeeper
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        slot.get_or_insert_with(|| {
-            let email = format!("bk-{}@example.com", &uuid_hex()[..12]);
-            let made = self
-                .run(self.s1.raw(
-                    Method::Post,
-                    "/api/v1/company/invite-user",
-                    &[],
-                    Some(&serde_json::json!({
-                        "email": email,
-                        "displayName": "Synthetic Bookkeeper",
-                        "role": "bookkeeper",
-                    })),
-                ))
-                .unwrap_or_else(|e| panic!("invite: {e}"));
-            assert_eq!(made.status, 201, "{}", made.body);
-            let user = made.body["user"]["id"].as_str().expect("id").to_string();
-            let pw = made.body["temporaryPassword"]
+        self.member(Member::Bookkeeper)
+    }
+
+    /// The shared member `m` of Contract Co with the company open: `(user
+    /// id, session)`. Made on first use: invited by S1, signed in with the
+    /// temporary password, which is changed at once (U-230), and for
+    /// [`Member::Payables`] and [`Member::Receivables`] given the built-in's
+    /// map as overrides. Tests must not change the overrides of those two.
+    pub fn member(&self, m: Member) -> (String, Session) {
+        let mut slots = self.members.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(found) = slots.get(&m) {
+            return found.clone();
+        }
+        let made = self.sign_in_member(m);
+        slots.insert(m, made.clone());
+        made
+    }
+
+    fn sign_in_member(&self, m: Member) -> (String, Session) {
+        let email = format!("{}-{}@example.com", m.tag(), &uuid_hex()[..12]);
+        let made = self
+            .run(self.s1.raw(
+                Method::Post,
+                "/api/v1/company/invite-user",
+                &[],
+                Some(&serde_json::json!({
+                    "email": email,
+                    "displayName": format!("Synthetic {m:?}"),
+                    "role": m.engine_role(),
+                })),
+            ))
+            .unwrap_or_else(|e| panic!("invite {m:?}: {e}"));
+        assert_eq!(made.status, 201, "{}", made.body);
+        let user = made.body["user"]["id"].as_str().expect("id").to_string();
+        let temp = Secret::new(
+            made.body["temporaryPassword"]
                 .as_str()
                 .expect("temporary password")
-                .to_string();
-            let bk = match self.run(self.client.login(&email, &Secret::new(pw))) {
-                Ok(LoginOutcome::Session(b)) => b,
-                other => panic!("bookkeeper login: {other:?}"),
-            };
-            self.run(bk.open_company(self.contract_co))
-                .unwrap_or_else(|e| panic!("bookkeeper opens: {e}"));
-            (user, bk)
-        })
-        .clone()
+                .to_string(),
+        );
+        let map = match m {
+            Member::Payables => Some(payables_map(self.caps.has("report-areas-v1"))),
+            Member::Receivables => Some(receivables_map(self.caps.has("report-areas-v1"))),
+            Member::Bookkeeper | Member::ViewOnly => None,
+        };
+        if let Some(map) = map {
+            let r = self
+                .run(self.s1.raw(
+                    Method::Put,
+                    &format!("/api/v1/company/users/{user}/permissions"),
+                    &[],
+                    Some(&serde_json::json!({ "overrides": map })),
+                ))
+                .unwrap_or_else(|e| panic!("{m:?} permissions: {e}"));
+            assert_eq!(r.status, 200, "{}", r.body);
+        }
+        self.auth_slots(1);
+        let s = match self.run(self.client.login(&email, &temp)) {
+            Ok(LoginOutcome::Session(s)) => s,
+            other => panic!("{m:?} login: {other:?}"),
+        };
+        // U-230: a desktop invite's temporary password must be changed
+        // before anything else works.
+        if s.password_change_required() {
+            let new = Secret::new(format!("synthetic-{}-pw-1", m.tag()));
+            self.run(s.change_password(&temp, &new))
+                .unwrap_or_else(|e| panic!("{m:?} new password: {e}"));
+        }
+        self.run(s.open_company(self.contract_co))
+            .unwrap_or_else(|e| panic!("{m:?} opens: {e}"));
+        (user, s)
     }
 
     /// `true` when the engine advertises `cap`; otherwise prints
@@ -681,7 +917,7 @@ impl Harness {
             s1,
             s2,
             s3,
-            bookkeeper,
+            members,
             pending,
             scratch,
             ..
@@ -689,14 +925,15 @@ impl Harness {
         let pending = pending.into_inner().unwrap_or_else(PoisonError::into_inner);
         // Every session holds the client, which holds the endpoint source,
         // which holds the supervisor: log them out and drop them all first.
-        let bookkeeper = bookkeeper
+        let members = members
             .into_inner()
             .unwrap_or_else(PoisonError::into_inner)
+            .into_values()
             .map(|(_, s)| s);
         let others = [s2, s3]
             .into_iter()
             .filter_map(|m| m.into_inner().unwrap_or_else(PoisonError::into_inner))
-            .chain(bookkeeper);
+            .chain(members);
         for s in std::iter::once(s1).chain(others) {
             let _ = rt.block_on(async {
                 tokio::time::timeout(Duration::from_secs(10), s.logout()).await

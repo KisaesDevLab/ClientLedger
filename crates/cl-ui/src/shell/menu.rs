@@ -23,6 +23,14 @@ pub fn title_key(m: Menu) -> String {
 /// Draw the menu bar and its right-hand "Go to" box.
 pub fn show(ui: &mut Ui, shell: &mut Shell, narrow: bool, tokens: &Tokens) {
     let mut queued: Vec<CommandId> = Vec::new();
+    // P29: only what the user's role includes; a menu left empty is not
+    // drawn.
+    let rights = shell.rights();
+    let menus: Vec<Menu> = Menu::ALL
+        .iter()
+        .copied()
+        .filter(|m| !rows(*m, &rights).is_empty())
+        .collect();
     egui::Panel::top("menu_bar")
         .exact_size(HEIGHT)
         .show_separator_line(false)
@@ -36,13 +44,17 @@ pub fn show(ui: &mut Ui, shell: &mut Shell, narrow: bool, tokens: &Tokens) {
             egui::MenuBar::new().ui(ui, |ui| {
                 if narrow {
                     ui.menu_button(t("menu.menu"), |ui| {
-                        for m in Menu::ALL {
-                            ui.menu_button(t(&title_key(*m)), |ui| items(ui, *m, &mut queued));
+                        for m in &menus {
+                            ui.menu_button(t(&title_key(*m)), |ui| {
+                                items(ui, *m, &rights, &mut queued);
+                            });
                         }
                     });
                 } else {
-                    for m in Menu::ALL {
-                        ui.menu_button(t(&title_key(*m)), |ui| items(ui, *m, &mut queued));
+                    for m in &menus {
+                        ui.menu_button(t(&title_key(*m)), |ui| {
+                            items(ui, *m, &rights, &mut queued);
+                        });
                     }
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -126,11 +138,13 @@ pub struct MenuRow {
     pub separator_before: bool,
 }
 
-/// The rows of a menu in table order (pure, so it is unit-tested).
+/// The rows of a menu in table order that the user's role includes (pure,
+/// so it is unit-tested). Separators follow the rows left (P29).
 #[must_use]
-pub fn rows(menu: Menu) -> Vec<MenuRow> {
+pub fn rows(menu: Menu, rights: &cl_model::permissions::Rights) -> Vec<MenuRow> {
     let mut last_group: Option<u8> = None;
     commands::in_menu(menu)
+        .filter(|c| rights.allows(c.id))
         .map(|c| {
             let separator_before = last_group.is_some_and(|g| g != c.group);
             last_group = Some(c.group);
@@ -144,8 +158,13 @@ pub fn rows(menu: Menu) -> Vec<MenuRow> {
         .collect()
 }
 
-fn items(ui: &mut Ui, menu: Menu, queued: &mut Vec<CommandId>) {
-    for row in rows(menu) {
+fn items(
+    ui: &mut Ui,
+    menu: Menu,
+    rights: &cl_model::permissions::Rights,
+    queued: &mut Vec<CommandId>,
+) {
+    for row in rows(menu, rights) {
         if row.separator_before {
             ui.separator();
         }
@@ -178,7 +197,8 @@ mod tests {
 
     #[test]
     fn file_menu_rows_follow_the_command_table() {
-        let file = rows(Menu::File);
+        let all = cl_model::permissions::Rights::all();
+        let file = rows(Menu::File, &all);
         assert_eq!(file[0].id.as_str(), "file.open_company");
         assert_eq!(file[0].label, "Open or Switch Company");
         assert!(file[0].shortcut.as_deref().is_some_and(|s| s.contains('O')));
@@ -196,8 +216,27 @@ mod tests {
             "six groups in the File menu"
         );
         for m in Menu::ALL {
-            assert!(!rows(*m).is_empty(), "{m:?} has rows");
+            assert!(!rows(*m, &all).is_empty(), "{m:?} has rows");
             assert_ne!(title_key(*m), "");
         }
+    }
+
+    /// P29: an A/P user sees no Create Invoice and no P&L; separators are
+    /// drawn only between rows that are left.
+    #[test]
+    fn menus_follow_the_rights() {
+        let ap = cl_model::permissions::BuiltinRole::Payables.rights();
+        let has = |m: Menu, id: &str| rows(m, &ap).iter().any(|r| r.id.as_str() == id);
+        assert!(!has(Menu::Clients, "clients.create_invoice"));
+        assert!(!has(Menu::Reports, "reports.profit_loss"));
+        assert!(!has(Menu::Company, "company.closing_date"));
+        assert!(has(Menu::Vendors, "vendors.enter_bill"));
+        for m in Menu::ALL {
+            let r = rows(*m, &ap);
+            assert!(r.first().is_none_or(|f| !f.separator_before), "{m:?}");
+        }
+        let none = cl_model::permissions::Rights::none();
+        assert_eq!(rows(Menu::Payroll, &none), Vec::new());
+        assert_ne!(rows(Menu::Help, &none), Vec::new());
     }
 }

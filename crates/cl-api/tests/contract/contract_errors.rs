@@ -159,6 +159,7 @@ pub fn tag_conflicts_in_use_and_duplicate(h: &Harness) {
 /// A wrong login uses an email that does not exist, never the owner's (a
 /// wrong owner password counts toward the super-admin lockout).
 pub fn bad_login_is_invalid_credentials(h: &Harness) {
+    h.auth_slots(1);
     let r = h.run(
         h.client
             .login("nobody@example.com", &Secret::new("not the password 1")),

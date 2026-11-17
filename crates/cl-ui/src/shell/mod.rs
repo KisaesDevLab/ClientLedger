@@ -6,6 +6,7 @@
 //! all do the same thing: queue a command id. [`Shell::dispatch`] is the only
 //! place a command takes effect, so every entry point behaves alike.
 
+pub mod idle_lock;
 pub mod menu;
 pub mod outbox;
 pub mod palette;
@@ -194,6 +195,15 @@ pub struct Shell {
     doc_follow: Option<WindowId>,
     /// A04 WP-C: the pop-out's compare events, for next frame.
     viewer_outbox: outbox::ViewerOutbox,
+    /// P29: reads the rights again after a 403.
+    rights_watch: crate::company::RightsWatch,
+    /// P29: the signed-in user's role in the open company (the engine's
+    /// word), the fallback when `/auth/me` names none.
+    company_role: String,
+    /// P29 WP2: the idle lock (Q-P29p).
+    idle: idle_lock::IdleLock,
+    /// P29 WP2: File › Sign Out waits for the company to close.
+    sign_out_after_close: bool,
 }
 
 impl Shell {
@@ -244,6 +254,10 @@ impl Shell {
             doc_viewer,
             doc_follow: None,
             viewer_outbox: outbox::ViewerOutbox::new(),
+            rights_watch: crate::company::RightsWatch::default(),
+            company_role: String::new(),
+            idle: idle_lock::IdleLock::default(),
+            sign_out_after_close: false,
             widths,
             prompt_focused: None,
             demo: options.demo,
@@ -301,6 +315,15 @@ impl Shell {
     #[must_use]
     pub fn company_link(&self) -> Option<&Arc<CompanyLink>> {
         self.company_link.as_ref()
+    }
+
+    /// The signed-in user's rights in the open company (P29): everything
+    /// without an engine link (tests) or before a company is open.
+    #[must_use]
+    pub fn rights(&self) -> cl_model::permissions::Rights {
+        self.company_link
+            .as_ref()
+            .map_or_else(cl_model::permissions::Rights::all, |l| l.rights())
     }
 
     /// The open company (tenant id and name), if any.
@@ -456,6 +479,12 @@ impl Shell {
         };
         link.set_dirty_windows(self.windows.dirty_ids().len());
         self.poll_closing(&link, ctx);
+        let tenant = self.open_tenant.as_ref().map(|(t, _)| *t);
+        if self.rights_watch.poll(&link, tenant, &self.company_role)
+            && let Some(ctx) = ctx
+        {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
         // A08: a window whose own save finished asks to close (that window,
         // never another of its kind).
         let closing: Vec<WindowId> = self
@@ -480,7 +509,25 @@ impl Shell {
                 }
                 CompanyEvent::CompanyRole(role) => {
                     if let Some(name) = &self.signed_in_name {
-                        self.status.user = Some(crate::company::user_text(name, &role));
+                        self.status.user =
+                            Some(crate::company::user_text_for(name, &role, &link.rights()));
+                    }
+                    self.company_role = role;
+                }
+                // Menus, the rail and the palette read the link's rights
+                // each frame; the status bar names the role they make
+                // (P29 QA-4).
+                CompanyEvent::Rights(r) => {
+                    if let Some(name) = &self.signed_in_name
+                        && !self.company_role.is_empty()
+                    {
+                        self.status.user =
+                            Some(crate::company::user_text_for(name, &self.company_role, &r));
+                    }
+                }
+                CompanyEvent::ClosingDate(d) => {
+                    if let Some(b) = self.company.as_mut() {
+                        b.closed_through = d;
                     }
                 }
                 CompanyEvent::Opened {
@@ -525,6 +572,10 @@ impl Shell {
                     }
                     // Catch-up runs after every open (P15, Q-P15h).
                     self.runner.opened(&link, tenant_id);
+                    self.rights_watch.opened(&link);
+                    // U-33: an Admin's local sensitive marks move into the
+                    // engine (once; refused ones stay with a note).
+                    crate::company::sensitive::start(&link, tenant_id);
                     // This company's unknown saves (kept for the session).
                     link.lost_saves().set_company(Some(tenant_id));
                 }
@@ -534,17 +585,30 @@ impl Shell {
                         self.status.user = Some(name.clone());
                     }
                     self.runner.closed(&link);
+                    link.reset_rights();
+                    self.company_role.clear();
                     self.doc_viewer.close_window();
                     link.lost_saves().set_company(None);
-                    self.save_layout();
+                    // P29 QA-16: a sign-out leaves nothing of this user's
+                    // windows for the next person who opens the company.
+                    let signing_out = self.sign_out_after_close;
+                    if !signing_out {
+                        self.save_layout();
+                    }
                     for id in self.windows.all().iter().map(|w| w.id).collect::<Vec<_>>() {
                         self.windows.close_now(id);
+                    }
+                    if signing_out {
+                        self.save_layout();
                     }
                     self.open_tenant = None;
                     self.company = None;
                     self.counts = RailCounts::default();
                     self.company_key = "default".into();
                     self.last_saved_layout = Some(self.windows.snapshot());
+                    if std::mem::take(&mut self.sign_out_after_close) {
+                        self.finish_sign_out(&link);
+                    }
                     self.dispatch_now(CommandId::new("file.open_company"));
                 }
                 CompanyEvent::OpenWindow(id) => {
@@ -574,6 +638,14 @@ impl Shell {
                 }
                 CompanyEvent::UserPrefs(p) => {
                     self.prefs = p;
+                    if let Some(store) = self.store.as_ref().filter(|_| !self.run_only)
+                        && let Err(e) = store.save_prefs(&self.prefs)
+                    {
+                        tracing::warn!(error = %e, "could not save preferences");
+                    }
+                }
+                CompanyEvent::IdleLockMinutes(m) => {
+                    self.prefs.idle_lock_minutes = m;
                     if let Some(store) = self.store.as_ref().filter(|_| !self.run_only)
                         && let Err(e) = store.save_prefs(&self.prefs)
                     {
@@ -615,6 +687,33 @@ impl Shell {
                 }
             }
         }
+    }
+
+    /// File › Sign Out (P29 WP2): close the company first (unsaved windows
+    /// are asked about), then end the session; the Open Company window
+    /// asks for a sign-in. Automatic sign-in waits for the next start.
+    fn sign_out(&mut self) {
+        let Some(link) = self.company_link.clone() else {
+            return;
+        };
+        if !link.signed_in() {
+            return;
+        }
+        if self.open_tenant.is_some() || self.company.is_some() {
+            self.sign_out_after_close = true;
+            self.close_company();
+            return;
+        }
+        self.finish_sign_out(&link);
+        self.dispatch_now(CommandId::new("file.open_company"));
+    }
+
+    fn finish_sign_out(&mut self, link: &Arc<CompanyLink>) {
+        link.sign_out();
+        self.idle.reset();
+        self.signed_in_name = None;
+        self.status.user = None;
+        tracing::info!("signed out");
     }
 
     /// Close the open company: save or prompt for open forms first, wait
@@ -856,6 +955,18 @@ impl Shell {
         self.shortcuts_open
     }
 
+    /// True while the lock screen covers the app (P29 WP2).
+    #[must_use]
+    pub fn idle_locked(&self) -> bool {
+        self.idle.locked()
+    }
+
+    /// The lock screen's message key, if any.
+    #[must_use]
+    pub fn idle_message(&self) -> Option<&'static str> {
+        self.idle.message()
+    }
+
     /// True while About or the privacy notice is open.
     #[must_use]
     pub fn about_open(&self) -> bool {
@@ -909,6 +1020,11 @@ impl Shell {
     /// State of the window in front, for the control channel.
     #[must_use]
     pub fn active_screen_state(&self) -> serde_json::Value {
+        // Security review minor 8: behind the idle lock the channel learns
+        // only that the app is locked, nothing of the window in front.
+        if self.idle.locked() {
+            return serde_json::json!({ "locked": true });
+        }
         self.windows
             .active()
             .map_or(serde_json::Value::Null, |w| w.screen.state())
@@ -923,9 +1039,36 @@ impl Shell {
     /// to that window (a popped-out window's own keys, S2), the rest are
     /// app-wide.
     fn run_for(&mut self, ctx: Option<&Context>, id: CommandId, target: Option<WindowId>) {
+        // P29 WP2: nothing runs behind the lock screen.
+        if self.idle.locked() {
+            return;
+        }
         let Some(cmd) = self.find_command(id.as_str()) else {
             return;
         };
+        // P29: a command the user's role does not include (a shortcut, a
+        // script, a stale menu) says so; the engine would refuse it.
+        if commands::find(id.as_str()).is_some() && !self.rights().allows(id) {
+            if let Some(ctx) = ctx {
+                self.toast(ctx, "toast.not_for_role");
+            }
+            return;
+        }
+        // P29: a list the role may only look at takes no changes (New,
+        // Make inactive, Merge, Delete); the engine would refuse them.
+        if let Some(resource) = target
+            .and_then(|w| self.windows.get(w))
+            .and_then(|w| read_only_list(&self.rights(), id, w.kind))
+        {
+            tracing::debug!(
+                resource = resource.key(),
+                "list change refused for the role"
+            );
+            if let Some(ctx) = ctx {
+                self.toast(ctx, "toast.not_for_role");
+            }
+            return;
+        }
         if cmd.opens {
             let kind = cmd.id;
             if self.company_link.is_some()
@@ -955,6 +1098,12 @@ impl Shell {
         }
         match id.as_str() {
             "file.close_company" => self.close_company(),
+            "file.sign_out" => self.sign_out(),
+            "file.lock" => {
+                if self.company_link.as_ref().is_some_and(|l| l.signed_in()) {
+                    self.idle.lock_now();
+                }
+            }
             // Q-P19ao: Open Company opens the practice company the way it
             // opens any other (unsaved windows are asked about first).
             "file.open_practice" => {
@@ -1010,6 +1159,34 @@ impl Shell {
             "help.kofi" => {
                 if let Some(ctx) = ctx {
                     crate::links::open_external(ctx, crate::screens::home::support::KOFI_URL);
+                }
+            }
+            // P29 (demo only): the rights scenario's A/P user and back.
+            "dev.demo_rights_ap"
+            | "dev.demo_rights_all"
+            | "dev.demo_rights_bookkeeper"
+            | "dev.demo_rights_bookkeeper_hidden" => {
+                if let Some(link) = self.company_link.as_ref().filter(|l| l.is_demo()) {
+                    use cl_model::permissions::{BuiltinRole, Rights};
+                    link.set_rights(match id.as_str() {
+                        "dev.demo_rights_ap" => BuiltinRole::Payables.rights(),
+                        "dev.demo_rights_bookkeeper" => BuiltinRole::Bookkeeper.rights(),
+                        "dev.demo_rights_bookkeeper_hidden" => {
+                            BuiltinRole::Bookkeeper.rights().hiding_sensitive()
+                        }
+                        _ => Rights::all(),
+                    });
+                }
+            }
+            // P29 WP2 (demo only): the sign-in scenarios start and end with
+            // the demo's own users, passwords and recovery key.
+            "dev.demo_auth_reset" => {
+                if let Some(link) = self.company_link.as_ref().filter(|l| l.is_demo())
+                    && let Some(mut d) = link.demo_state()
+                {
+                    let signed_in = d.auth.signed_in.clone();
+                    d.auth = crate::company::demo::auth::DemoAuth::default();
+                    d.auth.signed_in = signed_in;
                 }
             }
             "help.current" => {
@@ -1218,7 +1395,11 @@ impl Shell {
             ctx.send_viewport_cmd(ViewportCommand::CancelClose);
             self.request_quit(Some(ctx));
         }
-        self.handle_keys(ctx);
+        // P29 WP2: behind the lock no shortcut is read (Enter belongs to the
+        // password field, not to the form in front).
+        if !self.idle.locked() {
+            self.handle_keys(ctx);
+        }
         if let Some(toast) = &self.toast
             && ctx.input(|i| i.time) > toast.until
         {
@@ -1331,6 +1512,11 @@ impl Shell {
         let tokens = Tokens::of(&ctx);
 
         self.apply_company_events(Some(&ctx));
+        // Security review minor 5: a copied secret leaves the clipboard.
+        crate::secret_clipboard::tick(&ctx);
+        if self.show_idle_lock(ui) {
+            return;
+        }
         self.doc_viewer.publish(&ctx);
         // A04 WP-C: last frame's pop-out compare events, before the forms
         // draw.
@@ -1380,6 +1566,32 @@ impl Shell {
         if self.toast.is_some() {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
+    }
+
+    /// The idle timer and, while locked, the lock screen instead of the
+    /// app (P29 WP2). True while locked: nothing else is drawn.
+    fn show_idle_lock(&mut self, ui: &mut egui::Ui) -> bool {
+        let ctx = ui.ctx().clone();
+        let Some(link) = self.company_link.clone() else {
+            return false;
+        };
+        self.idle
+            .tick(&ctx, self.prefs.idle_lock_minutes, link.signed_in());
+        if !self.idle.locked() {
+            return false;
+        }
+        // Commands asked for behind the lock are dropped, not kept for later.
+        self.pending.clear();
+        let dirty = self.windows.dirty_ids().len();
+        let user = self.signed_in_name.clone();
+        match self.idle.show(ui, &link, user.as_deref(), dirty) {
+            Some(idle_lock::LockAction::SignOut) if dirty == 0 => {
+                self.idle.reset();
+                self.sign_out();
+            }
+            Some(_) | None => {}
+        }
+        self.idle.locked()
     }
 
     /// Tell the grid screens of `viewport` today's date, the formats and
@@ -1616,10 +1828,13 @@ impl Shell {
     }
 
     fn show_overlays(&mut self, ctx: &Context) {
-        if let Some(id) = palette::show(ctx, &mut self.palette, &self.keymap) {
+        let rights = self.rights();
+        if let Some(id) = palette::show(ctx, &mut self.palette, &self.keymap, &rights) {
             self.pending.push(id);
         }
-        if self.shortcuts_open && shortcuts::show(ctx, self.focus_scope(), &self.keymap) {
+        if self.shortcuts_open
+            && shortcuts::show(ctx, self.focus_scope(), &self.keymap, &self.rights())
+        {
             self.shortcuts_open = false;
         }
         self.about.show(ctx);
@@ -1758,6 +1973,30 @@ pub(crate) type MakeScreen = fn(
     CalendarDate,
 ) -> Option<Box<dyn Screen>>;
 
+/// The resource a list change would write when the role may only read it
+/// (P29): `id` is a list-changing command and `window` a list the role
+/// opens with read access only.
+fn read_only_list(
+    rights: &cl_model::permissions::Rights,
+    id: CommandId,
+    window: CommandId,
+) -> Option<cl_model::permissions::Resource> {
+    use cl_model::permissions::{Action, Need, need};
+    const CHANGES: &[&str] = &[
+        "list.new",
+        "list.toggle_active",
+        "list.merge",
+        "list.delete",
+    ];
+    if !CHANGES.contains(&id.as_str()) {
+        return None;
+    }
+    match need(window)? {
+        Need::Read(r) if !rights.can(r, Action::Write) => Some(r),
+        _ => None,
+    }
+}
+
 /// A screen for `kind` without borrowing the shell (layout restore). The
 /// developer-only screens are built only with `--demo` (`demo`); every
 /// path that opens a window (commands, company events, layout restore)
@@ -1777,6 +2016,11 @@ fn make_any(
         return Box::new(Placeholder::for_command(kind));
     }
     if let Some(link) = link {
+        // P29: every way a window opens (a command, a screen's request,
+        // a remembered layout) comes here; a refused kind shows why.
+        if commands::find(kind.as_str()).is_some() && !link.rights().allows(kind) {
+            return Box::new(Placeholder::refused(kind));
+        }
         if let Some(s) = crate::screens::company::make(kind, link, open.clone(), today) {
             return s;
         }
@@ -1811,10 +2055,14 @@ fn make_any(
             .chain(&crate::screens::P26_SCREENS)
             .chain(&crate::screens::P27_SCREENS)
             .chain(&crate::screens::P28_SCREENS)
+            .chain(&crate::screens::P29_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;
             }
+        }
+        if let Some(s) = crate::screens::my_sign_in::make(kind, link, prefs.idle_lock_minutes) {
+            return s;
         }
         if let Some(s) = crate::screens::preferences::make(kind, link, open, prefs) {
             return s;

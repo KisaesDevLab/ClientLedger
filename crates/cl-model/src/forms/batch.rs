@@ -374,6 +374,11 @@ pub struct Section {
     pub context: Option<AccountId>,
     /// The rows, in grid order.
     pub rows: Vec<RowDraft>,
+    /// Q-276 (P29 review S3): the section's tag. A row without its own tag
+    /// is saved with it. New sections start with the company's active
+    /// default tag, shown in the section's header, where the owner can
+    /// change or clear it; nothing is added at send time.
+    pub tag: Option<TagId>,
 }
 
 impl Section {
@@ -384,6 +389,22 @@ impl Section {
             kind,
             context,
             rows: Vec::new(),
+            tag: None,
+        }
+    }
+
+    /// The tag a row is saved with: its own, else the section's (Q-276).
+    #[must_use]
+    pub fn row_tag(&self, row: &RowDraft) -> Option<TagId> {
+        row.tag.or(self.tag)
+    }
+
+    /// Feeds the section's tag into a content hash (nothing when it has
+    /// none, so hashes of untagged sections stay as they were).
+    fn feed_tag(&self, h: &mut Fnv) {
+        if let Some(t) = self.tag {
+            h.byte(3);
+            h.str(&t.to_string());
         }
     }
 

@@ -227,6 +227,9 @@ pub struct UserPrefs {
     /// keyboard habit, so it stays with the user, not the company (Q-P09c,
     /// P16 plan D3).
     pub enter_moves_fields: bool,
+    /// Lock the app after this many idle minutes (Q-69, Q-P29p); 0 = off,
+    /// the default. Kept per computer; one of [`IDLE_LOCK_STEPS`].
+    pub idle_lock_minutes: u16,
 }
 
 impl Default for UserPrefs {
@@ -240,6 +243,7 @@ impl Default for UserPrefs {
             date_warnings: DateWarnings::default(),
             update_check: UpdateCheck::Manual,
             enter_moves_fields: false,
+            idle_lock_minutes: 0,
         }
     }
 }
@@ -260,6 +264,14 @@ impl UserPrefs {
         self.zoom_percent = nearest_step(self.zoom_percent);
         self.date_warnings.past_days = self.date_warnings.past_days.min(DATE_WARNING_MAX_DAYS);
         self.date_warnings.future_days = self.date_warnings.future_days.min(DATE_WARNING_MAX_DAYS);
+        if !IDLE_LOCK_STEPS.contains(&self.idle_lock_minutes) {
+            // An odd value never means a shorter lock than asked for.
+            self.idle_lock_minutes = IDLE_LOCK_STEPS
+                .iter()
+                .copied()
+                .find(|m| *m >= self.idle_lock_minutes)
+                .unwrap_or(60);
+        }
     }
 
     /// Text to store.
@@ -274,6 +286,9 @@ impl UserPrefs {
         f32::from(self.zoom_percent) / 100.0
     }
 }
+
+/// Idle-lock choices in minutes (Q-P29p); 0 = never.
+pub const IDLE_LOCK_STEPS: [u16; 6] = [0, 5, 10, 15, 30, 60];
 
 /// Name of the preferences file.
 pub const USER_PREFS_FILE: &str = "ui-prefs.json";
@@ -324,6 +339,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn idle_lock_is_off_by_default_and_snaps_up() {
+        assert_eq!(UserPrefs::default().idle_lock_minutes, 0);
+        let p = UserPrefs::parse(r#"{"idle_lock_minutes": 7}"#);
+        assert_eq!(p.idle_lock_minutes, 10);
+        let p = UserPrefs::parse(r#"{"idle_lock_minutes": 900}"#);
+        assert_eq!(p.idle_lock_minutes, 60);
+        let p = UserPrefs::parse(r#"{"idle_lock_minutes": 15}"#);
+        assert_eq!(p.idle_lock_minutes, 15);
+    }
+
+    #[test]
     fn zoom_steps_stay_inside_80_to_200() {
         assert_eq!(ZOOM_STEPS.first(), Some(&80));
         assert_eq!(ZOOM_STEPS.last(), Some(&200));
@@ -371,6 +397,7 @@ mod tests {
             },
             update_check: UpdateCheck::Manual,
             enter_moves_fields: true,
+            idle_lock_minutes: 30,
         };
         assert_eq!(UserPrefs::parse(&p.to_text()), p);
         assert_eq!(UserPrefs::parse("garbage"), UserPrefs::default());

@@ -101,3 +101,41 @@ fn reference_numbers(
         .map(|s| s.rows.last().map(|r| r.number.clone()).unwrap_or_default())
         .collect()
 }
+
+/// P29 review S3: new sections start with the company's active default tag
+/// as a visible section tag (part of the blank window); it can be cleared,
+/// and an inactive default fills nothing.
+#[test]
+fn new_sections_show_the_active_default_tag_and_can_clear_it() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let (active, inactive) = {
+        let mut d = link.demo_state().expect("demo");
+        let tags = d.tags_mut();
+        let a = tags.iter().find(|t| t.is_active).expect("active").id;
+        let i = tags.iter_mut().find(|t| t.id != a).expect("another");
+        i.is_active = false;
+        let i = i.id;
+        d.default_tag = Some(a);
+        (a, i)
+    };
+    let mut s = BulkEntryScreen::new(Arc::clone(&link), None, day(11, 4));
+    assert_eq!(s.batch().sections[0].tag, Some(active));
+    assert!(!s.dirty(), "the default is part of the blank window");
+    s.add_section(SectionKind::Expenses);
+    assert_eq!(s.batch().sections[1].tag, Some(active));
+    // Cleared on the section: nothing is added at send time.
+    s.grid.edit_step(|b| b.sections[1].tag = None);
+    let out = s.batch().outgoing(None, None);
+    assert!(
+        out.groups
+            .iter()
+            .flat_map(|g| &g.rows)
+            .all(|r| r.tag.is_none() || r.tag == Some(active))
+    );
+    assert_eq!(s.batch().sections[1].tag, None);
+    // An inactive default fills nothing.
+    link.demo_state().expect("demo").default_tag = Some(inactive);
+    let s = BulkEntryScreen::new(Arc::clone(&link), None, day(11, 4));
+    assert_eq!(s.batch().sections[0].tag, None);
+}

@@ -325,6 +325,7 @@ impl InvoiceScreen {
         header::locked_scope(ui, enabled, read_only, |ui| self.footer_ui(ui, tokens));
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
+        kit::problem_texts(ui, tokens, &self.tag_refusal);
         if let Some(e) = &self.error {
             form::inline_error(ui, tokens, e);
         }

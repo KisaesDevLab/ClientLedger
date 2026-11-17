@@ -599,7 +599,7 @@ fn about_and_privacy_open_from_help() {
 #[test]
 fn kofi_opens_from_the_help_menu_only_when_chosen() {
     use egui::{PointerButton, Pos2};
-    let rows = super::menu::rows(Menu::Help);
+    let rows = super::menu::rows(Menu::Help, &cl_model::permissions::Rights::all());
     let row = rows
         .iter()
         .find(|r| r.id.as_str() == "help.kofi")
@@ -848,6 +848,75 @@ fn company_screens_render_in_the_demo_shell() {
     assert!(shell.toast_text().is_none() || shell.toast_text().is_some());
 }
 
+/// P29 QA-16: signing out leaves nothing of this user's windows for the
+/// next person who opens the company (a plain close keeps them).
+#[test]
+fn signing_out_forgets_the_open_windows() {
+    // Opens Pay Bills in the demo company under its own layout key (the
+    // tenant's, as a real open uses; the demo starts on "default", which
+    // the closed shell writes to as well), then leaves with `how`. Returns
+    // what the store keeps for that company.
+    let leave = |how: &'static str| {
+        let dir = std::env::temp_dir().join(format!(
+            "cl-ui-signout-{}-{}",
+            std::process::id(),
+            how.replace('.', "-")
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = crate::prefs::UiStore::new(&dir);
+        let ctx = context();
+        let mut shell = Shell::new(ShellOptions {
+            demo: true,
+            store: Some(store.clone()),
+            ..ShellOptions::default()
+        });
+        settle(&ctx, &mut shell, WIDE);
+        let key = shell
+            .open_tenant
+            .as_ref()
+            .map(|(id, _)| id.to_string())
+            .expect("the demo company");
+        let banner = shell.company.clone();
+        shell.set_company(&key, banner);
+        shell.dispatch_now(CommandId::new("vendors.pay_bills"));
+        settle(&ctx, &mut shell, WIDE);
+        assert_eq!(shell.company_key, key);
+        shell.save_layout();
+        assert!(
+            format!("{:?}", store.load_layout(&key)).contains("vendors.pay_bills"),
+            "the company's saved layout names Pay Bills before leaving"
+        );
+        shell.dispatch_now(CommandId::new(how));
+        let mut rounds = 0;
+        while shell.windows.prompt().is_some() {
+            let _ = shell
+                .windows
+                .answer_prompt(crate::windows::PromptAnswer::Discard);
+            shell.dispatch_now(CommandId::new(how));
+            rounds += 1;
+            assert!(rounds < 10, "{how} keeps prompting");
+        }
+        settle(&ctx, &mut shell, WIDE);
+        assert!(shell.company.is_none(), "{how} closed the company");
+        assert_ne!(shell.company_key, key);
+        let kept = format!("{:?}", store.load_layout(&key));
+        let _ = std::fs::remove_dir_all(dir);
+        kept
+    };
+    // A plain close keeps the windows for the next open by the same user.
+    let closed = leave("file.close_company");
+    assert!(
+        closed.contains("vendors.pay_bills"),
+        "a plain close keeps the layout: {closed}"
+    );
+    // A sign-out leaves nothing of them for the next person.
+    let signed_out = leave("file.sign_out");
+    assert!(
+        !signed_out.contains("vendors.pay_bills") && signed_out.contains("tabs: []"),
+        "the next user does not get Pay Bills back: {signed_out}"
+    );
+}
+
 /// The interview moves through its pages with the form commands, refuses
 /// to leave the first page without a name, and Esc reverts then closes.
 #[test]
@@ -1017,7 +1086,7 @@ fn make_portable_copy_is_removed_q268() {
     let shell = Shell::new(ShellOptions::default());
     assert!(shell.find_command("file.portable_copy").is_none());
     assert!(commands::find("file.portable_copy").is_none());
-    let file: Vec<String> = super::menu::rows(Menu::File)
+    let file: Vec<String> = super::menu::rows(Menu::File, &cl_model::permissions::Rights::all())
         .iter()
         .map(|r| r.label.to_ascii_lowercase())
         .collect();
@@ -1681,4 +1750,99 @@ fn close_company_switches_back_even_when_its_group_is_dropped() {
     assert!(matches!(r, Ok(Ok(()))), "{r:?}");
     assert_eq!(session.scope(), cl_api::Scope::Workspace);
     let _ = q.shutdown(Duration::from_secs(1), None);
+}
+
+/// P29: an A/P user (the demo's developer switch) has no Create Invoice
+/// anywhere: not in the menu, not in the palette, and a forced command or
+/// a screen's request to open it shows the refusal instead of the form.
+#[test]
+fn an_ap_user_cannot_open_invoices() {
+    let mut shell = demo();
+    shell.dispatch_now(CommandId::new("dev.demo_rights_ap"));
+    let rights = shell.rights();
+    assert!(!rights.is_admin());
+    let invoice = CommandId::new("clients.create_invoice");
+    assert!(
+        !super::menu::rows(Menu::Clients, &rights)
+            .iter()
+            .any(|r| r.id == invoice)
+    );
+    assert!(
+        !super::palette::matches_for("create invoice", false, &rights)
+            .iter()
+            .any(|c| c.id == invoice)
+    );
+    // A forced command (a shortcut, a script) opens nothing.
+    shell.dispatch_now(invoice);
+    assert!(shell.windows.find_kind(invoice).is_none());
+    // A screen's request goes through the same door and says why.
+    if let Some(link) = shell.company_link().cloned() {
+        link.push(crate::company::CompanyEvent::OpenWindow(invoice));
+    }
+    shell.apply_events_now();
+    let id = shell.windows.find_kind(invoice).expect("refusal window");
+    assert_eq!(
+        shell.windows.get(id).expect("w").screen.state()["refused"],
+        true
+    );
+    // Enter Bill is the A/P user's own.
+    let bill = CommandId::new("vendors.enter_bill");
+    shell.dispatch_now(bill);
+    let bill_id = shell.windows.find_kind(bill).expect("bill");
+    assert_ne!(
+        shell.windows.get(bill_id).expect("w").screen.state()["refused"],
+        true
+    );
+    // Back to Admin: everything again.
+    shell.dispatch_now(CommandId::new("dev.demo_rights_all"));
+    assert!(shell.rights().is_admin());
+    assert!(
+        super::menu::rows(Menu::Clients, &shell.rights())
+            .iter()
+            .any(|r| r.id == invoice)
+    );
+}
+
+/// P29: a view-only user's lists take no changes from the keyboard.
+#[test]
+fn a_view_only_list_takes_no_changes() {
+    use cl_model::permissions::{Resource, Rights};
+    let accounts = CommandId::new("lists.chart_of_accounts");
+    let view = Rights::view_only();
+    assert_eq!(
+        super::read_only_list(&view, CommandId::new("list.new"), accounts),
+        Some(Resource::Accounts)
+    );
+    assert_eq!(
+        super::read_only_list(&view, CommandId::new("list.show_inactive"), accounts),
+        None
+    );
+    assert_eq!(
+        super::read_only_list(&Rights::all(), CommandId::new("list.new"), accounts),
+        None
+    );
+    // Not a list window: nothing to refuse here.
+    assert_eq!(
+        super::read_only_list(
+            &view,
+            CommandId::new("list.new"),
+            CommandId::new("nav.home")
+        ),
+        None
+    );
+}
+
+/// Security review minor 8: behind the idle lock the control channel's
+/// screen state says only that the app is locked.
+#[test]
+fn the_control_channel_sees_only_locked_behind_the_idle_lock() {
+    let mut shell = demo();
+    shell.run(None, cl_model::CommandId::new("vendors.write_check"));
+    let open = shell.active_screen_state();
+    assert_eq!(open["screen"], "write_check");
+    shell.idle.lock_now();
+    assert_eq!(
+        shell.active_screen_state(),
+        serde_json::json!({ "locked": true })
+    );
 }

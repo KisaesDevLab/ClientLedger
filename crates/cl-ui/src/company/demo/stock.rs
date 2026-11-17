@@ -417,6 +417,7 @@ fn add_account(
             created_at: Some(DemoState::now()),
             updated_at: Some(DemoState::now()),
             card_last4: None,
+            is_sensitive: false,
         });
     id
 }

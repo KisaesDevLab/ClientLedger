@@ -13,6 +13,7 @@ mod common;
 mod contract_accounts;
 mod contract_ap_void;
 mod contract_audit;
+mod contract_auth;
 mod contract_bank_import;
 mod contract_bank_postings;
 mod contract_batch;
@@ -25,6 +26,7 @@ mod contract_cash_basis_spf;
 mod contract_census;
 mod contract_check_panel;
 mod contract_closed_period;
+mod contract_closing_admin;
 mod contract_companies;
 mod contract_conflict;
 mod contract_contacts;
@@ -68,6 +70,7 @@ mod contract_report_defs;
 mod contract_reports_exact;
 mod contract_reports_p28;
 mod contract_resources;
+mod contract_rights;
 mod contract_run_due;
 mod contract_sales_receipts;
 mod contract_sales_tax_documents;
@@ -76,9 +79,12 @@ mod contract_sales_tax_liability;
 mod contract_sales_tax_pay;
 mod contract_sales_tax_setup;
 mod contract_sales_tax_ssuta;
+mod contract_sensitive;
 mod contract_session;
 mod contract_tags;
+mod contract_team;
 mod contract_templates;
+mod contract_thresholds_1099;
 // A09: `.clreport` transfer (U-220, WP-A) and the tenant-archive round
 // trip of memorized reports (AC3, WP-B).
 mod contract_report_defs_archive;
@@ -530,6 +536,10 @@ fn main() -> std::process::ExitCode {
         (
             "audit::delete_keeps_every_line_in_the_audit_trail",
             contract_audit::delete_keeps_every_line_in_the_audit_trail,
+        ),
+        (
+            "audit::viewer_pages_and_filters",
+            contract_audit::viewer_pages_and_filters,
         ),
         (
             "money::seeded_amounts_round_trip_string_equal",
@@ -1308,6 +1318,82 @@ fn main() -> std::process::ExitCode {
         (
             "reconcile::undo_admin_only",
             contract_reconcile::undo_admin_only,
+        ),
+        (
+            "rights::me_reports_the_role_and_the_map",
+            contract_rights::me_reports_the_role_and_the_map,
+        ),
+        (
+            "rights::ap_is_refused_invoices_and_runs_ap_aging",
+            contract_rights::ap_is_refused_invoices_and_runs_ap_aging,
+        ),
+        (
+            "rights::ap_saves_a_bill_and_ar_saves_an_invoice",
+            contract_rights::ap_saves_a_bill_and_ar_saves_an_invoice,
+        ),
+        (
+            "rights::ap_hidden_reports_are_refused",
+            contract_rights::ap_hidden_reports_are_refused,
+        ),
+        (
+            "rights::ar_hidden_reports_are_refused",
+            contract_rights::ar_hidden_reports_are_refused,
+        ),
+        (
+            "sensitive::payroll_hidden_from_bookkeeper",
+            contract_sensitive::payroll_hidden_from_bookkeeper,
+        ),
+        (
+            "sensitive::doors_match_the_engine",
+            contract_sensitive::doors_match_the_engine,
+        ),
+        (
+            "auth::temporary_password_must_be_changed",
+            contract_auth::temporary_password_must_be_changed,
+        ),
+        (
+            "auth::five_wrong_passwords_lock_until_unlocked",
+            contract_auth::five_wrong_passwords_lock_until_unlocked,
+        ),
+        (
+            "auth::recovery_key_works_once",
+            contract_auth::recovery_key_works_once,
+        ),
+        (
+            "team::add_is_view_only_until_the_row_is_written",
+            contract_team::add_is_view_only_until_the_row_is_written,
+        ),
+        (
+            "team::non_admin_is_refused_team_changes",
+            contract_team::non_admin_is_refused_team_changes,
+        ),
+        (
+            "team::temporary_password_is_refused_for_yourself",
+            contract_team::temporary_password_is_refused_for_yourself,
+        ),
+        (
+            "thresholds_1099::admin_sets_and_clears_thresholds",
+            contract_thresholds_1099::admin_sets_and_clears_thresholds,
+        ),
+        (
+            "thresholds_1099::bookkeeper_is_refused_threshold_changes",
+            contract_thresholds_1099::bookkeeper_is_refused_threshold_changes,
+        ),
+        (
+            "closing_admin::bookkeeper_cannot_move_the_closing_date",
+            contract_closing_admin::bookkeeper_cannot_move_the_closing_date,
+        ),
+        (
+            "closing_admin::closed_period_edit_is_in_the_exceptions_report",
+            contract_closing_admin::closed_period_edit_is_in_the_exceptions_report,
+        ),
+        (
+            "closing_admin::closed_period_void_delete_and_batch_are_in_the_exceptions_report",
+            contract_closing_admin::closed_period_void_delete_and_batch_are_in_the_exceptions_report,
+        ),
+        (
+            "closing_admin::bookkeeper_closed_period_edit_is_in_the_exceptions_report",
+            contract_closing_admin::bookkeeper_closed_period_edit_is_in_the_exceptions_report,
         ),
         (
             "reconcile::discrepancy_lists_changed_and_backdated_entries",

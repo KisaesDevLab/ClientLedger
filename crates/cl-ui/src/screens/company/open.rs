@@ -88,6 +88,10 @@ pub struct OpenCompanyScreen {
     practice_pending: bool,
     /// The role of the company being opened, sent with its Opened.
     opening_role: Option<String>,
+    /// P29 WP2: the sign-in form (moved to `screens::login`).
+    signin: crate::screens::login::SignInPanel,
+    /// P29 WP4: `Forgot password?`: the recovery form.
+    recovery: Option<crate::screens::recovery::RecoveryPanel>,
 }
 
 #[derive(Clone, Debug)]
@@ -103,7 +107,13 @@ struct Row {
 }
 
 /// What opening a company learned (tenant, name, colour, closing date).
-type Opened = (TenantId, String, Accent, Option<cl_core::CalendarDate>);
+type Opened = (
+    TenantId,
+    String,
+    Accent,
+    Option<cl_core::CalendarDate>,
+    cl_model::permissions::Rights,
+);
 
 #[derive(Clone, Debug)]
 struct SignedIn {
@@ -118,11 +128,14 @@ impl OpenCompanyScreen {
     #[must_use]
     pub fn new(link: Arc<CompanyLink>) -> OpenCompanyScreen {
         let group = link.group().and_then(Result::ok);
-        let stage = if link.is_demo() || link.session().is_some() {
+        let stage = if link.signed_in() {
             Stage::Ready
+        } else if link.is_demo() {
+            Stage::SignIn
         } else {
             Stage::Probing
         };
+        let signin = crate::screens::login::SignInPanel::new(Arc::clone(&link));
         OpenCompanyScreen {
             link,
             group,
@@ -151,6 +164,8 @@ impl OpenCompanyScreen {
             retry_open: None,
             practice_pending: false,
             opening_role: None,
+            signin,
+            recovery: None,
         }
     }
 
@@ -269,29 +284,6 @@ impl OpenCompanyScreen {
         .ok();
     }
 
-    fn start_sign_in(&mut self) {
-        let (Some(group), Some(client)) = (self.group.as_ref(), self.link.client().cloned()) else {
-            return;
-        };
-        let email = self.email.trim().to_string();
-        let password = Secret::new(std::mem::take(&mut self.password));
-        self.busy = Some("open.signin.working");
-        self.signin_task = spawn_lifecycle(&self.link, group, move || async move {
-            match client.login(&email, &password).await? {
-                LoginOutcome::Session(session) => {
-                    let display = email.split('@').next().unwrap_or("Owner").to_string();
-                    Ok(SignedIn {
-                        session,
-                        user: display.clone(),
-                        recovery_key: None,
-                    })
-                }
-                LoginOutcome::TfaRequired(_) => Err(CompanyError::Unavailable("tfa")),
-            }
-        })
-        .ok();
-    }
-
     fn open_selected(&mut self) {
         let Some(row) = self.companies.get(self.selected).cloned() else {
             return;
@@ -312,6 +304,8 @@ impl OpenCompanyScreen {
             demo.open = Some(row.tenant_id);
             drop(demo);
             self.link.push(CompanyEvent::CompanyRole(row.role.clone()));
+            // The demo has every right; a developer command narrows them.
+            self.link.set_rights(cl_model::permissions::Rights::all());
             self.link.push(CompanyEvent::Opened {
                 tenant_id: row.tenant_id,
                 name: row.name,
@@ -338,11 +332,14 @@ impl OpenCompanyScreen {
                 .unwrap_or_default();
             crate::screens::preferences::ai::push_at_open(&session, secrets.as_ref(), &prefs).await;
             let settings = session.company_settings().await.ok();
+            // P29: the role is per company, so its rights are read again.
+            let rights = crate::company::read_rights(&session, row.tenant_id, &row.role).await;
             Ok((
                 row.tenant_id,
                 row.name,
                 row.accent,
                 settings.and_then(|s| s.lock_date),
+                rights,
             ))
         })
         .ok();
@@ -459,6 +456,8 @@ impl OpenCompanyScreen {
             match r {
                 Ok(s) => {
                     self.link.set_session(Some(s.session));
+                    self.link
+                        .set_signed_in_email(Some(self.email.trim().to_string()));
                     self.link.push(CompanyEvent::SignedIn { user: s.user });
                     if let Some(key) = s.recovery_key {
                         // Shown once by the recovery-key window (Q-210).
@@ -495,10 +494,11 @@ impl OpenCompanyScreen {
             self.open_task = None;
             self.busy = None;
             match r {
-                Ok((tenant_id, name, accent, closed_through)) => {
+                Ok((tenant_id, name, accent, closed_through, rights)) => {
                     if let Some(role) = self.opening_role.take() {
                         self.link.push(CompanyEvent::CompanyRole(role));
                     }
+                    self.link.set_rights(rights);
                     self.link.push(CompanyEvent::Opened {
                         tenant_id,
                         name,
@@ -518,6 +518,7 @@ impl OpenCompanyScreen {
                 Ok(c) => {
                     // Made by this user, who owns it.
                     self.link.push(CompanyEvent::CompanyRole("owner".into()));
+                    self.link.set_rights(cl_model::permissions::Rights::all());
                     self.link.push(CompanyEvent::Opened {
                         tenant_id: c.tenant_id,
                         name: cl_company::SAMPLE_NAME.into(),
@@ -613,18 +614,31 @@ impl OpenCompanyScreen {
                 },
                 Color32::from_rgb(row.accent.0[0], row.accent.0[1], row.accent.0[2]),
             );
-            p.text(
+            // P29 QA-1: both lines end with "…" inside the card (clear of
+            // the Enter chip), never past its border.
+            let room = (rect.width() - 20.0 - if selected { 76.0 } else { 16.0 }).max(40.0);
+            let line = |text: &str, font: egui::FontId, color: Color32| {
+                let mut job =
+                    egui::text::LayoutJob::simple_singleline(text.to_owned(), font, color);
+                job.wrap = egui::text::TextWrapping::truncate_at_width(room);
+                ui.painter().layout_job(job)
+            };
+            p.galley(
                 egui::pos2(rect.left() + 20.0, rect.top() + 14.0),
-                egui::Align2::LEFT_TOP,
-                &row.name,
-                egui::FontId::new(15.0, crate::fonts::bold()),
+                line(
+                    &row.name,
+                    egui::FontId::new(15.0, crate::fonts::bold()),
+                    tokens.text_primary,
+                ),
                 tokens.text_primary,
             );
-            p.text(
+            p.galley(
                 egui::pos2(rect.left() + 20.0, rect.top() + 38.0),
-                egui::Align2::LEFT_TOP,
-                &row.meta,
-                egui::FontId::proportional(12.0),
+                line(
+                    &row.meta,
+                    egui::FontId::proportional(12.0),
+                    tokens.text_secondary,
+                ),
                 tokens.text_secondary,
             );
             if selected {
@@ -701,20 +715,57 @@ impl OpenCompanyScreen {
     }
 
     fn signin_panel(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        form::card(ui, tokens, |ui| {
-            form::heading(ui, tokens, &t("open.signin.title"));
-            form::field(ui, &t("open.setup.email"), &mut self.email);
-            let r = form::password(ui, &t("open.setup.password"), &mut self.password);
-            ui.add_space(6.0);
-            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if self.busy.is_some() {
-                form::progress_line(ui, tokens, &t("open.signin.working"));
-            } else if primary_button(ui, &t("open.signin.go")).clicked() || enter {
-                self.start_sign_in();
+        use crate::screens::login::SignInEvent;
+        self.signin.try_auto();
+        match self.signin.ui(ui, tokens) {
+            Some(SignInEvent::SignedIn {
+                session,
+                name,
+                email,
+                password_changed,
+            }) => {
+                if session.is_some() {
+                    self.link.set_session(session);
+                }
+                if password_changed {
+                    // Q-P29o: a new password ends automatic sign-in.
+                    self.link.clear_auto_sign_in();
+                }
+                self.link.set_signed_in_email(Some(email));
+                self.link.push(CompanyEvent::SignedIn { user: name });
+                self.stage = Stage::Ready;
+                self.loaded_once = false;
+                self.recovery = None;
+                self.error = None;
+                self.notice = None;
             }
-        });
+            Some(SignInEvent::Forgot) => {
+                self.recovery = Some(crate::screens::recovery::RecoveryPanel::new(
+                    Arc::clone(&self.link),
+                    &self.signin.email,
+                ));
+            }
+            None => {}
+        }
     }
 
+    /// Forgot password? (P29 WP4): the recovery form in place of sign-in.
+    fn recovery_panel(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        use crate::screens::recovery::RecoveryEvent;
+        let Some(panel) = self.recovery.as_mut() else {
+            return;
+        };
+        match panel.ui(ui, tokens) {
+            Some(RecoveryEvent::Recovered(email)) => {
+                self.recovery = None;
+                self.signin = crate::screens::login::SignInPanel::new(Arc::clone(&self.link));
+                self.signin.email = email;
+                self.notice = Some(t("reset.done"));
+            }
+            Some(RecoveryEvent::Cancel) => self.recovery = None,
+            None => {}
+        }
+    }
     fn restore_panel(&mut self, ui: &mut Ui, tokens: &Tokens) {
         form::card(ui, tokens, |ui| {
             form::heading(ui, tokens, &t("open.restore.title"));
@@ -870,6 +921,17 @@ impl Screen for OpenCompanyScreen {
     fn ui(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
         self.poll();
+        // P29 WP2: after Sign out the window asks for a sign-in again.
+        if self.stage == Stage::Ready && !self.link.signed_in() && self.busy.is_none() {
+            self.stage = if self.link.is_demo() {
+                Stage::SignIn
+            } else {
+                Stage::Probing
+            };
+            self.companies.clear();
+            self.loaded_once = false;
+            self.signin = crate::screens::login::SignInPanel::new(Arc::clone(&self.link));
+        }
         // A window opened before the engine was up asks again once it runs;
         // otherwise it would say "still starting up" for good.
         if self.stage == Stage::EngineNotReady {
@@ -990,6 +1052,9 @@ impl OpenCompanyScreen {
                                 form::hint(ui, &tokens, &t("open.engine_not_ready"));
                             }
                             Stage::FirstRun => self.setup_panel(ui, &tokens),
+                            Stage::SignIn if self.recovery.is_some() => {
+                                self.recovery_panel(ui, &tokens);
+                            }
                             Stage::SignIn => self.signin_panel(ui, &tokens),
                             Stage::Ready => {}
                         }
@@ -1022,6 +1087,10 @@ impl OpenCompanyScreen {
             "busy": self.busy.is_some(),
             "error": self.error.is_some(),
             "practice_pending": self.practice_pending,
+            "signin_message": self.signin.message(),
+            "must_change": self.signin.must_change(),
+            "forgot_open": self.recovery.is_some(),
+            "recovery_message": self.recovery.as_ref().and_then(crate::screens::recovery::RecoveryPanel::message),
         })
     }
 }

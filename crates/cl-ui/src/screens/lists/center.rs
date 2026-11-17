@@ -885,7 +885,14 @@ impl CenterScreen {
         if let Some(old) = self.detail.take().filter(|o| o.id == id) {
             d.profile_value = old.profile_value;
         }
-        let want_profile = vendor && self.role == Role::Vendor && d.profile_value.is_none();
+        // P29 review B2: not asked while the engine refuses it.
+        let want_profile = vendor
+            && self.role == Role::Vendor
+            && d.profile_value.is_none()
+            && self
+                .link
+                .rights()
+                .door_open(cl_model::permissions::Door::Vendor1099Profile);
         if self.link.is_demo() {
             if let Some(state) = self.link.demo_state() {
                 let (rows, total) =
@@ -1057,17 +1064,26 @@ impl CenterScreen {
             Role::Client => "center.new_client",
             Role::Vendor => "center.new_vendor",
         };
+        let kind = match self.role {
+            Role::Client => CLIENTS_KIND,
+            Role::Vendor => VENDORS_KIND,
+        };
+        let write = super::can_change(&self.link, kind);
         ui.horizontal_wrapped(|ui| {
-            let b = |ui: &mut Ui, key: &str, cmd: &str| {
+            let tip = |key: &str, cmd: &str| {
                 let hint = shortcut_hint(cmd);
-                let tip = if hint.is_empty() {
+                if hint.is_empty() {
                     t(key)
                 } else {
                     format!("{} ({hint})", t(key))
-                };
-                ui.button(t(key)).on_hover_text(tip)
+                }
             };
-            if b(ui, new_key, "list.new").clicked() {
+            let b =
+                |ui: &mut Ui, key: &str, cmd: &str| ui.button(t(key)).on_hover_text(tip(key, cmd));
+            let w = |ui: &mut Ui, key: &str, cmd: &str| {
+                super::change_button(ui, write, t(key), tip(key, cmd))
+            };
+            if w(ui, new_key, "list.new").clicked() {
                 self.open_new();
             }
             if b(ui, "center.edit", "edit.edit_transaction").clicked() {
@@ -1078,13 +1094,13 @@ impl CenterScreen {
             } else {
                 "center.make_inactive"
             };
-            if b(ui, toggle_key, "list.toggle_active").clicked() {
+            if w(ui, toggle_key, "list.toggle_active").clicked() {
                 self.toggle_active();
             }
             if b(ui, "center.quick_report", "list.quick_report").clicked() {
                 self.open_report();
             }
-            if b(ui, "center.merge", "list.merge").clicked() {
+            if w(ui, "center.merge", "list.merge").clicked() {
                 self.open_merge();
             }
             // P21: Receive Payment from the selected client.

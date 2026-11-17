@@ -587,6 +587,17 @@ pub enum ApiError {
     /// Never echoed.
     #[error("sign-in password rejected (ACCOUNT_PASSWORD_INVALID)")]
     AccountPasswordRejected,
+    /// The user signed in with a temporary password and must choose a new
+    /// one before anything else works (403 `PASSWORD_CHANGE_REQUIRED`,
+    /// U-230). Not counted as a rights refusal.
+    #[error("a new password is needed first (PASSWORD_CHANGE_REQUIRED)")]
+    PasswordChangeRequired,
+    /// The engine hides sensitive accounts from this user (U-33): a
+    /// transaction that uses one (403 `SENSITIVE_ACCOUNT`) or a report that
+    /// still needs them (403 `SENSITIVE_HIDDEN`). Nothing was saved. Not
+    /// counted as a rights refusal (the rights did not change).
+    #[error("hidden for this role ({0:?})")]
+    Sensitive(SensitiveRefusal),
     /// The engine sent money as a JSON number where cl-api needs the exact
     /// decimal string (for example a register from an engine without
     /// `register-exact-v1`). Amounts that may have been rounded are never
@@ -742,6 +753,37 @@ impl ApiError {
     }
 }
 
+/// What the engine hides from a user without the `sensitive_accounts`
+/// right (U-33, `sensitive-accounts-v1`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SensitiveRefusal {
+    /// The transaction has a line on an account hidden for this role (403
+    /// `SENSITIVE_ACCOUNT`): it can't be opened, changed, voided or posted.
+    Transaction,
+    /// The report or screen needs access to sensitive accounts (403
+    /// `SENSITIVE_HIDDEN`).
+    Report,
+}
+
+/// 403 `SENSITIVE_ACCOUNT` (U-33).
+pub const SENSITIVE_ACCOUNT: &str = "SENSITIVE_ACCOUNT";
+/// 403 `SENSITIVE_HIDDEN` (U-33).
+pub const SENSITIVE_HIDDEN: &str = "SENSITIVE_HIDDEN";
+/// 403 `SENSITIVE_DEFINITION` (U-33 part 2): a saved report naming a hidden
+/// account can't be changed by this user (read through
+/// `definition_refusal`).
+pub const SENSITIVE_DEFINITION: &str = "SENSITIVE_DEFINITION";
+/// 422 `SENSITIVE_NOT_ALLOWED` (U-33): a bank, credit card or built-in
+/// account (or a parent of one) can't be marked sensitive.
+pub const SENSITIVE_NOT_ALLOWED: &str = "SENSITIVE_NOT_ALLOWED";
+
+/// True when the engine refused to mark this account sensitive (422
+/// `SENSITIVE_NOT_ALLOWED`).
+#[must_use]
+pub fn is_sensitive_not_allowed(e: &ApiError) -> bool {
+    matches!(e, ApiError::Validation(v) if v.code().is_some_and(|c| c.as_str() == SENSITIVE_NOT_ALLOWED))
+}
+
 /// What an earlier request with the same idempotency key saved (422
 /// `IDEMPOTENCY_KEY_REUSED` `details {entityType, entityId}`, U-18).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -884,6 +926,18 @@ fn special_message(e: &ApiError) -> Option<(&'static str, Option<&'static str>)>
     if matches!(e, ApiError::ReportShape { .. }) {
         return Some(("error.api.report_shape", Some("fix.api.update_engine")));
     }
+    // P29 review: a bank, card or built-in account created, moved or
+    // retyped under a sensitive account (422 `SENSITIVE_NOT_ALLOWED`).
+    if is_sensitive_not_allowed(e) {
+        return Some((
+            "error.api.sensitive_not_allowed",
+            Some("fix.api.sensitive_not_allowed"),
+        ));
+    }
+    // The desktop audit trail export is the owner's (403 `OWNER_REQUIRED`).
+    if matches!(e, ApiError::Forbidden { code: Some(c) } if c.as_str() == "OWNER_REQUIRED") {
+        return Some(("error.api.owner_required", Some("fix.api.owner_required")));
+    }
     match e {
         ApiError::OutcomeUnknown { keyed: true, .. } => {
             return Some((
@@ -1010,6 +1064,16 @@ impl OwnerFacing for ApiError {
                 ("error.api.closing_password_attempts", Some("fix.api.wait"))
             }
             ApiError::AccountPasswordRejected => ("error.api.account_password_wrong", None),
+            ApiError::PasswordChangeRequired => (
+                "error.api.password_change_required",
+                Some("fix.api.password_change_required"),
+            ),
+            ApiError::Sensitive(SensitiveRefusal::Transaction) => {
+                ("error.api.sensitive_transaction", Some("fix.api.ask_admin"))
+            }
+            ApiError::Sensitive(SensitiveRefusal::Report) => {
+                ("error.api.sensitive_report", Some("fix.api.ask_admin"))
+            }
             ApiError::InexactMoney { .. } => ("error.api.inexact_money", Some("fix.api.report")),
             ApiError::OfflineUnavailable { .. } => ("error.api.offline", Some("fix.api.offline")),
             ApiError::FeatureNotEnabled { .. } => {
@@ -1460,6 +1524,7 @@ pub fn engine_refusal(status: u16, body: &Value) -> ApiError {
 }
 
 /// The §2.4 table.
+#[allow(clippy::too_many_lines, reason = "one arm per engine status and code")]
 fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: RouteKind) -> Mapped {
     let parsed = EngineErrorBody::parse(body);
     let code = parsed.as_ref().and_then(|b| b.code.clone());
@@ -1521,6 +1586,9 @@ fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: Ro
             fin(ApiError::ClosingPasswordOwnerRequired)
         }
         403 if has("ACCOUNT_PASSWORD_INVALID") => fin(ApiError::AccountPasswordRejected),
+        403 if has("PASSWORD_CHANGE_REQUIRED") => fin(ApiError::PasswordChangeRequired),
+        403 if has(SENSITIVE_ACCOUNT) => fin(ApiError::Sensitive(SensitiveRefusal::Transaction)),
+        403 if has(SENSITIVE_HIDDEN) => fin(ApiError::Sensitive(SensitiveRefusal::Report)),
         403 => fin(ApiError::Forbidden { code }),
         404 => match code {
             Some(c) if c.as_str() == "NOT_AVAILABLE_IN_DESKTOP" => {

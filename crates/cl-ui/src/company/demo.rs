@@ -5,11 +5,18 @@ use cl_core::ids::TenantId;
 use cl_core::{CalendarDate, Timestamp};
 use cl_settings::{ACCENT_PALETTE, Accent};
 
+// P29: the Audit Trail viewer's synthetic rows.
+pub mod audit;
+// P29: sign-in, passwords and recovery.
+pub mod auth;
 pub mod batch;
+pub mod team;
 // P20: Create Invoice (the engine's sales money rule, held to the golden file).
 pub mod billable;
 pub mod bills;
 pub mod checks;
+// P29: Set Closing Date.
+pub mod closing;
 pub mod contacts;
 pub mod daily_sales;
 pub mod deposits;
@@ -87,6 +94,9 @@ pub struct DemoState {
     pub chart: Option<Vec<cl_api::Account>>,
     /// Accounts marked sensitive in the demo (Q-157).
     pub sensitive: std::collections::BTreeSet<cl_core::ids::AccountId>,
+    /// The signed-in demo user lacks the `sensitive_accounts` right (U-33):
+    /// the demo engine leaves the marked accounts out, as the engine does.
+    pub hides_sensitive: bool,
     /// The open company's clients and vendors as the demo "engine" keeps
     /// them (built on first use from the sample fixture, P11).
     pub contacts: Option<Vec<cl_api::Contact>>,
@@ -108,6 +118,10 @@ pub struct DemoState {
     /// preference, Q-180).
     pub required_tag_groups:
         std::collections::BTreeMap<cl_core::ids::TagGroupId, std::collections::BTreeSet<String>>,
+    /// Q-276: the demo company's "tag on every line" option.
+    pub require_tag_every_line: bool,
+    /// Q-276: the demo company's default tag.
+    pub default_tag: Option<cl_core::ids::TagId>,
     /// Tags merged or deleted in the demo (their usage moved or gone).
     pub tags_gone: std::collections::BTreeSet<cl_core::ids::TagId>,
     /// Transactions recorded or changed in the demo registers (P12).
@@ -162,6 +176,12 @@ pub struct DemoState {
     /// developer command `dev.demo_card_digits` turns it on and off for
     /// the Chart of Accounts scenario.
     pub card_digits: bool,
+    /// P29: the demo's closing-date password (`None`: none set).
+    pub closing_password: Option<String>,
+    /// P29 WP8: the demo company's own 1099 amounts per box code.
+    pub thresholds_1099: std::collections::BTreeMap<String, cl_core::Money>,
+    /// P29: the demo's users, sign-in and recovery key.
+    pub auth: auth::DemoAuth,
     /// Invoices the demo engine keeps (P20).
     pub invoices: invoices::DemoInvoices,
     /// Price levels and the clients on them (P20).
@@ -270,6 +290,7 @@ impl DemoState {
             open: Some(id(1)),
             chart: None,
             sensitive: std::collections::BTreeSet::new(),
+            hides_sensitive: false,
             contacts: None,
             contact_names: std::collections::BTreeMap::new(),
             merged: Vec::new(),
@@ -278,6 +299,8 @@ impl DemoState {
             tags: None,
             tag_groups: None,
             required_tag_groups: std::collections::BTreeMap::new(),
+            require_tag_every_line: false,
+            default_tag: None,
             tags_gone: std::collections::BTreeSet::new(),
             ledger: register::DemoLedger::default(),
             checks: checks::DemoChecks::default(),
@@ -302,6 +325,9 @@ impl DemoState {
             // The demo engine has document drafts and attach (A04).
             drafts: drafts::DemoDrafts::on(),
             card_digits: false,
+            closing_password: Some(register::DEMO_CLOSING_PASSWORD.to_owned()),
+            thresholds_1099: std::collections::BTreeMap::new(),
+            auth: auth::DemoAuth::default(),
             invoices: invoices::DemoInvoices::default(),
             price_levels: price_levels::DemoPriceLevels::seeded(),
             layouts: layouts::DemoLayouts::seeded(),
@@ -314,6 +340,39 @@ impl DemoState {
             units: units::DemoUnits::default(),
             report_store: report_store::DemoReportStore::default(),
         }
+    }
+
+    /// The accounts hidden from the signed-in demo user (U-33): the marked
+    /// accounts and every sub-account under them; empty when the user sees
+    /// them.
+    #[must_use]
+    pub fn hidden_accounts(
+        &self,
+        chart: &[cl_api::Account],
+    ) -> std::collections::BTreeSet<cl_core::ids::AccountId> {
+        let mut out = std::collections::BTreeSet::new();
+        if !self.hides_sensitive {
+            return out;
+        }
+        out.extend(self.sensitive.iter().copied());
+        loop {
+            let before = out.len();
+            for a in chart {
+                if a.fields.parent_id.is_some_and(|p| out.contains(&p)) {
+                    out.insert(a.id);
+                }
+            }
+            if out.len() == before {
+                return out;
+            }
+        }
+    }
+
+    /// The engine's `hiddenNotice`: the user lacks the right and something
+    /// is marked (Q-P29b).
+    #[must_use]
+    pub fn hidden_notice(&self) -> bool {
+        self.hides_sensitive && !self.sensitive.is_empty()
     }
 
     /// The story date of the mockups.
@@ -435,6 +494,7 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
         consent,
         smtp: None,
         usage: Some(usage),
+        tags: Vec::new(),
         // The chart's own names (4000 is "Service Income" there).
         incomes: vec![
             named(&accounts, 4000, "Service Income"),
@@ -445,6 +505,7 @@ pub fn preferences_loaded_with(switches: DemoAi) -> crate::screens::preferences:
             named(&accounts, 6960, "Bad Debts"),
         ],
         sales_taxes: Vec::new(),
+        thresholds: None,
         done: true,
     }
 }
@@ -648,6 +709,7 @@ pub fn chart() -> Vec<cl_api::Account> {
                 created_at: Some(DemoState::now()),
                 updated_at: Some(DemoState::now()),
                 card_last4: None,
+                is_sensitive: false,
             }
         })
         .collect()

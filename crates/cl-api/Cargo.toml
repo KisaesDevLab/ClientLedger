@@ -8,6 +8,9 @@ description = "Typed client for the local MyBooks engine API (loopback HTTP, ses
 
 [dependencies]
 cl-core = { path = "../cl-core" }
+# The local date of an engine timestamp ("Changed on", P29 QA-8); MIT OR
+# Apache-2.0, already in the tree through cl-core and cl-ui.
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 # Page pictures go to the document reading assist as base64 (A03 U-92d);
 # MIT OR Apache-2.0, already in the tree through cl-docread.
 base64 = { version = "0.22.1", default-features = false, features = ["std"] }

@@ -396,6 +396,8 @@ fn save_changes_needs_the_right_to_change_it() {
         version: 2,
         kind: SavedKind::Builder,
         can_edit: false,
+        hidden_refs: false,
+        hidden_ids: Vec::new(),
         def: s.ed.definition().clone(),
         name: String::new(),
         group_id: None,
@@ -407,6 +409,91 @@ fn save_changes_needs_the_right_to_change_it() {
     assert!(s.ed.dirty() && !s.ed.can_save_changes());
     assert!(s.command(CommandId::new("builder.save_changes")));
     assert_eq!(s.save.state_name(), "idle", "nothing is sent");
+}
+
+/// U-33: a memorized report naming an account hidden for this role is
+/// read-only for that reason (not "only the author"), and the hidden id's
+/// chip reads "Hidden account" while an id the engine didn't list stays
+/// "name not found".
+#[test]
+fn a_report_with_hidden_accounts_is_read_only_for_that_reason() {
+    use super::lists::{Which, caption_of};
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    add(&mut s, RowKind::Text, "Note");
+    let mut saved = Saved {
+        id: "r1".into(),
+        version: 2,
+        kind: SavedKind::Builder,
+        can_edit: false,
+        hidden_refs: false,
+        hidden_ids: Vec::new(),
+        def: s.ed.definition().clone(),
+        name: String::new(),
+        group_id: None,
+        author: None,
+        updated_at: None,
+    };
+    assert_eq!(
+        super::save::read_only_key(&saved),
+        "builder.save.not_author"
+    );
+    saved.hidden_refs = true;
+    saved.hidden_ids = vec!["hidden-1".into()];
+    assert_eq!(
+        super::save::read_only_key(&saved),
+        "sensitive.definition_read_only"
+    );
+    s.ed.mark_saved(saved);
+    assert_eq!(
+        caption_of(&s, Which::Accounts, "hidden-1"),
+        crate::i18n::t("sensitive.hidden_account")
+    );
+    assert_eq!(
+        caption_of(&s, Which::Accounts, "gone-1"),
+        crate::i18n::t("builder.filter.unknown_name")
+    );
+    assert_eq!(
+        caption_of(&s, Which::Tags, "hidden-1"),
+        crate::i18n::t("builder.filter.unknown_name"),
+        "only accounts are hidden"
+    );
+    s.apply(Op::Name("Mine".into()));
+    assert!(s.ed.dirty() && !s.ed.can_save_changes());
+}
+
+/// The engine's 403 `SENSITIVE_DEFINITION` on Save changes turns it off
+/// and says why in plain words.
+#[test]
+fn a_hidden_account_refusal_says_so() {
+    let (_d, _l, mut s) = editor(BuilderSeed::Blank);
+    add(&mut s, RowKind::Text, "Note");
+    let saved = Saved {
+        id: "r1".into(),
+        version: 2,
+        kind: SavedKind::Builder,
+        can_edit: true,
+        hidden_refs: false,
+        hidden_ids: Vec::new(),
+        def: s.ed.definition().clone(),
+        name: String::new(),
+        group_id: None,
+        author: None,
+        updated_at: None,
+    };
+    s.ed.mark_saved(saved);
+    s.apply(Op::Name("Mine".into()));
+    assert!(s.ed.can_save_changes());
+    let e = cl_api::engine_refusal(
+        403,
+        &serde_json::json!({"error": {"message": "x", "code": "SENSITIVE_DEFINITION"}}),
+    );
+    super::save::refused_for_test(&mut s, &e);
+    assert!(!s.ed.can_save_changes());
+    assert!(s.ed.saved().is_some_and(|x| x.hidden_refs));
+    assert_eq!(
+        s.status.as_deref(),
+        Some(crate::i18n::t("sensitive.definition_read_only").as_str())
+    );
 }
 
 /// An editor on the shell's company with a dirty Gross profit report.
@@ -1116,6 +1203,8 @@ fn a_result_tab_memorized_as_a_new_report_opens_a_new_editor() {
         version: 1,
         kind: SavedKind::Builder,
         can_edit: true,
+        hidden_refs: false,
+        hidden_ids: Vec::new(),
         def: s.ed.definition().clone(),
         name: "Other".into(),
         group_id: None,
@@ -1208,6 +1297,8 @@ fn an_untouched_customize_of_a_memorized_standard_report_is_clean() {
         version: 1,
         kind: SavedKind::Standard,
         can_edit: true,
+        hidden_refs: false,
+        hidden_ids: Vec::new(),
         def: def.clone(),
         name: "My P&L".into(),
         group_id: None,

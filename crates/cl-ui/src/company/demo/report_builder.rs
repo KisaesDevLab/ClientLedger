@@ -1204,7 +1204,7 @@ pub fn run(d: &mut DemoState, req: &RunRequest, slow: bool) -> Result<BuilderRun
     let v = json!({
         "columns": plan.cols, "rows": rows,
         "meta": {"basis": req.reference.basis.map_or("accrual", cl_core::report::Basis::as_str),
-                 "dates": dates, "notes": notes, "truncated": cut, "hiddenNotice": null, "denied": denied,
+                 "dates": dates, "notes": notes, "truncated": cut, "hiddenNotice": d.hidden_notice().then_some(true), "denied": denied,
                  "preview": if preview { json!({"detailRowsPerLine": cl_api::resources::report_builder::PREVIEW_DETAIL_ROWS}) } else { Value::Null }},
         "fingerprint": fingerprint(&req.reference),
         "stamp": stamp(&books),

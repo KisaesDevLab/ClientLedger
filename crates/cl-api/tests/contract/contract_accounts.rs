@@ -239,7 +239,9 @@ pub fn parent_rules_u32(h: &Harness) {
     }
 }
 
-/// U-33: today an `isSensitive` field is dropped by the engine's schema.
+/// U-33: a create never marks an account sensitive (only the Admin's
+/// `PUT /accounts/{id}/sensitive` does); with `sensitive-accounts-v1` the
+/// account carries `isSensitive: false`, before it no key at all.
 pub fn sensitive_flag_u33(h: &Harness) {
     let s = &h.s1;
     let raw = h
@@ -257,7 +259,7 @@ pub fn sensitive_flag_u33(h: &Harness) {
     assert_eq!(raw.status, 201, "{}", raw.body);
     let flag = &raw.body["account"]["isSensitive"];
     if h.require_cap(Capabilities::ACCOUNT_SENSITIVE, "U-33") {
-        assert_eq!(flag, &json!(true));
+        assert_eq!(flag, &json!(false), "create ignores the flag");
     } else {
         assert!(flag.is_null(), "not stored today: {flag}");
     }

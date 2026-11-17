@@ -23,6 +23,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("reports.builder.opening_before", "Balance before {name}"),
     ("reports.builder.missing_deleted", "This report uses a name that was deleted."),
     ("reports.builder.missing_merged", "This report uses a name that was merged into another."),
+    ("reports.builder.hidden_for_role", "This report uses an account hidden for your role, so it can't run for you. Ask your Admin if you need it."),
+    ("reports.builder.all_denied", "Your role can't see any part of this report."),
     ("reports.builder.missing_merged_into", "A name it uses was merged into {name}."),
     ("reports.builder.use_merged", "Use {name}"),
     ("reports.builder.fix_in_builder", "Fix in the builder"),

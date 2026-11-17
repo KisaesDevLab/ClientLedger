@@ -150,6 +150,9 @@ pub(super) fn poll(w: &mut ReportWindow) {
                         Some(DefinitionRefusal::NotAuthor) => {
                             d.problem = Some("reports.memorize.not_author");
                         }
+                        Some(DefinitionRefusal::Hidden) => {
+                            d.problem = Some("sensitive.definition_refused");
+                        }
                         Some(DefinitionRefusal::TooLarge | DefinitionRefusal::Invalid { .. }) => {
                             d.problem = Some("reports.memorize.invalid");
                         }
@@ -390,14 +393,29 @@ pub(super) fn open_row(w: &mut ReportWindow, row: &DefinitionRow) {
 
 /// The catalog's "Memorized" section, narrowed by the catalog's search
 /// (every word in the name). Returns how many it lists.
+/// P29: a memorized standard report is listed only when the role includes
+/// its report's area (U-227); Report Builder rows are left to the engine.
+/// A Report Builder row the role can see no part of is not listed either
+/// (P29 QA-6).
+pub(super) fn role_includes(rights: &cl_model::permissions::Rights, r: &DefinitionRow) -> bool {
+    r.definition
+        .get("reportKey")
+        .and_then(serde_json::Value::as_str)
+        .and_then(cl_model::reports::find)
+        .is_none_or(|spec| rights.allows_report(spec.source))
+        && !(r.definition["kind"] == "builder"
+            && super::builder_run::wholly_denied(&r.definition, rights))
+}
+
 pub(super) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) -> usize {
     if !available(&w.link) {
         return 0;
     }
     let words: Vec<String> = w.search.split_whitespace().map(str::to_lowercase).collect();
+    let rights = w.link.rights();
     let matches = |r: &DefinitionRow| {
         let name = r.name.to_lowercase();
-        words.iter().all(|x| name.contains(x.as_str()))
+        words.iter().all(|x| name.contains(x.as_str())) && role_includes(&rights, r)
     };
     let shown = w.memo.list.iter().filter(|r| matches(r)).count();
     if !words.is_empty() && shown == 0 {
@@ -629,6 +647,8 @@ mod tag_tests {
             updated_at: None,
             can_edit: true,
             missing: Vec::new(),
+            hidden_refs: false,
+            hidden: Vec::new(),
         };
         super::open_row(&mut w, &row);
         assert_eq!(

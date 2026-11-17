@@ -295,3 +295,39 @@ fn no_fill_while_busy_or_read_only() {
     pick_line(&mut s, entry, "6400");
     assert_eq!(s.lines.value().lines[entry].amount, None);
 }
+
+/// P29 review S2: Paid with Personal Funds and the tag options: on, an
+/// untagged line is refused and nothing posts; off, it saves; a new form
+/// starts with the company's default tag in its header.
+#[test]
+fn tag_options_on_personal_funds() {
+    let (_d, link) = link();
+    let tag = {
+        let mut d = link.demo_state().expect("demo");
+        let t = d.tags_mut().iter().find(|t| t.is_active).expect("tag").id;
+        d.require_tag_every_line = true;
+        t
+    };
+    let mut s = screen(&link);
+    assert!(s.header.current().header_tags.is_empty(), "no default set");
+    fill(&mut s, "42.18", &[("6250", "42.18")]);
+    let before = posted(&link);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(posted(&link), before, "nothing posted");
+    assert_eq!(
+        s.state()["save"]["tag_refusal"].as_array().map(Vec::len),
+        Some(1)
+    );
+    link.demo_state().expect("demo").require_tag_every_line = false;
+    assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
+    assert_eq!(posted(&link), before + 1);
+    link.demo_state().expect("demo").default_tag = Some(tag);
+    let mut s = screen(&link);
+    assert_eq!(s.header.current().header_tags, vec![tag], "a new form");
+    // None on edits: the saved (untagged) entry opens without the default.
+    assert!(s.command(CommandId::new("form.prev_record")));
+    assert!(
+        s.header.current().header_tags.is_empty(),
+        "an edit keeps its own tags"
+    );
+}

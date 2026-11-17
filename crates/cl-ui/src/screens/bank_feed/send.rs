@@ -383,6 +383,22 @@ pub(crate) fn start(s: &mut BankFeedScreen, send: Send, password: Option<Secret>
     if s.view_only || s.act.is_some() {
         return;
     }
+    // P29 review B1 (Q-276, Q-180): every posting send is checked with the
+    // tag each line posts with. A rule's accept goes whole or not at all
+    // (the engine picks its rows): the rule must set a tag and every listed
+    // row of it must post with one.
+    s.tag_skipped.clear();
+    if let Send::Rule(r) = &send
+        && let Some(left) = super::tag_check::rule_refused(s, r)
+    {
+        s.tag_skipped = super::tag_check::names(s, &left);
+        s.notice = Some(("bank_feed.notice.tag_rule", left.len()));
+        return;
+    }
+    if let Some(key) = super::tag_check::refusal(s, &send) {
+        s.notice = Some((key, 1));
+        return;
+    }
     // PR-5: a line already in the books, or an Undo of a ticked entry,
     // asks first (a password retry was already asked about).
     if password.is_none()

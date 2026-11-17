@@ -207,9 +207,18 @@ impl EnterBillScreen {
             (BillKind::Bill, "bill.kind.bill"),
             (BillKind::Credit, "bill.kind.credit"),
         ] {
+            let allowed = self.kind_allowed(k);
+            let why = if allowed {
+                "bill.kind.locked"
+            } else {
+                "bill.kind.not_allowed"
+            };
             if ui
-                .add_enabled(can_switch, egui::RadioButton::new(kind == k, t(key)))
-                .on_disabled_hover_text(t("bill.kind.locked"))
+                .add_enabled(
+                    can_switch && (allowed || kind == k),
+                    egui::RadioButton::new(kind == k, t(key)),
+                )
+                .on_disabled_hover_text(t(why))
                 .clicked()
             {
                 self.set_kind(k);
@@ -1283,6 +1292,7 @@ impl EnterBillScreen {
         for p in &self.save.problems {
             ui.add(egui::Label::new(RichText::new(t(p.key().0)).color(tokens.warn_text)).wrap());
         }
+        crate::forms::tag_gate::show(ui, tokens, &self.save.tag_refusal);
         if let Some(key) = self.save.refusal {
             ui.add(egui::Label::new(RichText::new(t(key)).color(tokens.warn_text)).wrap());
         }

@@ -199,6 +199,14 @@ pub fn holds_bank_or_card_number(kind: AccountKind, detail: Option<&str>) -> boo
     crate::register::AccountClass::of(kind, detail).is_money_account()
 }
 
+/// True when the "Sensitive account" switch is offered (U-33, Q-P29d): never
+/// on a bank or credit card account, nor on a built-in (system) account; the
+/// engine refuses those with 422 `SENSITIVE_NOT_ALLOWED` anyway.
+#[must_use]
+pub fn sensitive_offered(kind: AccountKind, detail: Option<&str>, is_system: bool) -> bool {
+    !is_system && !holds_bank_or_card_number(kind, detail)
+}
+
 /// The detail type of a credit card account: the only accounts that take
 /// "Card ends in" digits (A03; the engine's rule, `document-drafts-v1`).
 pub const CREDIT_CARD_DETAIL: &str = "credit_card";

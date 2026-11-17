@@ -176,6 +176,17 @@ impl DepositScreen {
         }
     }
 
+    /// The tag rules on the deposit's lines (P29 WP7, Q-276). A deposit has
+    /// no header tag.
+    pub(crate) fn tag_gate(
+        &self,
+        form: &cl_model::forms::deposit::DepositForm,
+    ) -> Result<(), Vec<String>> {
+        let list = crate::forms::tag_gate::form_list(&self.tags, &self.link);
+        let lines = cl_model::forms::tag_rule::expense_lines(&[], &form.lines, &list, false);
+        crate::forms::tag_gate::check(&list, &lines, &self.accounts)
+    }
+
     fn refuse(&mut self, problems: Vec<DepositProblem>) {
         if let Some(first) = problems.first().copied() {
             self.focus_problem(first);
@@ -186,6 +197,10 @@ impl DepositScreen {
     /// A refused save's problems, checked again against the form as it is
     /// now: the ones the owner fixed go away.
     pub(crate) fn recheck_problems(&mut self) {
+        if !self.save.tag_refusal.is_empty() {
+            let form = self.compose();
+            self.save.tag_refusal = self.tag_gate(&form).err().unwrap_or_default();
+        }
         if self.save.problems.is_empty() {
             return;
         }
@@ -229,6 +244,7 @@ impl DepositScreen {
             return false;
         }
         self.save.problems.clear();
+        self.save.tag_refusal.clear();
         self.save.error = None;
         self.save.stale = false;
         self.save.notice = None;
@@ -245,6 +261,11 @@ impl DepositScreen {
                 return false;
             }
         };
+        // P29 WP7: the company's tag rules (Q-276, Q-180).
+        if let Err(texts) = self.tag_gate(&self.compose()) {
+            self.save.tag_refusal = texts;
+            return false;
+        }
         let draft = match to_draft(&checked, self.clearing()) {
             Ok(d) => d,
             Err(e) => {

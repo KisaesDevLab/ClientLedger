@@ -49,10 +49,19 @@ pub(crate) fn accept_selected(s: &mut BankFeedScreen, ids: &[FeedItemId]) {
     if s.view_only || s.act.is_some() || s.show != Show::Waiting {
         return;
     }
-    let p = plan(s, ids);
-    let skipped = p.skipped.len();
-    if p.is_empty() {
-        s.notice = Some(("bank_feed.notice.skipped", skipped));
+    let mut p = plan(s, ids);
+    // P29 review B1 (Q-276, Q-180): rows that would post a line the tag
+    // rules refuse stay waiting and are named under the notice.
+    let (ok, left) = super::tag_check::split_proposed(s, &p.categorize);
+    s.tag_skipped = super::tag_check::names(s, &left);
+    p.categorize = ok;
+    let skipped = p.skipped.len() + left.len();
+    if p.categorize.is_empty() && p.matches.is_empty() {
+        s.notice = Some(if left.is_empty() {
+            ("bank_feed.notice.skipped", skipped)
+        } else {
+            ("bank_feed.notice.tag_needed", left.len())
+        });
         return;
     }
     if !s.accept_route && !s.link.is_demo() {

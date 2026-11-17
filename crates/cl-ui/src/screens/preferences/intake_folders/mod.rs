@@ -282,6 +282,8 @@ pub struct IntakePanel {
     pub updated_at: Option<String>,
     /// The user's engine role (`None`: not known yet; read-only).
     pub role: Option<String>,
+    /// `Rights::is_admin` when the load started (P29).
+    admin: bool,
     load_task: Option<Task<Result<Fetched, CompanyError>>>,
     replace_on_load: bool,
     probes: BTreeMap<IntakeFolderId, Probe>,
@@ -319,6 +321,7 @@ impl Default for IntakePanel {
             load: LoadState::NoCompany,
             updated_at: None,
             role: None,
+            admin: false,
             load_task: None,
             replace_on_load: false,
             probes: BTreeMap::new(),
@@ -339,7 +342,10 @@ impl IntakePanel {
     /// Whether the user may change the folders.
     #[must_use]
     pub fn is_admin(&self) -> bool {
-        self.role.as_deref() == Some(source::ADMIN_ROLE)
+        // P29 (Q-P29k): the rights read from `/auth/me` decide (owner or
+        // super admin); the role must be known too, so a list still
+        // loading stays read-only.
+        self.role.is_some() && self.admin
     }
 
     /// Whether the folders can be edited now.
@@ -356,6 +362,7 @@ impl IntakePanel {
         tenant: Option<TenantId>,
         group: Option<&cl_api::RequestGroup>,
     ) -> Option<Fetched> {
+        self.admin = link.rights().is_admin();
         let Some(tenant) = tenant else {
             self.load = LoadState::NoCompany;
             return None;

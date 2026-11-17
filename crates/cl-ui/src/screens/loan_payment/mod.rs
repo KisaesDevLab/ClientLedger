@@ -132,6 +132,8 @@ pub struct LoanPaymentScreen {
     pub(crate) inputs: Inputs,
     pub(crate) flow: SaveFlow,
     pub(crate) problems: Vec<LoanProblem>,
+    /// P29 WP7: the extra lines the tag rules refused, in words (Q-276).
+    pub(crate) tag_refusal: Vec<String>,
     prefill_task: Option<Task<Option<LoanPrefill>>>,
     pub(crate) prefill_applied: bool,
     /// The comparison waiting for the engine's balance after a save.
@@ -210,6 +212,7 @@ impl LoanPaymentScreen {
             },
             flow: SaveFlow::default(),
             problems: Vec::new(),
+            tag_refusal: Vec::new(),
             prefill_task: None,
             prefill_applied: false,
             lender_check: None,
@@ -591,6 +594,7 @@ impl LoanPaymentScreen {
             return false;
         }
         self.problems.clear();
+        self.tag_refusal.clear();
         self.flow.reset_messages();
         if !self.is_dirty() {
             self.follow_up(intent);
@@ -604,6 +608,11 @@ impl LoanPaymentScreen {
                 return false;
             }
         };
+        // P29 WP7: the company's tag rules on the extra lines (Q-276).
+        if let Err(texts) = self.tag_gate(&form) {
+            self.tag_refusal = texts;
+            return false;
+        }
         let out = match self.outbound(&checked) {
             Ok(o) => o,
             Err(v) => {
@@ -751,6 +760,7 @@ impl LoanPaymentScreen {
             FormLines::from_lines(Vec::new(), &mut self.extras.form_mut().adapter_mut().keys);
         self.extras.load(fresh, &*lists);
         self.problems.clear();
+        self.tag_refusal.clear();
         self.prefill_applied = false;
         self.inputs.lender = NameInput::default();
         self.flow.new_record();
@@ -1312,6 +1322,7 @@ impl LoanPaymentScreen {
         });
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
+        kit::problem_texts(ui, tokens, &self.tag_refusal);
         if let Some(ev) = kit::status(
             ui,
             tokens,
@@ -1478,6 +1489,7 @@ impl LoanPaymentScreen {
             "save": {
                 "refused": self.problems.first().map(|p| p.name()),
                 "problems": self.problems.len(),
+                "tag_refusal": self.tag_refusal,
             },
             "nav_prompt": self.records.prompt.is_some(),
             "nav_at": self.records.at,
@@ -1613,9 +1625,23 @@ impl RecordForm for LoanPaymentScreen {
 }
 
 impl LoanPaymentScreen {
+    /// The tag rules on the extra lines (P29 WP7, Q-276). The principal
+    /// and interest lines have no tag field and are not checked.
+    pub(crate) fn tag_gate(&self, form: &LoanPaymentForm) -> Result<(), Vec<String>> {
+        // The company's rules as they are now (Preferences may have changed
+        // them since this window read its lists).
+        let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
+        let lines = cl_model::forms::tag_rule::expense_lines(&[], &form.extras, &list, false);
+        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
+    }
+
     /// A refused save's problems, checked again against the form as it is
     /// now (a fixed problem goes away at once, P13).
     pub(crate) fn recheck_problems(&mut self) {
+        if !self.tag_refusal.is_empty() {
+            let form = self.compose();
+            self.tag_refusal = self.tag_gate(&form).err().unwrap_or_default();
+        }
         if self.problems.is_empty() {
             return;
         }

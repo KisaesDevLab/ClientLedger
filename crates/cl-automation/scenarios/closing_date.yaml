@@ -1,0 +1,45 @@
+# Set Closing Date (P29 WP5, AC2 screen) against `clientledger --demo`: the
+# Admin moves the closing date with the closing-date password (a wrong one
+# is refused in plain words), the title bar follows, and the date goes back
+# so the dark run starts the same. Synthetic; the demo password is
+# `demo-close`.
+name: closing_date
+description: The Admin moves the closing date with its password.
+steps:
+  - resize: {width: 1280, height: 860}
+  - set_zoom: {percent: 100}
+  - command: company.closing_date
+  - wait: {ms: 300}
+  - assert_state: {key: screen.password_set, equals: true}
+  - assert_exists: {role: label, label_contains: The books are closed through}
+  - assert_exists: {role: link, label: See changes made in closed periods}
+  - screenshot: closing-date
+  # A wrong password changes nothing.
+  - click: {role: text_input, label: Close the books through}
+  - key: Ctrl+A
+  - type: {text: 10/31/2026}
+  - click: {role: password_input, label: Closing-date password, index: 0}
+  - type: {text: wrong-one}
+  - click: {role: button, label: Save closing date}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.message, equals: closing.admin.wrong_password}
+  - screenshot: wrong-password
+  # The right one moves the date; the title bar follows.
+  - click: {role: password_input, label: Closing-date password, index: 0}
+  - type: {text: demo-close}
+  - click: {role: button, label: Save closing date}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.closed_through, equals: "2026-10-31"}
+  - assert_exists: {role: label, label_contains: Books closed through 10/31/2026}
+  - screenshot: saved
+  # Back to 09/30 for the next run.
+  - click: {role: text_input, label: Close the books through}
+  - key: Ctrl+A
+  - type: {text: 09/30/2026}
+  - click: {role: password_input, label: Closing-date password, index: 0}
+  - type: {text: demo-close}
+  - click: {role: button, label: Save closing date}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.closed_through, equals: "2026-09-30"}
+  - command: file.close_window
+  - wait: {ms: 200}

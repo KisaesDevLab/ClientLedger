@@ -88,11 +88,15 @@ impl Mailer {
 type Form = (String, String, String, String, Kind);
 
 /// True when the engine sends report email (the Email button shows).
+/// P29 review B2: not while the engine refuses report email to this role.
 pub(crate) fn available(w: &ReportWindow) -> bool {
-    w.link.is_demo()
+    (w.link.is_demo()
         || w.link
             .capabilities()
-            .has(cl_api::Capabilities::REPORTS_EMAIL)
+            .has(cl_api::Capabilities::REPORTS_EMAIL))
+        && w.link
+            .rights()
+            .door_open(cl_model::permissions::Door::ReportEmail)
 }
 
 /// Addresses typed with commas or semicolons.

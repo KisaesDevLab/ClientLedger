@@ -178,6 +178,49 @@ pub fn sales_tax_engine(
     open
 }
 
+/// Preferences › Tags (P29 WP7, Q-276): "Require a tag on every line" and
+/// the default tag. Admins change them; others see them read-only.
+pub fn tags(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    edits: &mut Edits,
+    choices: &[(cl_core::ids::TagId, String)],
+    admin: bool,
+) {
+    form::heading(ui, tokens, &t("prefs.tags.title"));
+    ui.add_space(8.0);
+    form::card(ui, tokens, |ui| {
+        if !admin {
+            form::hint(ui, tokens, &t("prefs.tags.admin_only"));
+        }
+        ui.add_enabled_ui(admin, |ui| {
+            let p = &mut edits.company;
+            ui.checkbox(&mut p.require_tag_every_line, t("prefs.tags.every_line"))
+                .on_hover_text(t("prefs.tags.every_line_tip"));
+            form::hint(ui, tokens, &t("prefs.tags.every_line_hint"));
+            ui.add_space(6.0);
+            let shown = p
+                .default_tag
+                .and_then(|id| choices.iter().find(|(x, _)| *x == id))
+                .map_or_else(|| t("prefs.tags.default_none"), |(_, n)| n.clone());
+            ui.horizontal(|ui| {
+                let l = ui.add(egui::Label::new(t("prefs.tags.default")).selectable(false));
+                egui::ComboBox::from_id_salt("prefs-default-tag")
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut p.default_tag, None, t("prefs.tags.default_none"));
+                        for (id, n) in choices {
+                            ui.selectable_value(&mut p.default_tag, Some(*id), n);
+                        }
+                    })
+                    .response
+                    .labelled_by(l.id);
+            });
+            form::hint(ui, tokens, &t("prefs.tags.default_hint"));
+        });
+    });
+}
+
 /// Preferences › Sales for Receive Payment (P21, Q-P21q): engine company
 /// settings.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

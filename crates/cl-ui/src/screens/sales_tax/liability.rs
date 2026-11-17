@@ -103,9 +103,24 @@ impl OwedScreen {
         s
     }
 
+    /// P29 review B2: the engine refuses the liability report (and the
+    /// payments list) while an account is hidden from this role.
+    fn door_open(&self) -> bool {
+        !self
+            .link
+            .rights()
+            .refuses("GET", cl_core::report::Source::SalesTaxLiability.route())
+    }
+
+    /// Whether the payments list is served (the same rule, its own route).
+    fn payments_open(&self) -> bool {
+        self.link
+            .rights()
+            .door_open(cl_model::permissions::Door::SalesTaxPayments)
+    }
     /// Runs the report again for the dates and basis on screen.
     pub(crate) fn refresh(&mut self) {
-        if !self.available {
+        if !self.available || !self.door_open() {
             return;
         }
         let (Some(start), Some(end)) = (self.from.value, self.to.value) else {
@@ -131,6 +146,10 @@ impl OwedScreen {
             move |d| crate::company::demo::sales_tax_owed::liability(d, q),
             move |s| async move { s.reports().sales_tax_liability(q).await },
         ));
+        if !self.payments_open() {
+            self.poll();
+            return;
+        }
         self.payments_job = Some(engine::read(
             &self.link,
             self.group.as_ref(),
@@ -199,6 +218,10 @@ impl OwedScreen {
         ui.label(RichText::new(t("sales_tax.owed.title")).size(22.0).strong());
         if !self.available {
             form::hint(ui, &tokens, &t("sales_tax.owed.needs_update"));
+            return;
+        }
+        if !self.door_open() {
+            form::hint(ui, &tokens, &t("sensitive.door_closed"));
             return;
         }
         self.controls(ui);

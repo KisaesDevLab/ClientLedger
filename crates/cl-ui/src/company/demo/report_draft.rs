@@ -164,11 +164,19 @@ fn refused(status: u16, code: &str, details: &Value) -> ApiError {
     )
 }
 
-/// The demo books' accounts whose label holds `word`.
+/// The demo books' accounts whose label holds `word`, leaving out the
+/// accounts hidden for the signed-in role (U-33: the engine never offers
+/// them to the model or as a candidate).
 fn accounts(d: &mut DemoState, word: &str) -> Vec<(String, String)> {
+    let chart = d.chart.get_or_insert_with(super::chart).clone();
+    let hidden: Vec<String> = d
+        .hidden_accounts(&chart)
+        .iter()
+        .map(ToString::to_string)
+        .collect();
     super::report_transfer::pick_list(d, "account")
         .into_iter()
-        .filter(|(_, l)| l.to_lowercase().contains(word))
+        .filter(|(id, l)| l.to_lowercase().contains(word) && !hidden.contains(id))
         .collect()
 }
 
@@ -310,6 +318,44 @@ mod tests {
             y.notes.first().map(|n| n.code),
             Some(cl_api::resources::reports::draft::NoteCode::NumbersNotUsed)
         );
+    }
+
+    /// U-33: an account hidden for this role is never a draft's name or a
+    /// candidate.
+    #[test]
+    fn hidden_accounts_are_left_out_of_drafts() {
+        let mut d = demo();
+        let fuel = accounts(&mut d, "fuel");
+        let (fuel_id, _) = fuel.first().cloned().expect("a fuel account");
+        let supplies = accounts(&mut d, "supplies");
+        assert!(supplies.len() >= 2);
+        let (sup_id, _) = supplies[0].clone();
+        for id in [&fuel_id, &sup_id] {
+            d.sensitive
+                .insert(cl_core::ids::AccountId::parse(id).expect("id"));
+        }
+        // Marked but this user may see them: still offered.
+        assert_eq!(accounts(&mut d, "fuel"), fuel);
+        d.hides_sensitive = true;
+        assert!(
+            accounts(&mut d, "fuel")
+                .iter()
+                .all(|(id, _)| *id != fuel_id)
+        );
+        match draft(&mut d, &req("Fuel by month")) {
+            Ok(r) => assert!(!r.definition.to_string().contains(&fuel_id)),
+            Err(e) => assert!(matches!(
+                cl_api::resources::reports::draft::draft_refusal(&e),
+                Some(cl_api::resources::reports::draft::DraftRefusal::Unmapped { .. })
+            )),
+        }
+        match draft(&mut d, &req("Supplies by customer")) {
+            Ok(r) => assert!(r.unresolved[0].candidates.iter().all(|c| c.id != sup_id)),
+            Err(e) => assert!(matches!(
+                cl_api::resources::reports::draft::draft_refusal(&e),
+                Some(cl_api::resources::reports::draft::DraftRefusal::Unmapped { .. })
+            )),
+        }
     }
 
     /// A10 review Minor 4: the engine's rule for which note a number gets.

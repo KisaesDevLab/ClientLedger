@@ -392,12 +392,13 @@ fn other_roles_see_a_read_only_list() {
     let mut s = screen(&link);
     assert!(!s.intake.is_admin());
     assert!(!s.intake.editable());
+    // P29 QA-17: the company's sections are an Admin's; the panel says so
+    // in place of the list.
     let all = texts(&mut s);
     assert!(
-        all.contains("Only an Admin can change intake folders. Ask an Admin."),
+        all.contains("The company's settings are changed by an Admin."),
         "{all}"
     );
-    assert!(all.contains("Ask an Admin to add one."), "{all}");
     assert!(!all.contains("Add folder"), "{all}");
     // A change can't be saved (the engine would also refuse on P29).
     s.edits.intake.folders.push(IntakeFolder {

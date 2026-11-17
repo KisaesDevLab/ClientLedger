@@ -147,9 +147,38 @@ pub(crate) fn to_draft(c: &CheckedDaily) -> DailyEntryDraft {
 }
 
 impl DailySalesScreen {
+    /// The tag rules on the day (P29 WP7, Q-276): one tag for the whole
+    /// day, so every layout line is saved with it.
+    pub(crate) fn tag_gate(&self, form: &DailySalesForm) -> Result<(), Vec<String>> {
+        use cl_model::forms::tag_rule::{Place, TagLine};
+        let list = crate::forms::tag_gate::form_list(&self.tags, &self.link);
+        let tags: Vec<cl_core::ids::TagId> = form.tag.into_iter().collect();
+        let mut lines = vec![TagLine {
+            place: Place::Entry,
+            account: None,
+            tags: tags.clone(),
+        }];
+        lines.extend(
+            self.layout
+                .lines
+                .iter()
+                .filter_map(|l| l.account)
+                .map(|a| TagLine {
+                    place: Place::Entry,
+                    account: Some(a),
+                    tags: tags.clone(),
+                }),
+        );
+        crate::forms::tag_gate::check(&list, &lines, &self.accounts)
+    }
+
     /// A refused save's problems, checked again against the day as it is
     /// now (a fixed problem goes away at once, P13).
     pub(crate) fn recheck_problems(&mut self) {
+        if !self.save.tag_refusal.is_empty() {
+            let form = self.header.current().clone();
+            self.save.tag_refusal = self.tag_gate(&form).err().unwrap_or_default();
+        }
         if self.save.problems.is_empty() {
             return;
         }
@@ -190,6 +219,12 @@ impl DailySalesScreen {
             }
         };
         self.save.problems.clear();
+        // P29 WP7: the company's tag rules (Q-276, Q-180) on the day's tag.
+        self.save.tag_refusal.clear();
+        if let Err(texts) = self.tag_gate(&form) {
+            self.save.tag_refusal = texts;
+            return false;
+        }
         // A day in the closed period needs the closing-date password (NN8):
         // asked before anything is sent; refused plainly without the
         // engine's lock (Q-P14v).
@@ -423,7 +458,11 @@ impl DailySalesScreen {
     /// A blank day on the same layout.
     pub(crate) fn new_day(&mut self, date: cl_core::CalendarDate) {
         let template = self.header.current().template;
-        let tag = self.header.current().tag;
+        let tag =
+            self.header.current().tag.or_else(|| {
+                crate::forms::tag_gate::form_list(&self.tags, &self.link).default_tag()
+            });
+        self.save.tag_refusal.clear();
         self.header.load(DailySalesForm {
             template,
             date: Some(date),

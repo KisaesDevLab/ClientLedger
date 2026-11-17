@@ -333,6 +333,7 @@ impl NewCompanyScreen {
                 Ok(c) => {
                     // A new company's maker owns it (A09 QA-9).
                     self.link.push(CompanyEvent::CompanyRole("owner".into()));
+                    self.link.set_rights(cl_model::permissions::Rights::all());
                     self.link.push(CompanyEvent::Opened {
                         tenant_id: c.tenant_id,
                         name: self.setup.name.trim().to_string(),

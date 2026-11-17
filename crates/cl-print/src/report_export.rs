@@ -73,10 +73,7 @@ fn us_date(d: cl_core::CalendarDate) -> String {
 /// payee or memo never runs as one when the CSV is opened. Only text
 /// cells: amounts keep their exact strings.
 fn neutral(s: String) -> String {
-    match s.trim_start_matches(' ').chars().next() {
-        Some('=' | '+' | '-' | '@' | '\t' | '\r') => format!("'{s}"),
-        _ => s,
-    }
+    cl_core::report::csv_formula_safe(s)
 }
 
 fn csv_cell(c: &Cell, tr: &dyn Fn(&str) -> String) -> String {

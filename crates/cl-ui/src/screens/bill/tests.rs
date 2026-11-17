@@ -239,6 +239,28 @@ fn a_closed_period_bill_is_refused_without_the_engine_update_and_asks_with_it() 
     assert_eq!(s.state()["saved_count"], 1);
 }
 
+/// P29 review S7: credit mode posts to `/vendor-credits`, which the engine
+/// guards with `vendor_credits`; a role with bills but not vendor credits
+/// can't switch to it.
+#[test]
+fn credit_mode_needs_the_vendor_credits_right() {
+    use cl_model::permissions::{Level, Resource, Rights};
+    let (_d, link) = link();
+    let mut r = Rights::all().without_admin();
+    r.set(Resource::VendorCredits, Level::View);
+    link.set_rights(r);
+    let mut s = screen(&link);
+    assert!(s.kind_allowed(BillKind::Bill));
+    assert!(!s.kind_allowed(BillKind::Credit));
+    s.set_kind(BillKind::Credit);
+    assert_eq!(s.kind(), BillKind::Bill, "stays a bill");
+    let mut r = Rights::all().without_admin();
+    r.set(Resource::VendorCredits, Level::Full);
+    link.set_rights(r);
+    s.set_kind(BillKind::Credit);
+    assert_eq!(s.kind(), BillKind::Credit);
+}
+
 #[test]
 fn a_vendor_credit_posts_the_other_way_and_is_read_only_without_ap_edit() {
     let (_d, link) = link();
@@ -998,4 +1020,51 @@ fn prefill_arriving_while_a_line_is_typed_keeps_the_keystrokes() {
     assert!(!s.prefill.applied, "prefill waits for no one typing");
     assert!(s.expenses.typing(), "the keystrokes are still there");
     assert_eq!(s.expenses.value().lines[0].account, None);
+}
+
+/// P29 review S2: the tag options on Enter Bill and vendor credits (table
+/// over both kinds): with "tag on every line" on an untagged line is
+/// refused and named; off, it saves; the default tag fills a new form's
+/// header only, never an edit.
+#[test]
+fn tag_options_on_bills_and_vendor_credits() {
+    for kind in [BillKind::Bill, BillKind::Credit] {
+        let (_d, link) = link();
+        let tag = {
+            let mut d = link.demo_state().expect("demo");
+            let t = d.tags_mut().iter().find(|t| t.is_active).expect("tag").id;
+            d.require_tag_every_line = true;
+            t
+        };
+        // On: refused, nothing sent, the line named.
+        let mut s = screen(&link);
+        s.set_kind(kind);
+        fill(
+            &mut s,
+            demo_bills::STORY_VENDOR,
+            "150.00",
+            &[("6210", "150.00")],
+        );
+        let before = writes(&link);
+        assert!(!s.start_save(SaveIntent::Save, None), "{kind:?}");
+        assert_eq!(writes(&link), before, "{kind:?}: nothing sent");
+        let refusal = s.state()["tag_refusal"].clone();
+        assert_eq!(refusal.as_array().map(Vec::len), Some(1), "{kind:?}");
+        assert!(
+            refusal[0].as_str().is_some_and(|r| r.contains("line 1")),
+            "{refusal}"
+        );
+        // Off: the same form saves.
+        link.demo_state().expect("demo").require_tag_every_line = false;
+        assert!(s.start_save(SaveIntent::Save, None), "{kind:?} saves");
+        assert_eq!(s.state()["mode"], "edit");
+        // The saved form is an edit: the default never goes on it.
+        link.demo_state().expect("demo").default_tag = Some(tag);
+        s.tag_list = crate::forms::tag_gate::form_list(&s.tags, &s.link);
+        s.fill_default_tag();
+        assert_eq!(s.state()["header_tags"], 0, "{kind:?}: not on an edit");
+        // A new form starts with it.
+        let s = screen(&link);
+        assert_eq!(s.state()["header_tags"], 1, "{kind:?}: on a new form");
+    }
 }

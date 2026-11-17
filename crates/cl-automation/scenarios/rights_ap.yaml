@@ -1,0 +1,54 @@
+# Rights (P29 WP1, AC1) against `clientledger --demo`: the demo signs in as
+# an Accounts payable user (developer switch). No Create Invoice in the
+# Customers menu, on Home or in the palette; no Profit & Loss or A/R reports
+# in the Reports menu or list; a forced Create Invoice (its shortcut) says it
+# is not available for the role. Back to Admin at the end so the dark run
+# starts the same. Synthetic.
+name: rights_ap
+description: An A/P user sees no invoices, no P&L and no A/R reports.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: dev.demo_rights_ap
+  - command: nav.home
+  - wait: {ms: 300}
+  # Home: the Money in lane keeps only what A/P may do.
+  - assert_not_exists: {role: button, label_contains: Create Invoice}
+  - assert_exists: {role: button, label_contains: Enter Bill}
+  - screenshot: home
+  # Menus.
+  - click: {role: button, label: Customers, index: 0}
+  - assert_not_exists: {role: button, label_contains: Create Invoice}
+  - assert_not_exists: {role: button, label_contains: Receive Payment}
+  - screenshot: menu-customers
+  - click: {role: button, label: Customers, index: 0}
+  - click: {role: button, label: Reports, index: 0}
+  - assert_not_exists: {role: button, label_contains: Profit & Loss}
+  - assert_not_exists: {role: button, label_contains: A/R Aging}
+  - assert_exists: {role: button, label_contains: Memorized Reports}
+  - screenshot: menu-reports
+  - click: {role: button, label: Reports, index: 0}
+  # The palette.
+  - key: Ctrl+K
+  - type: {text: create invoice}
+  - assert_not_exists: {role: button, label_contains: Create Invoice}
+  - key: Escape
+  # A forced command (its shortcut) opens nothing and says why.
+  - command: clients.create_invoice
+  - assert_state: {key: toast, equals: Not available for your role in this company.}
+  - assert_state: {key: is_admin, equals: false}
+  - screenshot: refused
+  # The Reports list: A/P reports only.
+  - command: reports.center
+  - wait: {ms: 400}
+  - assert_not_exists: {label: A/R Aging}
+  - assert_not_exists: {label: Profit & Loss}
+  - assert_exists: {label: A/P Aging}
+  - screenshot: reports-list
+  - command: file.close_window
+  - wait: {ms: 200}
+  - command: dev.demo_rights_all
+  - assert_state: {key: is_admin, equals: true}
+  - command: nav.home
+  - wait: {ms: 300}
+  - assert_exists: {role: button, label_contains: Create Invoice}

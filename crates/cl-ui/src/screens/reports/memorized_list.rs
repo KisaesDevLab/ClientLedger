@@ -151,6 +151,7 @@ fn refusal_key(e: &ApiError) -> &'static str {
     match definition_refusal(e) {
         Some(DefinitionRefusal::Stale) => "reports.memorized.stale",
         Some(DefinitionRefusal::NotAuthor) => "reports.memorized.not_author",
+        Some(DefinitionRefusal::Hidden) => "sensitive.definition_refused",
         Some(DefinitionRefusal::NameTaken) => "reports.memorize.name_taken",
         Some(DefinitionRefusal::TooLarge | DefinitionRefusal::Invalid { .. }) => {
             "reports.memorize.invalid"

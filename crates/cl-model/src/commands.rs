@@ -228,6 +228,9 @@ pub const COMMANDS: &[Command] = &[
     built("file.open_company", "Open or Switch Company", Some(Menu::File), 0, ctrl('O')),
     built("file.new_company", "New Company", Some(Menu::File), 0, None),
     cmd("file.close_company", "Close Company", Some(Menu::File), 0, None, Scope::Global),
+    // P29 WP2: sign out (another user signs in) and lock the app now.
+    cmd("file.sign_out", "Sign Out", Some(Menu::File), 0, None, Scope::Global),
+    cmd("file.lock", "Lock ClientLedger", Some(Menu::File), 0, None, Scope::Global),
     // P19 (Q-P19ao): close the company the normal way and open the practice company.
     cmd("file.open_practice", "Open Practice Company", Some(Menu::File), 0, None, Scope::Global),
     built("file.backup", "Back Up Company", Some(Menu::File), 1, None),
@@ -503,10 +506,12 @@ pub const COMMANDS: &[Command] = &[
     built("company.journal_entry", "Make Journal Entry", Some(Menu::Company), 0, ctrl('J')),
     // P19: logo, form footers and document numbering (no shortcut)
     built("company.information", "Company Information", Some(Menu::Company), 0, None),
-    screen("company.closing_date", "Set Closing Date", Some(Menu::Company), 1, None, "P29"),
-    screen("company.users", "Users and Permissions", Some(Menu::Company), 1, None, "P29"),
+    built("company.closing_date", "Set Closing Date", Some(Menu::Company), 1, None),
+    built("company.users", "Users and Permissions", Some(Menu::Company), 1, None),
+    // P29 WP2: change your own password, automatic sign-in, idle lock
+    built("company.my_sign_in", "My Sign-in", Some(Menu::Company), 1, None),
     screen("company.send_to_accountant", "Send to My Accountant", Some(Menu::Company), 2, None, "P32"),
-    screen("company.audit_trail", "Audit Trail", Some(Menu::Company), 2, None, "P29"),
+    built("company.audit_trail", "Audit Trail", Some(Menu::Company), 2, None),
     // Window
     built("nav.home", "Home", Some(Menu::Window), 0, alt('H')),
     cmd("window.next", "Next Window", Some(Menu::Window), 1, key(Mods::CMD, Key::Tab), Scope::Global),
@@ -692,6 +697,24 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_reconcile_close_books",
         "Close the Demo Books Through 11/01 for Reconcile (developer)",
     ),
+    // P29: the rights scenario signs the demo in as an A/P user and back.
+    dev_action(
+        "dev.demo_rights_ap",
+        "Demo Rights: Accounts Payable (developer)",
+    ),
+    dev_action("dev.demo_rights_all", "Demo Rights: Admin (developer)"),
+    // P29 WP2: the sign-in scenarios reset the demo's users.
+    dev_action("dev.demo_auth_reset", "Reset Demo Sign-ins (developer)"),
+    // P29 WP6: a Bookkeeper reads the audit trail but can't export it.
+    dev_action(
+        "dev.demo_rights_bookkeeper",
+        "Demo Rights: Bookkeeper (developer)",
+    ),
+    // P29 (U-33): a Bookkeeper without "See sensitive accounts".
+    dev_action(
+        "dev.demo_rights_bookkeeper_hidden",
+        "Demo Rights: Bookkeeper without sensitive accounts (developer)",
+    ),
 ];
 
 /// A developer-only command the window in front handles (opens nothing).
@@ -851,6 +874,11 @@ mod tests {
             // A09
             "reports.memorized_list",
             "reports.report_file",
+            // P29
+            "company.closing_date",
+            "company.audit_trail",
+            "company.my_sign_in",
+            "company.users",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

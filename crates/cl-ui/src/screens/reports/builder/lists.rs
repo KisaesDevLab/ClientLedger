@@ -231,7 +231,19 @@ pub(crate) fn caption_of(s: &BuilderScreen, w: Which, id: &str) -> String {
         .get(w)
         .and_then(|l| l.iter().find(|(x, _)| x == id))
         .map_or_else(
-            || crate::i18n::t("builder.filter.unknown_name"),
+            || {
+                // U-33: an account hidden for this role has no name here;
+                // the engine listed it, so it is not a deleted one.
+                let hidden = w == Which::Accounts
+                    && s.ed
+                        .saved()
+                        .is_some_and(|x| x.hidden_ids.iter().any(|h| h == id));
+                crate::i18n::t(if hidden {
+                    "sensitive.hidden_account"
+                } else {
+                    "builder.filter.unknown_name"
+                })
+            },
             |(_, n)| n.clone(),
         )
 }

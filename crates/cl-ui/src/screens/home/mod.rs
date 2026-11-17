@@ -53,6 +53,7 @@ use crate::layout::{Body, FixedFrame, FrameOpts, FrameReport};
 use crate::screens::templates::engine::{Job, finished, run};
 use crate::theme::Tokens;
 use crate::windows::Screen;
+use cl_model::permissions::ReportUse;
 
 /// The window kind.
 pub const KIND: &str = "nav.home";
@@ -401,13 +402,19 @@ impl HomeScreen {
             |s| async move { Ok(s.company_settings().await?.lock_date) },
         ));
         let calendar = self.local.calendar;
-        self.data.chart.start(run(
-            &self.link,
-            group,
-            None,
-            move |_| Ok(demo::profit_loss_months(today, calendar)),
-            move |s| async move { charts::read(&s, today, calendar).await },
-        ));
+        // P29: the reads below hit `/reports/*`; a role without the report
+        // area never asks (the engine would refuse, and a 403 re-reads the
+        // rights).
+        let rights = self.link.rights();
+        if rights.allows_use(ReportUse::HomeCharts) {
+            self.data.chart.start(run(
+                &self.link,
+                group,
+                None,
+                move |_| Ok(demo::profit_loss_months(today, calendar)),
+                move |s| async move { charts::read(&s, today, calendar).await },
+            ));
+        }
         self.data.checklist.start(run(
             &self.link,
             group,
@@ -415,7 +422,10 @@ impl HomeScreen {
             |_| Ok(demo::checklist_facts()),
             |s| async move { checklist::read(&s).await },
         ));
-        if !self.link.is_demo() && self.link.capabilities().has("ar-aging-exact-v1") {
+        if !self.link.is_demo()
+            && self.link.capabilities().has("ar-aging-exact-v1")
+            && rights.allows_use(ReportUse::HomeReceivables)
+        {
             self.data.past_60.start(run(
                 &self.link,
                 group,
@@ -474,11 +484,12 @@ impl HomeScreen {
                 |s| async move { Ok(s.invoices().outbox().await?.len() as u64) },
             ));
         }
-        if self.link.is_demo()
+        if (self.link.is_demo()
             || self
                 .link
                 .capabilities()
-                .has(cl_api::Capabilities::SALES_TAX_LIABILITY)
+                .has(cl_api::Capabilities::SALES_TAX_LIABILITY))
+            && rights.allows_use(ReportUse::HomeSalesTax)
         {
             let today = self.today;
             self.data.sales_tax.start(run(
@@ -627,7 +638,7 @@ impl HomeScreen {
             if let Some(c) = list.as_ref().filter(|_| self.checklist_expanded()) {
                 let mut picked = None;
                 card(ui, &tokens, 0.0, |ui| {
-                    picked = checklist::card(ui, &tokens, c);
+                    picked = checklist::card(ui, &tokens, c, self.link.rights().is_admin());
                 });
                 todo = todo.or(picked);
                 ui.add_space(GAP + 6.0);
@@ -721,7 +732,8 @@ impl HomeScreen {
         (refresh, todo)
     }
 
-    /// The setup checklist when Home shows it: read, not hidden, not done.
+    /// The setup checklist when Home shows it: read, not hidden, not done,
+    /// listing only the steps the role may take (P29 QA-5).
     pub(crate) fn checklist_shown(&self) -> Option<cl_model::home::Checklist> {
         checklist::checklist(self).filter(|c| c.visible(self.local.checklist_dismissed))
     }
@@ -746,7 +758,11 @@ impl HomeScreen {
 
     /// Hides the checklist for this company (`setup_checklist_dismissed`,
     /// kept with the company's preferences).
+    /// Only an Admin may: it hides the list for everyone (P29 QA-5, QA-17).
     pub(crate) fn dismiss_checklist(&mut self) {
+        if !self.link.rights().is_admin() {
+            return;
+        }
         self.local.checklist_dismissed = true;
         if let Some((id, name)) = &self.tenant
             && let Err(e) = self.link.store().update(|l| {

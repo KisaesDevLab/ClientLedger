@@ -31,6 +31,32 @@ pub(crate) struct Saving {
 }
 
 impl BulkEntryScreen {
+    /// The tag rules on the filled rows, named by section and row (P29 WP7).
+    pub(crate) fn tag_gate(&self) -> Result<(), Vec<String>> {
+        // The company's rules as they are now (Preferences may have changed
+        // them since this window read its lists).
+        use cl_model::forms::tag_rule::{Place, TagLine};
+        let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
+        let lines: Vec<TagLine> = self
+            .batch()
+            .sections
+            .iter()
+            .enumerate()
+            .flat_map(|(s, sec)| {
+                sec.rows
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| !r.is_blank())
+                    .map(move |(i, r)| TagLine {
+                        place: Place::Row(s, i),
+                        account: r.account,
+                        tags: sec.row_tag(r).into_iter().collect(),
+                    })
+            })
+            .collect();
+        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
+    }
+
     /// Save all. True when the batch saved at once.
     pub(crate) fn save_all(&mut self, intent: SaveIntent) -> bool {
         if self.busy() {
@@ -97,6 +123,13 @@ impl BulkEntryScreen {
     /// of them (Q-P15Ae); it goes on each such row and is dropped after
     /// the call.
     pub(crate) fn send_save(&mut self, intent: SaveIntent, password: Option<Secret>) -> bool {
+        // P29 WP7: the company's tag rules (Q-276, Q-180) on every filled
+        // row, before anything is sent.
+        self.tag_refusal = self.tag_gate().err().unwrap_or_default();
+        if !self.tag_refusal.is_empty() {
+            self.last_action = Some("save_refused");
+            return false;
+        }
         let closing = self.books.closing;
         let locked = self.batch().locked_rows(closing).len();
         if locked > 0 && password.is_none() {
@@ -439,6 +472,8 @@ impl BulkEntryScreen {
         a.suggested.clear();
         a.accepted.clear();
         self.grid.load(b, &*lists);
+        self.tag_default_due = true;
+        self.fill_default_tag();
         self.checks.clear();
         self.touched.clear();
         self.cursor_row = None;

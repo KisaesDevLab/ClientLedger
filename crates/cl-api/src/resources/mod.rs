@@ -38,7 +38,9 @@ pub mod invoice_layouts;
 pub mod invoices;
 pub mod items;
 pub mod ledger;
+// P29: the user's role and rights in the open company.
 pub mod list_csv;
+pub mod me;
 pub mod operations;
 pub mod payments;
 pub mod posting;
@@ -63,6 +65,7 @@ pub mod setup;
 pub mod smtp;
 pub mod system;
 pub mod tags;
+pub mod team;
 pub mod templates;
 pub mod tenants;
 pub mod transactions;
@@ -73,5 +76,7 @@ pub mod versioning;
 
 #[cfg(test)]
 mod journal_tests;
+#[cfg(test)]
+mod sensitive_tests;
 #[cfg(test)]
 pub(crate) mod testkit;

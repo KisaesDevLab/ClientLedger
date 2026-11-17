@@ -256,6 +256,63 @@ fn display_only_lines_are_text_and_flag_the_page() {
     assert_eq!(row.kind, "PMT");
 }
 
+/// U-33 (Q-P29e): the other side of a line hidden for this role reads
+/// "Hidden account", ahead of the memo.
+#[test]
+fn a_hidden_other_side_reads_hidden_account() {
+    let body = include_str!("../../../../../fixtures/engine/register-legacy.json");
+    let mut page = cl_api::resources::register::page_from_json(body.as_bytes()).expect("page");
+    page.lines[0].category = cl_api::resources::register::Category::Hidden;
+    let mapping = Mapping {
+        class: Some(AccountClass::Bank),
+        ..Mapping::default()
+    };
+    let row = mapping.row(&page.lines[0]);
+    assert!(
+        row.account_memo
+            .starts_with(&crate::i18n::t("sensitive.hidden_account")),
+        "{:?}",
+        row.account_memo
+    );
+}
+
+/// U-33: a register whose account turns hidden for this role closes with a
+/// plain message, not an inline load error.
+#[test]
+fn a_register_of_an_account_hidden_mid_session_closes() {
+    let (_d, link) = link();
+    let vehicles = crate::company::demo::account_id(1510);
+    let mut s = RegisterScreen::new(Arc::clone(&link), None, today(), Some(vehicles));
+    s.set_range(cl_model::register::RangePreset::AllDates);
+    settle(&mut s, None);
+    assert_eq!(s.account(), Some(vehicles));
+    assert_eq!(s.state()["hidden_closed"], false);
+    assert!(!s.take_close_request());
+    let _ = link.drain();
+    if let Some(mut d) = link.demo_state() {
+        d.sensitive.insert(vehicles);
+        d.hides_sensitive = true;
+    }
+    s.set_range(cl_model::register::RangePreset::ThisYear);
+    settle(&mut s, None);
+    let st = s.state();
+    assert_eq!(st["hidden_closed"], true);
+    assert_eq!(st["load_error"], false, "no inline error");
+    assert!(s.take_close_request());
+    assert!(!s.take_close_request(), "asked once");
+    let events = link.drain();
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(
+                e,
+                CompanyEvent::Toast(k) if *k == "sensitive.register_closed"
+            ))
+            .count(),
+        1
+    );
+}
+
 #[test]
 fn custom_ranges_are_checked() {
     let (_d, link) = link();

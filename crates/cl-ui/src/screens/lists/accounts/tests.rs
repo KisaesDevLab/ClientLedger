@@ -187,6 +187,64 @@ fn a_new_sub_account_is_saved_and_selected() {
     assert!(r.link.demo_state().expect("demo").sensitive.contains(&id));
 }
 
+/// The "Sensitive account" check box in the edit panel: `(found, enabled)`.
+fn sensitive_box(r: &mut Rig) -> Option<bool> {
+    r.ctx.enable_accesskit();
+    let label = crate::i18n::t("lists.accounts.form.sensitive");
+    let mut found = None;
+    for _ in 0..2 {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 820.0))),
+            ..RawInput::default()
+        };
+        let s = &mut r.s;
+        let mut out = r.ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        if let Some(t) = out.platform_output.accesskit_update {
+            found = t
+                .nodes
+                .iter()
+                .find(|(_, n)| {
+                    n.role() == egui::accesskit::Role::CheckBox
+                        && n.label().is_some_and(|l| l == label)
+                })
+                .map(|(_, n)| !n.is_disabled());
+        }
+    }
+    found
+}
+
+/// U-33 (Q-P29d): only the Admin marks an account sensitive, and the switch
+/// is never offered on a bank, credit card or built-in account.
+#[test]
+fn the_sensitive_switch_is_admin_only_and_not_on_bank_card_or_built_in() {
+    let mut r = Rig::new(true);
+    r.s.open_edit(Some(account_id(6550)));
+    assert_eq!(sensitive_box(&mut r), Some(true), "Admin, an expense");
+    r.s.open_edit(Some(account_id(1010)));
+    assert_eq!(sensitive_box(&mut r), None, "a bank account");
+    let card =
+        r.s.accounts
+            .iter()
+            .find(|a| a.fields.detail_type.as_deref() == Some("credit_card"))
+            .map(|a| a.id);
+    if let Some(card) = card {
+        r.s.open_edit(Some(card));
+        assert_eq!(sensitive_box(&mut r), None, "a credit card");
+    }
+    let system = r.s.accounts.iter().find(|a| a.is_system).map(|a| a.id);
+    if let Some(system) = system {
+        r.s.open_edit(Some(system));
+        assert_eq!(sensitive_box(&mut r), None, "a built-in account");
+    }
+    r.link
+        .set_rights(cl_model::permissions::BuiltinRole::Bookkeeper.rights());
+    r.s.open_edit(Some(account_id(6550)));
+    assert_eq!(sensitive_box(&mut r), Some(false), "not the Admin");
+}
+
 #[test]
 fn a_used_number_is_refused_before_and_by_the_engine() {
     let mut r = Rig::new(true);

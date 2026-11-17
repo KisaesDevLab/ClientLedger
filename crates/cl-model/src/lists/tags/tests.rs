@@ -52,6 +52,30 @@ fn sample() -> TagList {
 }
 
 #[test]
+fn every_line_rule_adds_missing_only_to_untagged_lines() {
+    let l = sample().with_rules(TagRules {
+        every_line: true,
+        default_tag: Some(tid(6)),
+        required: BTreeMap::new(),
+    });
+    assert_eq!(
+        check_line_tags(&l, &[], None, true),
+        vec![LineTagProblem::Missing]
+    );
+    assert_eq!(check_line_tags(&l, &[tid(5)], None, true), Vec::new());
+    assert_eq!(LineTagProblem::Missing.key().0, "tags.line.missing");
+    // An inactive default fills nothing; the rules replaced the groups'
+    // required types (none now).
+    assert_eq!(l.default_tag(), None);
+    assert!(
+        l.groups()
+            .iter()
+            .all(|g| g.required_for.is_empty() || g.id == gid(1))
+    );
+    assert!(!sample().every_line());
+}
+
+#[test]
 fn groups_by_order_tags_by_group_then_name_and_orphans_ungrouped() {
     let l = sample();
     let g: Vec<&str> = l.groups().iter().map(|g| g.name.as_str()).collect();

@@ -8,6 +8,8 @@
 //! through [`Task`]; the egui thread never blocks.
 
 pub mod demo;
+// P29: sensitive marks move into the engine on open (U-33).
+pub mod sensitive;
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -33,6 +35,11 @@ pub enum CompanyEvent {
     /// [`CompanyEvent::Opened`] (A09 QA-9: the status bar said "Admin" for
     /// every user).
     CompanyRole(String),
+    /// The signed-in user's rights in the company being opened (P29),
+    /// sent before [`CompanyEvent::Opened`] and again whenever they are
+    /// read anew (a 403 from the engine). The shell re-filters its menus,
+    /// rail and palette; screens read [`CompanyLink::rights`].
+    Rights(cl_model::permissions::Rights),
     /// A company was opened or switched to.
     Opened {
         /// The tenant.
@@ -44,6 +51,9 @@ pub enum CompanyEvent {
         /// Closing date, when set.
         closed_through: Option<cl_core::CalendarDate>,
     },
+    /// The closing date was set, moved or cleared (P29 Set Closing Date):
+    /// the title bar follows.
+    ClosingDate(Option<cl_core::CalendarDate>),
     /// No company is open now.
     Closed,
     /// Open a window (a screen asked for another screen, for example the
@@ -79,6 +89,9 @@ pub enum CompanyEvent {
     /// The owner saved new user preferences (theme, zoom, dates): the
     /// shell applies and persists them.
     UserPrefs(cl_settings::UserPrefs),
+    /// Company › My Sign-in chose a new idle-lock time (P29, Q-P29p): the
+    /// shell changes only that field of its own preferences.
+    IdleLockMinutes(u16),
     /// Home read the rail's counts (clients, vendors, bank items waiting;
     /// P16). Counts only.
     RailCounts(crate::shell::RailCounts),
@@ -125,6 +138,16 @@ pub struct CompanyLink {
     /// Messages waiting in the Outbox (P20, Q-P20d), as last read; shown on
     /// Home and in the status bar.
     outbox: Mutex<Option<u32>>,
+    /// The signed-in user's rights in the open company (P29). Everything
+    /// while no company is open (nothing but Open Company works then).
+    rights: Mutex<cl_model::permissions::Rights>,
+    /// The company open now (P29 WP7: its local tag rules).
+    open_tenant: Mutex<Option<TenantId>>,
+    /// P29 WP2: the signed-in email, kept in memory only (the idle unlock
+    /// signs in again with it; never logged).
+    sign_in_email: Mutex<Option<String>>,
+    /// P29 WP2: Sign out skips automatic sign-in for the rest of the run.
+    skip_auto_sign_in: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for CompanyLink {
@@ -190,6 +213,10 @@ impl CompanyLink {
             outbox: Mutex::new(None),
             due: Mutex::new(crate::templates_runner::DueBoard::default()),
             lost_saves: Mutex::new(crate::forms::lost_save::LostBook::default()),
+            rights: Mutex::new(cl_model::permissions::Rights::all()),
+            open_tenant: Mutex::new(None),
+            sign_in_email: Mutex::new(None),
+            skip_auto_sign_in: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -212,6 +239,10 @@ impl CompanyLink {
             outbox: Mutex::new(None),
             due: Mutex::new(crate::templates_runner::DueBoard::default()),
             lost_saves: Mutex::new(crate::forms::lost_save::LostBook::default()),
+            rights: Mutex::new(cl_model::permissions::Rights::all()),
+            open_tenant: Mutex::new(None),
+            sign_in_email: Mutex::new(None),
+            skip_auto_sign_in: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -337,6 +368,99 @@ impl CompanyLink {
         *self.session.lock().unwrap_or_else(PoisonError::into_inner) = s;
     }
 
+    /// True while someone is signed in (the demo starts signed in).
+    #[must_use]
+    pub fn signed_in(&self) -> bool {
+        match self.demo_state() {
+            Some(d) => d.auth.signed_in.is_some(),
+            None => self.session().is_some(),
+        }
+    }
+
+    /// The signed-in email (memory only; the demo's own when it runs).
+    #[must_use]
+    pub fn signed_in_email(&self) -> Option<String> {
+        if let Some(d) = self.demo_state() {
+            return d.auth.signed_in.clone();
+        }
+        self.sign_in_email
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+
+    /// Remember who signed in (P29 WP2).
+    pub fn set_signed_in_email(&self, email: Option<String>) {
+        *self
+            .sign_in_email
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = email;
+    }
+
+    /// Automatic sign-in for this app data folder (Q-P29o).
+    #[must_use]
+    pub fn auto_sign_in(&self) -> cl_settings::AutoSignIn {
+        let dir = self
+            .store
+            .path()
+            .parent()
+            .map_or_else(|| self.backup_dir.clone(), Path::to_path_buf);
+        cl_settings::AutoSignIn::in_dir(&dir)
+    }
+
+    /// Turns automatic sign-in off (a password change, a recovery, a
+    /// temporary password or a second user, Q-P29o). Best effort: a
+    /// keychain refusal is logged without the value.
+    pub fn clear_auto_sign_in(&self) {
+        if let Err(e) = self.auto_sign_in().clear(self.secrets.as_ref()) {
+            tracing::warn!(error = %e, "automatic sign-in could not be cleared from the keychain");
+        }
+    }
+
+    /// True once Sign out ran: automatic sign-in waits for the next start.
+    #[must_use]
+    pub fn auto_sign_in_skipped(&self) -> bool {
+        self.skip_auto_sign_in
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Skip automatic sign-in for the rest of this run.
+    pub fn skip_auto_sign_in(&self) {
+        self.skip_auto_sign_in
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Signs out (File › Sign Out, P29 WP2): the session ends on the engine
+    /// (best effort, never aborted), the email is forgotten and automatic
+    /// sign-in waits for the next start. The caller closes the company
+    /// first.
+    pub fn sign_out(&self) {
+        self.skip_auto_sign_in();
+        self.set_signed_in_email(None);
+        self.reset_rights();
+        if let Some(mut d) = self.demo_state() {
+            d.auth.signed_in = None;
+            d.open = None;
+            return;
+        }
+        let session = self
+            .session
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let (Some(session), Some(live)) = (session, self.live.as_ref())
+            && let Ok(group) = live.queue.group()
+        {
+            let label = cl_api::OrphanLabel {
+                what: "orphan.lifecycle",
+                key: None,
+            };
+            let _ = group.write(&live.client, label, move |_c| async move {
+                Ok(session.logout().await.is_ok())
+            });
+        }
+    }
+
     /// Capabilities of the engine (empty in demo).
     #[must_use]
     pub fn capabilities(&self) -> Capabilities {
@@ -391,8 +515,88 @@ impl CompanyLink {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// The signed-in user's rights in the open company (P29). In the demo,
+    /// a non-owner role set on the demo (`demo.intake.role`) is not an
+    /// Admin.
+    #[must_use]
+    pub fn rights(&self) -> cl_model::permissions::Rights {
+        let r = self
+            .rights
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        match self.demo_state() {
+            Some(d) => {
+                let r = if cl_model::permissions::is_admin_role(&d.intake.role(), false) {
+                    r
+                } else {
+                    r.without_admin()
+                };
+                // P29 review B2: the demo answers `/sensitive-doors` as the
+                // pinned engine does once something is marked.
+                if d.hidden_notice() {
+                    r.with_doors(demo_doors())
+                } else {
+                    r
+                }
+            }
+            None => r,
+        }
+    }
+
+    /// Keeps new rights and tells the shell (`CompanyEvent::Rights`).
+    pub fn set_rights(&self, r: cl_model::permissions::Rights) {
+        // U-33: the demo engine hides what the real one would.
+        if let Some(mut d) = self.demo_state() {
+            d.hides_sensitive = r.hides_sensitive;
+        }
+        *self.rights.lock().unwrap_or_else(PoisonError::into_inner) = r.clone();
+        self.push(CompanyEvent::Rights(r));
+    }
+
+    /// The company just opened (None once closed).
+    pub fn set_open_tenant(&self, t: Option<TenantId>) {
+        *self
+            .open_tenant
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = t;
+    }
+
+    /// The open company's tag rules (Q-180 required groups, Q-276 every
+    /// line and the default tag), read from its local preferences each
+    /// time, so a change in Preferences or the Tags window shows at the
+    /// next form or save. The one place the forms' rules come from.
+    #[must_use]
+    pub fn tag_rules(&self) -> cl_model::lists::tags::TagRules {
+        use cl_model::lists::tags::TagRules;
+        if let Some(d) = self.demo_state() {
+            return TagRules::from_prefs(
+                d.require_tag_every_line,
+                d.default_tag,
+                &d.required_tag_groups,
+            );
+        }
+        let open = *self
+            .open_tenant
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        store_tag_rules(&self.store, open)
+    }
+
+    /// No company open: back to everything (only Open Company works).
+    pub fn reset_rights(&self) {
+        self.set_open_tenant(None);
+        *self.rights.lock().unwrap_or_else(PoisonError::into_inner) =
+            cl_model::permissions::Rights::all();
+    }
+
     /// Queue an event for the shell.
     pub fn push(&self, e: CompanyEvent) {
+        // Every way of opening a company tells the shell with `Opened`:
+        // the link learns which company's local rules apply from it.
+        if let CompanyEvent::Opened { tenant_id, .. } = &e {
+            self.set_open_tenant(Some(*tenant_id));
+        }
         self.events
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -499,6 +703,159 @@ where
     Ok(Task::Pending(pending))
 }
 
+/// The rights `/auth/me` reported (P29). The role comes from the engine's
+/// row for the open company, else from the company list (`fallback_role`).
+/// An answer without a permission map, or for another company, falls back
+/// to the role alone (view-only at most unless Admin: fail closed).
+#[must_use]
+pub fn rights_from_me(
+    me: &cl_api::Me,
+    tenant: TenantId,
+    fallback_role: &str,
+) -> cl_model::permissions::Rights {
+    use cl_model::permissions::Rights;
+    let role = if me.role.is_empty() {
+        fallback_role
+    } else {
+        me.role.as_str()
+    };
+    if me.active_tenant.is_some_and(|t| t != tenant) || me.permissions.is_empty() {
+        return Rights::from_role_only(role, me.is_super_admin);
+    }
+    Rights::from_engine(role, me.is_super_admin, &me.permissions)
+}
+
+/// Reads the rights in the company just opened (`/auth/me`); on any error
+/// the role alone decides (fail closed).
+pub async fn read_rights(
+    session: &Session,
+    tenant: TenantId,
+    fallback_role: &str,
+) -> cl_model::permissions::Rights {
+    match session.me().await {
+        Ok(me) => with_doors(session, rights_from_me(&me, tenant, fallback_role)).await,
+        Err(_) => cl_model::permissions::Rights::from_role_only(fallback_role, false),
+    }
+}
+
+/// The tag rules kept on this computer for `tenant` (the live path of
+/// [`CompanyLink::tag_rules`]); nothing open or no record: no rules.
+#[must_use]
+pub fn store_tag_rules(
+    store: &cl_settings::RecentStore,
+    tenant: Option<TenantId>,
+) -> cl_model::lists::tags::TagRules {
+    use cl_model::lists::tags::TagRules;
+    tenant
+        .and_then(|t| {
+            store.load().ok().and_then(|l| {
+                l.get(t).map(|r| {
+                    TagRules::from_prefs(
+                        r.prefs.require_tag_every_line,
+                        r.prefs.default_tag,
+                        &r.prefs.required_tag_groups,
+                    )
+                })
+            })
+        })
+        .unwrap_or_default()
+}
+
+/// The pinned engine's `/sensitive-doors` answer for a viewer with a
+/// hidden account (the demo's answer; nothing refused if unreadable, which
+/// a cl-model test rules out).
+#[must_use]
+pub fn demo_doors() -> std::sync::Arc<cl_model::permissions::SensitiveDoors> {
+    static DOORS: std::sync::LazyLock<std::sync::Arc<cl_model::permissions::SensitiveDoors>> =
+        std::sync::LazyLock::new(|| {
+            std::sync::Arc::new(
+                serde_json::from_str(cl_core::sensitive_doors::ENGINE_ANSWER_JSON)
+                    .unwrap_or_default(),
+            )
+        });
+    std::sync::Arc::clone(&DOORS)
+}
+
+/// P29 review B2: for a user from whom sensitive accounts are hidden, the
+/// engine's list of routes it still refuses (`/sensitive-doors`), so the
+/// app doesn't offer them. An older engine or a failed read: as before.
+pub async fn with_doors(
+    session: &Session,
+    r: cl_model::permissions::Rights,
+) -> cl_model::permissions::Rights {
+    if !r.hides_sensitive {
+        return r;
+    }
+    match session.sensitive_doors().await {
+        Ok(Some(d)) => r.with_doors(d),
+        Ok(None) | Err(_) => r,
+    }
+}
+
+/// Reads the rights again after the engine refused something with 403
+/// (P29 §5: rights may have changed mid-session). The shell polls it each
+/// frame; one read at a time, and the rights change only when they differ.
+#[derive(Default)]
+pub struct RightsWatch {
+    seen: u64,
+    task: Option<(RequestGroup, Task<cl_model::permissions::Rights>)>,
+}
+
+impl std::fmt::Debug for RightsWatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RightsWatch")
+            .field("seen", &self.seen)
+            .field("reading", &self.task.is_some())
+            .finish()
+    }
+}
+
+impl RightsWatch {
+    /// A company was opened: refusals before now belong to the last one.
+    pub fn opened(&mut self, link: &CompanyLink) {
+        self.seen = link.session().map_or(0, |s| s.forbidden_seen());
+        self.task = None;
+    }
+
+    /// Starts a read when a new 403 came back; applies a finished read.
+    /// Returns true while a read runs.
+    pub fn poll(&mut self, link: &CompanyLink, tenant: Option<TenantId>, role: &str) -> bool {
+        let (Some(session), Some(tenant)) = (link.session(), tenant) else {
+            return false;
+        };
+        if let Some((_, task)) = self.task.as_mut() {
+            let Some(r) = task.try_take() else {
+                return true;
+            };
+            self.task = None;
+            if let Ok(r) = r
+                && r != link.rights()
+            {
+                tracing::info!("the signed-in user's rights changed; menus follow");
+                link.set_rights(r);
+            }
+            return false;
+        }
+        let n = session.forbidden_seen();
+        if n <= self.seen {
+            return false;
+        }
+        self.seen = n;
+        let Some(Ok(group)) = link.group() else {
+            return false;
+        };
+        let role = role.to_owned();
+        if let Ok(p) = group.read(&session, move |s| async move {
+            let me = s.me().await?;
+            let r = rights_from_me(&me, tenant, &role);
+            Ok(with_doors(&s, r).await)
+        }) {
+            self.task = Some((group, Task::Pending(p)));
+        }
+        self.task.is_some()
+    }
+}
+
 /// Status-bar text for the signed-in user in a company (name and role; no
 /// email). An owner or administrator reads "Admin"; the other engine roles
 /// have plain words, and a role this build doesn't know is shown as its
@@ -522,9 +879,63 @@ pub fn user_text(display_name: &str, role: &str) -> String {
     format!("{display_name} \u{b7} {role}")
 }
 
+/// [`user_text`] with the rights read for the company (P29 QA-4): a
+/// `bookkeeper` on the A/R or A/P template reads as the Users list names
+/// it, and one on a custom role (or with overrides) as "Custom role" (the
+/// engine tells a non-Admin no template name).
+#[must_use]
+pub fn user_text_for(
+    display_name: &str,
+    role: &str,
+    rights: &cl_model::permissions::Rights,
+) -> String {
+    use cl_model::permissions::BuiltinRole;
+    if role.trim() != "bookkeeper" || rights.is_admin() {
+        return user_text(display_name, role);
+    }
+    let key = match rights.builtin_role() {
+        Some(BuiltinRole::Bookkeeper) => "status.role.bookkeeper",
+        Some(BuiltinRole::Receivables) => "status.role.receivables",
+        Some(BuiltinRole::Payables) => "status.role.payables",
+        None => "status.role.custom",
+    };
+    format!("{display_name} \u{b7} {}", crate::i18n::t(key))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// P29 review B2: every desktop operation the pinned engine refuses a
+    /// viewer with a hidden account is claimed by a gate: a catalog
+    /// report's own route (the Reports list and its commands), a
+    /// [`cl_model::permissions::Door`], or an Admin-only screen. A new
+    /// operation under a refused prefix fails here until it has one.
+    #[test]
+    fn every_refused_desktop_operation_has_a_gate() {
+        use cl_model::permissions::{ADMIN_ONLY_ROUTES, Door};
+        let doors = demo_doors();
+        let claimed = |m: &str, r: &str| {
+            cl_core::report::Source::ALL
+                .iter()
+                .any(|s| m == "GET" && s.route().replace(":id", "{id}") == r)
+                || Door::ALL
+                    .iter()
+                    .any(|d| d.routes().iter().any(|(dm, dr)| *dm == m && *dr == r))
+                || ADMIN_ONLY_ROUTES
+                    .iter()
+                    .any(|(am, ar)| *am == m && *ar == r)
+        };
+        let mut open = Vec::new();
+        for op in &cl_api::OPERATIONS {
+            let m = op.method().as_str();
+            if doors.refuses(m, op.route()) && !claimed(m, op.route()) {
+                open.push(format!("{m} {}", op.route()));
+            }
+        }
+        assert!(open.is_empty(), "refused but offered: {open:#?}");
+        assert!(doors.hides_sensitive, "the demo answer hides");
+    }
 
     #[test]
     fn demo_link_has_no_engine_and_queues_events() {
@@ -555,5 +966,38 @@ mod tests {
         assert_eq!(user_text("v", "readonly"), "v \u{b7} View only");
         assert_eq!(user_text("x", "client_viewer"), "x \u{b7} Client viewer");
         assert_eq!(user_text("x", ""), "x");
+    }
+
+    /// P29 QA-4: the A/R and A/P templates are named as the Users list
+    /// names them; a custom role is not called "Bookkeeper".
+    #[test]
+    fn the_status_bar_names_the_role_template() {
+        use cl_model::permissions::{BuiltinRole, Level, Resource, Rights};
+        let ap = BuiltinRole::Payables.rights();
+        assert_eq!(
+            user_text_for("qa-ap", "bookkeeper", &ap),
+            "qa-ap \u{b7} Accounts payable"
+        );
+        let ar = BuiltinRole::Receivables.rights();
+        assert_eq!(
+            user_text_for("r", "bookkeeper", &ar),
+            "r \u{b7} Accounts receivable"
+        );
+        let bk = BuiltinRole::Bookkeeper.rights();
+        assert_eq!(user_text_for("b", "bookkeeper", &bk), "b \u{b7} Bookkeeper");
+        let mut custom = ap.clone();
+        custom.set(Resource::Reports, Level::None);
+        assert_eq!(
+            user_text_for("c", "bookkeeper", &custom),
+            "c \u{b7} Custom role"
+        );
+        assert_eq!(
+            user_text_for("o", "owner", &Rights::all()),
+            "o \u{b7} Admin"
+        );
+        assert_eq!(
+            user_text_for("v", "readonly", &Rights::view_only()),
+            "v \u{b7} View only"
+        );
     }
 }

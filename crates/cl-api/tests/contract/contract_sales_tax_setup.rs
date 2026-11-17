@@ -94,6 +94,7 @@ pub(crate) struct Monett {
 pub(crate) fn sales_tax_company(h: &Harness) -> (TenantId, Session) {
     static ONCE: std::sync::OnceLock<TenantId> = std::sync::OnceLock::new();
     let tenant = *ONCE.get_or_init(|| {
+        h.auth_slots(1);
         h.run(h.s1.create_company(&NewCompany {
             company_name: unique("Sales Tax Co"),
             business_type: Some("default".into()),

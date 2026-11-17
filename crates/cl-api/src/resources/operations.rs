@@ -498,6 +498,11 @@ pub(crate) const CREATE_TENANT: Operation = op(
     false,
 );
 pub(crate) const AUTH_ME: Operation = session_read("/api/v1/auth/me");
+/// P29: change your own password (also ends a temporary password's
+/// must-change, U-230). The engine ends every session and answers with a
+/// fresh token pair for this one.
+pub(crate) const CHANGE_PASSWORD: Operation =
+    auth("/api/v1/auth/change-password", RouteKind::Session);
 /// Read without `X-Company-Id`: used while opening a company to learn its id.
 pub(crate) const COMPANY_GET: Operation = session_read("/api/v1/company");
 
@@ -508,6 +513,9 @@ pub(crate) const ACCOUNTS_CREATE: Operation = keyable(Method::Post, "/api/v1/acc
 pub(crate) const ACCOUNT_GET: Operation = read("/api/v1/accounts/{id}");
 pub(crate) const ACCOUNT_PUT: Operation = write(Method::Put, "/api/v1/accounts/{id}");
 pub(crate) const ACCOUNT_DELETE: Operation = write(Method::Delete, "/api/v1/accounts/{id}");
+/// U-33: mark or unmark an account sensitive (Admin only).
+pub(crate) const ACCOUNT_SENSITIVE_PUT: Operation =
+    write(Method::Put, "/api/v1/accounts/{id}/sensitive");
 pub(crate) const CONTACTS_LIST: Operation = read("/api/v1/contacts");
 pub(crate) const CONTACTS_CREATE: Operation = keyable(Method::Post, "/api/v1/contacts");
 pub(crate) const CONTACT_GET: Operation = read("/api/v1/contacts/{id}");
@@ -1882,6 +1890,53 @@ pub(crate) const REPORT_BUILDER_DRAFT: Operation = op(
     true,
 );
 
+// ---- P29 WP3 team management (owner or super admin; the list is ungated) ----
+
+/// A company-scoped write that is never retried (it mints a credential).
+const fn team_once(route: &'static str) -> Operation {
+    op(
+        Method::Post,
+        route,
+        RetryClass::Never,
+        RouteKind::Session,
+        TimeoutClass::Write,
+        true,
+    )
+}
+
+pub(crate) const TEAM_USERS: Operation = read("/api/v1/company/users");
+pub(crate) const TEAM_INVITE: Operation = team_once("/api/v1/company/invite-user");
+pub(crate) const TEAM_USER_PATCH: Operation =
+    write(Method::Patch, "/api/v1/company/users/{userId}");
+pub(crate) const TEAM_DEACTIVATE: Operation =
+    write(Method::Post, "/api/v1/company/users/{userId}/deactivate");
+pub(crate) const TEAM_REACTIVATE: Operation =
+    write(Method::Post, "/api/v1/company/users/{userId}/reactivate");
+pub(crate) const TEAM_UNLOCK: Operation =
+    write(Method::Post, "/api/v1/company/users/{userId}/unlock");
+/// U-230 (`temp-password-v1`): the reply holds a password, shown once.
+pub(crate) const TEAM_TEMP_PASSWORD: Operation =
+    team_once("/api/v1/company/users/{userId}/temporary-password");
+pub(crate) const TEAM_TEMPLATES: Operation = read("/api/v1/company/permission-templates");
+pub(crate) const TEAM_TEMPLATES_CREATE: Operation =
+    write(Method::Post, "/api/v1/company/permission-templates");
+pub(crate) const TEAM_TEMPLATE_PUT: Operation =
+    write(Method::Put, "/api/v1/company/permission-templates/{id}");
+pub(crate) const TEAM_TEMPLATE_DELETE: Operation =
+    write(Method::Delete, "/api/v1/company/permission-templates/{id}");
+pub(crate) const TEAM_USER_PERMISSIONS: Operation =
+    read("/api/v1/company/users/{userId}/permissions");
+pub(crate) const TEAM_USER_PERMISSIONS_PUT: Operation =
+    write(Method::Put, "/api/v1/company/users/{userId}/permissions");
+
+// ---- P29 WP8 (U-215, `1099-thresholds-v1`): the company's 1099 thresholds ----
+pub(crate) const COMPANY_1099_THRESHOLDS: Operation = read("/api/v1/company/1099-thresholds");
+pub(crate) const COMPANY_1099_THRESHOLDS_PUT: Operation =
+    write(Method::Put, "/api/v1/company/1099-thresholds");
+
+// ---- P29 review B2 (`sensitive-accounts-doors-v1`) ----
+pub(crate) const SENSITIVE_DOORS: Operation = read("/api/v1/sensitive-doors");
+
 #[cfg(test)]
 /// POSTs that save nothing and call an AI model (A10 QA-1): `Query`.
 const QUERY_POSTS: [(&str, &str); 2] = [
@@ -1892,16 +1947,18 @@ const QUERY_POSTS: [(&str, &str); 2] = [
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
-const NEVER_RETRIED: [(&str, &str); 5] = [
+const NEVER_RETRIED: [(&str, &str); 7] = [
     ("POST", "/api/v1/tenants"),
     ("POST", "/api/v1/tenants/{id}/delete"),
     ("POST", "/api/v1/desktop/recover-password"),
     ("PUT", "/api/v1/company/closing-password"),
     ("POST", "/api/v1/company/closing-password/reset"),
+    ("POST", "/api/v1/company/invite-user"),
+    ("POST", "/api/v1/company/users/{userId}/temporary-password"),
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 421] = [
+pub const OPERATIONS: [Operation; 439] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -1921,6 +1978,7 @@ pub const OPERATIONS: [Operation; 421] = [
     ACCOUNT_GET,
     ACCOUNT_PUT,
     ACCOUNT_DELETE,
+    ACCOUNT_SENSITIVE_PUT,
     CONTACTS_LIST,
     CONTACTS_CREATE,
     CONTACT_GET,
@@ -2342,6 +2400,27 @@ pub const OPERATIONS: [Operation; 421] = [
     REPORT_DEFS_EXPORT,
     REPORT_DEFS_IMPORT_PREVIEW,
     REPORT_BUILDER_DRAFT,
+    // P29 (U-230)
+    CHANGE_PASSWORD,
+    // P29 WP3 team management
+    TEAM_USERS,
+    TEAM_INVITE,
+    TEAM_USER_PATCH,
+    TEAM_DEACTIVATE,
+    TEAM_REACTIVATE,
+    TEAM_UNLOCK,
+    TEAM_TEMP_PASSWORD,
+    TEAM_TEMPLATES,
+    TEAM_TEMPLATES_CREATE,
+    TEAM_TEMPLATE_PUT,
+    TEAM_TEMPLATE_DELETE,
+    TEAM_USER_PERMISSIONS,
+    TEAM_USER_PERMISSIONS_PUT,
+    // P29 WP8 1099 thresholds (U-215)
+    COMPANY_1099_THRESHOLDS,
+    COMPANY_1099_THRESHOLDS_PUT,
+    // P29 review B2
+    SENSITIVE_DOORS,
 ];
 
 /// Looks up a covered operation.
@@ -2408,6 +2487,31 @@ mod tests {
             })
             .collect();
         assert_eq!(rows, table);
+    }
+
+    /// P29 fix pass: the user and secret routes are never sent again after
+    /// a transport error. Invite, temporary password, recovery, change
+    /// password and a new recovery key are `Never` (single-shot even on a
+    /// refused connect). Marking an account sensitive is an idempotent PUT
+    /// sent without an outcome reconciler, so `PreHandlerOnly` gives a
+    /// timeout or lost connection back as an unknown outcome
+    /// (`Transport::ambiguous` with no reconciler), never a resend; only a
+    /// connect refused before anything was sent is tried again.
+    #[test]
+    fn user_and_secret_routes_are_never_resent() {
+        for o in [
+            TEAM_INVITE,
+            TEAM_TEMP_PASSWORD,
+            RECOVER_PASSWORD,
+            CHANGE_PASSWORD,
+            RECOVERY_KEY_ROTATE,
+        ] {
+            assert_eq!(o.retry(), RetryClass::Never, "{}", o.route());
+            assert_eq!(o.key_set(), None, "{}", o.route());
+        }
+        assert_eq!(ACCOUNT_SENSITIVE_PUT.retry(), RetryClass::PreHandlerOnly);
+        assert_eq!(ACCOUNT_SENSITIVE_PUT.key_set(), None);
+        assert_eq!(ACCOUNT_SENSITIVE_PUT.method(), Method::Put);
     }
 
     #[test]

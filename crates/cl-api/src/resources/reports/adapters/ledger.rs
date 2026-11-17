@@ -192,7 +192,7 @@ pub fn general_ledger(
             truncated,
             note: None,
             note_drill: None,
-            hidden_notice: false,
+            hidden_notice: super::hidden_notice(v),
         },
     })
 }

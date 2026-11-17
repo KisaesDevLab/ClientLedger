@@ -1,0 +1,61 @@
+# Preferences › 1099 amounts (P29 WP8, U-215) against `clientledger --demo`:
+# an Admin sees one amount per 1099 box with the year's standard amount as
+# the placeholder (the demo engine mirrors the engine's 2026 table), types
+# an amount, is refused a negative one in plain words, saves, sees the
+# amount read back as dollars and cents, then clears it again so the dark
+# run starts the same. Synthetic data only.
+name: thresholds_1099
+description: "Preferences, 1099 amounts: per-box amount, refused negative, save and clear."
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: edit.preferences
+  - assert_state: {key: screen.screen, equals: preferences}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: 1099 amounts}
+  - assert_state: {key: screen.category, equals: "1099"}
+  - assert_state: {key: screen.thresholds_1099.available, equals: ready}
+  - assert_state: {key: screen.thresholds_1099.year, equals: 2026}
+  - assert_exists: {role: label, label: "1099 reporting amounts"}
+  - assert_exists: {role: text_input, label: "Nonemployee pay (1099-NEC box 1)"}
+  - assert_exists: {role: text_input, label: "Payments to an attorney (1099-MISC box 10)"}
+  # Several boxes share the 2026 standard amount of 2,000.00.
+  - assert_exists: {role: label, label: "2,000.00", index: 0}
+  - assert_no_clipping: {}
+  - screenshot: thresholds-blank
+
+  # A negative amount is refused in plain words; nothing is saved.
+  - type: {text: "-5", target: {role: text_input, label: "Royalties (1099-MISC box 2)"}}
+  - click: {role: button, label: Save}
+  - wait: {ms: 200}
+  - assert_exists: {label_contains: "Each 1099 amount must be blank, or zero or more"}
+  - assert_state: {key: screen.dirty, equals: true}
+  - screenshot: thresholds-refused
+
+  # A good amount saves and reads back in dollars and cents. (Save took the
+  # focus: outside a field Ctrl+A opens the Chart of Accounts.)
+  - click: {role: text_input, label: "Royalties (1099-MISC box 2)"}
+  - key: Ctrl+A
+  - type: {text: "25"}
+  - type: {text: "1500", target: {role: text_input, label: "Nonemployee pay (1099-NEC box 1)"}}
+  - click: {role: button, label: Save}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.thresholds_1099.boxes.0.saved, equals: "1,500.00"}
+  - assert_state: {key: screen.thresholds_1099.boxes.2.saved, equals: "25.00"}
+  - assert_no_clipping: {}
+  - screenshot: thresholds-saved
+
+  # Cleared again: back to the standard amounts.
+  - click: {role: text_input, label: "Nonemployee pay (1099-NEC box 1)"}
+  - key: Ctrl+A
+  - key: Backspace
+  - click: {role: text_input, label: "Royalties (1099-MISC box 2)"}
+  - key: Ctrl+A
+  - key: Backspace
+  - click: {role: button, label: Save}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.dirty, equals: false}
+  - assert_state: {key: screen.thresholds_1099.boxes.0.saved, equals: null}
+  - assert_state: {key: screen.thresholds_1099.boxes.2.saved, equals: null}
+  - command: file.close_window

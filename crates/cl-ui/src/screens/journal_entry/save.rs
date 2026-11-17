@@ -143,6 +143,7 @@ impl JournalScreen {
             return false;
         }
         self.problems.clear();
+        self.tag_refusal.clear();
         self.error = None;
         self.notice = None;
         self.stale = false;
@@ -157,6 +158,11 @@ impl JournalScreen {
                 return false;
             }
         };
+        // P29 WP7: the company's tag rules (Q-276, Q-180).
+        if let Err(texts) = self.tag_gate(&self.compose()) {
+            self.tag_refusal = texts;
+            return false;
+        }
         let basis = self.editing.as_ref().map_or(self.new_basis, |e| e.basis);
         let entry = match self.entry_of(&checked, basis) {
             Ok(e) => e,

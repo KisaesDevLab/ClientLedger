@@ -52,6 +52,17 @@ impl Serialize for PasswordRecovery {
 /// Minimum password length (Q-211).
 pub const PASSWORD_MIN_CHARS: usize = 12;
 
+/// Longest password the engine takes, in bytes (bcrypt reads 72).
+pub const PASSWORD_MAX_BYTES: usize = 72;
+
+/// A new password the engine will take: 12+ characters, at most 72 bytes
+/// (Q-211; no composition rules, no expiry).
+#[must_use]
+pub fn password_fits(password: &Secret) -> bool {
+    let p = password.expose();
+    p.chars().count() >= PASSWORD_MIN_CHARS && p.len() <= PASSWORD_MAX_BYTES
+}
+
 /// Normalises a key the owner typed: trims, uppercases, and drops spaces
 /// and hyphens, so `abcd-efgh` and `ABCD EFGH` compare equal.
 #[must_use]
@@ -66,16 +77,29 @@ pub fn normalize_recovery_key(typed: &str) -> Secret {
 }
 
 impl Client {
-    /// `POST /api/v1/desktop/recover-password`. Never retried.
+    /// `POST /api/v1/desktop/recover-password`. Never retried. A successful
+    /// recovery uses the key up, so the engine answers with a fresh one
+    /// (Q-P29m), returned here to be shown once; `None` from an engine
+    /// that sent none (the owner is asked to make a new key).
     ///
     /// # Errors
-    /// `Local(InvalidValue)` for an empty key or a short password (nothing
-    /// sent); `Unauthorized(InvalidCredentials)` for a wrong key;
-    /// `RateLimited`; `NotFound` on an engine without U-23; any
-    /// [`ApiError`].
-    pub async fn recover_password(&self, recovery: &PasswordRecovery) -> Result<(), ApiError> {
+    /// `Local(InvalidValue)` for an empty key or email, or a password that
+    /// doesn't fit (nothing sent); `Unauthorized(InvalidCredentials)` for a
+    /// wrong key or an unknown email; `RateLimited`; `Validation` for a
+    /// password the engine refused; `NotFound` on an engine without U-23;
+    /// any [`ApiError`].
+    pub async fn recover_password(
+        &self,
+        recovery: &PasswordRecovery,
+    ) -> Result<Option<Secret>, ApiError> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct W {
+            #[serde(default)]
+            recovery_key: Option<String>,
+        }
         if recovery.recovery_key.is_empty()
-            || recovery.new_password.expose().chars().count() < PASSWORD_MIN_CHARS
+            || !password_fits(&recovery.new_password)
             || recovery.email.trim().is_empty()
         {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
@@ -83,15 +107,21 @@ impl Client {
         let call = Call::at(Method::Post, RECOVER_PASSWORD.route())
             .json_body(json_body(recovery)?)
             .timeout(TimeoutClass::Auth);
-        self.exec()
+        let reply = self
+            .exec()
             .run(
                 &RECOVER_PASSWORD,
                 call,
                 &StaticAuth(AttemptAuth::default()),
                 None,
             )
-            .await
-            .map(drop)
+            .await?;
+        // An empty or unreadable body (an older engine) is "no key".
+        Ok(serde_json::from_slice::<W>(&reply.body)
+            .ok()
+            .and_then(|w| w.recovery_key)
+            .filter(|k| !k.trim().is_empty())
+            .map(Secret::new))
     }
 }
 
@@ -169,6 +199,48 @@ mod tests {
             .expect_err("short");
         assert_eq!(e, ApiError::Local(LocalValidation::InvalidValue));
         assert_eq!(requests(&server, "POST").await.len(), 1);
+    }
+
+    /// Q-P29m: the reply's fresh key comes back as a secret; an engine that
+    /// sends none gives `None`.
+    #[tokio::test]
+    async fn recover_returns_the_fresh_key() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/desktop/recover-password"))
+            .respond_with(json(
+                200,
+                r#"{"recovered":true,"recoveryKey":"FRESH-CANARY"}"#,
+            ))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/desktop/recover-password"))
+            .respond_with(json(200, r#"{"recovered":true}"#))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let r = PasswordRecovery {
+            email: "owner@example.com".into(),
+            recovery_key: normalize_recovery_key("abcde-fghjk"),
+            new_password: Secret::new("a-new-password-123"),
+        };
+        let key = s.client().recover_password(&r).await.expect("ok");
+        let key = key.expect("fresh key");
+        assert_eq!(key.expose(), "FRESH-CANARY");
+        assert!(!format!("{key:?}").contains("CANARY"));
+        assert!(s.client().recover_password(&r).await.expect("ok").is_none());
+        let long = PasswordRecovery {
+            new_password: Secret::new("x".repeat(73)),
+            ..r
+        };
+        assert_eq!(
+            s.client().recover_password(&long).await.expect_err("long"),
+            ApiError::Local(LocalValidation::InvalidValue)
+        );
+        assert!(password_fits(&Secret::new("x".repeat(72))));
+        assert!(!password_fits(&Secret::new("x".repeat(11))));
     }
 
     #[tokio::test]

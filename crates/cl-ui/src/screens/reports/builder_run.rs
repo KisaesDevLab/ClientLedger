@@ -811,7 +811,14 @@ fn poll_run(w: &mut ReportWindow) {
             }
             b.missing.clear();
             let denied = !run.denied.is_empty();
-            let table = dress(b.def.as_ref(), run.table, denied);
+            let mut table = dress(b.def.as_ref(), run.table, denied);
+            let sections = b.def.as_ref().map_or(0, |d| {
+                cl_model::report_def::outline::walk(&d.nodes)
+                    .iter()
+                    .filter(|v| matches!(v.node, cl_model::report_def::Node::Section(_)))
+                    .count()
+            });
+            table.meta.note = note_with_denied(table.meta.note.take(), run.denied.len(), sections);
             let mut detail_columns = run.detail_columns;
             dress_columns(b.def.as_ref(), &mut detail_columns);
             b.shown = b.reference.clone().map(|reference| Shown {
@@ -841,10 +848,18 @@ fn poll_run(w: &mut ReportWindow) {
             // report or "Try again"; the window says which and offers the
             // fix (one click for a merge).
             if let Some(BuilderRefusal::MissingReference(list)) = builder_refusal(&e) {
-                b.missing = list;
                 w.table = None;
                 w.error = None;
                 w.state = RunState::Failed;
+                // P29 QA-7: an account hidden for this role is answered as
+                // deleted (U-33); it is said so, with nothing to fix (the
+                // report is shared, and read-only for this user).
+                if hidden_for_role(&hidden_known(b, w.memo.current.as_ref()), &list) {
+                    b.missing.clear();
+                    w.problem = Some("reports.builder.hidden_for_role");
+                    return;
+                }
+                b.missing = list;
                 w.problem = Some(missing_key(&b.missing));
                 return;
             }
@@ -1368,6 +1383,75 @@ fn poll_detail(w: &mut ReportWindow) {
     w.state = RunState::Shown;
 }
 
+/// P29 QA-3, QA-6: a builder definition (JSON) the role can see no part
+/// of; one that can't be read is left to the window's own message.
+pub(crate) fn wholly_denied(definition: &Value, rights: &cl_model::permissions::Rights) -> bool {
+    let text = serde_json::to_string(definition).unwrap_or_default();
+    cl_model::report_def::parse(&text)
+        .is_ok_and(|d| cl_model::report_def::outline::wholly_denied(&d.nodes, rights))
+}
+
+/// The engine's "No activity for these dates" is wrong next to sections
+/// the role can't see (P29 QA-3): it goes, and a report the role sees no
+/// part of says so instead.
+pub(crate) fn note_with_denied(
+    note: Option<String>,
+    denied: usize,
+    sections: usize,
+) -> Option<String> {
+    if denied == 0 {
+        return note;
+    }
+    if sections > 0 && denied >= sections {
+        return Some("@reports.builder.all_denied".into());
+    }
+    let kept = note
+        .unwrap_or_default()
+        .replace("@reports.builder.no_activity", "")
+        .trim()
+        .to_string();
+    (!kept.is_empty()).then_some(kept)
+}
+
+/// What this window knows of the accounts its report names that are
+/// hidden for the role (U-33): the ids, and whether the memorized row said
+/// it names some at all.
+#[derive(Debug, Default)]
+pub(crate) struct HiddenKnown {
+    pub(crate) ids: Vec<String>,
+    pub(crate) any: bool,
+}
+
+/// [`HiddenKnown`] from the editor's saved row or the memorized row shown.
+pub(crate) fn hidden_known(b: &Builder, row: Option<&DefinitionRow>) -> HiddenKnown {
+    let mut out = HiddenKnown::default();
+    if let Some(s) = b.saved.as_ref() {
+        out.any |= s.hidden_refs;
+        out.ids.extend(s.hidden_ids.iter().cloned());
+    }
+    if let Some(r) = row {
+        out.any |= r.hidden_refs;
+        out.ids.extend(hidden_ids(r));
+    }
+    out
+}
+
+/// P29 QA-7: every "missing" name of a run is an account hidden for this
+/// role (the engine answers those as deleted in an inline definition,
+/// U-33), so the report is not broken, only hidden in part.
+pub(crate) fn hidden_for_role(
+    known: &HiddenKnown,
+    missing: &[cl_api::resources::reports::definitions::MissingRef],
+) -> bool {
+    known.any
+        && !missing.is_empty()
+        && missing.iter().all(|m| {
+            m.kind == "account"
+                && m.merged().is_none()
+                && (known.ids.is_empty() || m.ids.iter().all(|id| known.ids.contains(id)))
+        })
+}
+
 /// The window's words for missing names: deleted, or merged into another.
 pub(crate) fn missing_key(
     missing: &[cl_api::resources::reports::definitions::MissingRef],
@@ -1506,11 +1590,17 @@ pub(crate) fn catalog(w: &mut ReportWindow, ui: &mut Ui, tokens: &Tokens) {
         return;
     }
     let words: Vec<String> = w.search.split_whitespace().map(str::to_lowercase).collect();
+    // P29: a starter that ties to a catalog report follows that report's
+    // area (U-227); the engine gates the rest.
+    let rights = w.link.rights();
     let shown: Vec<&Starter> = list
         .iter()
         .filter(|s| {
             let title = s.title.to_lowercase();
             words.iter().all(|x| title.contains(x.as_str()))
+                && cl_model::reports::find(&s.key)
+                    .is_none_or(|spec| rights.allows_report(spec.source))
+                && !wholly_denied(&s.definition, &rights)
         })
         .collect();
     let new_report = new_report_matches(&words);
@@ -1742,12 +1832,28 @@ fn saved_of(row: &DefinitionRow, def: BuilderDefinition, kind: SavedKind) -> Sav
         version: row.version,
         kind,
         can_edit: row.can_edit,
+        hidden_refs: row.hidden_refs,
+        hidden_ids: hidden_ids(row),
         def,
         name: row.name.clone(),
         group_id: row.group_id.clone(),
         author: row.created_by_name.clone(),
         updated_at: row.updated_at,
     }
+}
+
+/// The account ids a memorized row names that are hidden for this role
+/// (U-33), each once.
+pub(crate) fn hidden_ids(row: &DefinitionRow) -> Vec<String> {
+    let mut ids: Vec<String> = row
+        .hidden
+        .iter()
+        .filter(|h| h.kind.is_empty() || h.kind == "account")
+        .flat_map(|h| h.ids.iter().cloned())
+        .collect();
+    ids.sort();
+    ids.dedup();
+    ids
 }
 
 /// A definition's text read, or the notice that says why it can't be.

@@ -21,6 +21,13 @@ use crate::i18n::t;
 use crate::theme::Tokens;
 use crate::windows::Screen;
 
+/// Security review minor 5: closing the window clears a copied key.
+impl Drop for RecoveryKeyScreen {
+    fn drop(&mut self) {
+        crate::secret_clipboard::clear_soon();
+    }
+}
+
 /// The recovery-key window.
 pub struct RecoveryKeyScreen {
     link: Arc<CompanyLink>,
@@ -91,6 +98,17 @@ impl RecoveryKeyScreen {
     /// Makes a new key on the owner's explicit request; the old key stops
     /// working the moment the engine answers.
     fn rotate(&mut self) {
+        // P29 WP4: the demo makes its next synthetic key (the old one stops
+        // working, as on the engine).
+        let demo = self.link.demo_state().map(|mut d| d.auth.rotate());
+        if let Some(key) = demo {
+            self.revealed = false;
+            self.confirmed = false;
+            self.saved_to = None;
+            self.copied = false;
+            self.task = Some(Task::ready(Ok(key)));
+            return;
+        }
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             return;
         };
@@ -246,7 +264,7 @@ impl Screen for RecoveryKeyScreen {
                     self.revealed = !self.revealed;
                 }
                 if ui.button(t("recovery.copy")).clicked() {
-                    ui.ctx().copy_text(Self::groups(key.expose()));
+                    crate::secret_clipboard::copy(ui.ctx(), Self::groups(key.expose()));
                     self.copied = true;
                 }
             });
@@ -254,7 +272,15 @@ impl Screen for RecoveryKeyScreen {
                 form::hint(ui, &tokens, &t("recovery.copied"));
             }
             ui.add_space(8.0);
-            form::field(ui, &t("recovery.save_path"), &mut self.save_path);
+            // A whole path is long: the field takes the card's width (the
+            // shared 360-point field cut it off), the full path also on hover.
+            ui.horizontal(|ui| {
+                let l = ui.add(egui::Label::new(t("recovery.save_path")).selectable(false));
+                let w = ui.available_width().max(120.0);
+                ui.add_sized([w, 24.0], egui::TextEdit::singleline(&mut self.save_path))
+                    .labelled_by(l.id)
+                    .on_hover_text(self.save_path.clone());
+            });
             if ui.button(t("recovery.save")).clicked() {
                 self.save_file();
             }
@@ -275,6 +301,7 @@ impl Screen for RecoveryKeyScreen {
             if form::actions(ui, &t("recovery.done"), &[]).is_some() {
                 self.done = true;
                 self.key = None;
+                crate::secret_clipboard::clear_soon();
                 self.link.push(CompanyEvent::OpenWindow(CommandId::new(
                     "company.opening_balances",
                 )));

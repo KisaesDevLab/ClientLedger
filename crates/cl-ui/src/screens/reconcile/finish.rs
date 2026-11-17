@@ -80,8 +80,13 @@ fn done(s: &mut ReconcileScreen, ui: &Ui) {
     dialog(ui, &t("reconcile.done.title"), |ui| {
         ui.add(egui::Label::new(t("reconcile.done.text")).wrap());
         ui.add_space(8.0);
+        let open = s.reports_open();
         ui.horizontal(|ui| {
-            if ui.button(t("reconcile.reports.summary")).clicked() {
+            if ui
+                .add_enabled(open, egui::Button::new(t("reconcile.reports.summary")))
+                .on_disabled_hover_text(t("sensitive.door_closed"))
+                .clicked()
+            {
                 s.reports.open(
                     &s.link,
                     s.group.as_ref(),
@@ -89,7 +94,11 @@ fn done(s: &mut ReconcileScreen, ui: &Ui) {
                     super::reports::Kind::Summary,
                 );
             }
-            if ui.button(t("reconcile.reports.detail")).clicked() {
+            if ui
+                .add_enabled(open, egui::Button::new(t("reconcile.reports.detail")))
+                .on_disabled_hover_text(t("sensitive.door_closed"))
+                .clicked()
+            {
                 s.reports.open(
                     &s.link,
                     s.group.as_ref(),

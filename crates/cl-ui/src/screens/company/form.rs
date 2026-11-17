@@ -35,6 +35,18 @@ impl SecretText {
         self.0.trim()
     }
 
+    /// The text as typed (borrowed; never copied).
+    #[must_use]
+    pub fn text(&self) -> &str {
+        self.0.as_str()
+    }
+
+    /// The text as typed, as a [`cl_core::Secret`] to send.
+    #[must_use]
+    pub fn to_secret(&self) -> cl_core::Secret {
+        cl_core::Secret::new(self.0.as_str())
+    }
+
     /// Wipes the text.
     pub fn clear(&mut self) {
         zeroize::Zeroize::zeroize(&mut *self.0);
@@ -508,6 +520,11 @@ pub fn inline_error(ui: &mut Ui, tokens: &Tokens, error: &dyn cl_core::OwnerFaci
 /// amounts, names or memo text) go to the clipboard.
 pub fn inline_error_details(ui: &mut Ui, tokens: &Tokens, error: &cl_api::ApiError, context: &str) {
     inline_error(ui, tokens, error);
+    // U-33: a transaction or report hidden for the role is a plain
+    // message, not a problem to report.
+    if matches!(error, cl_api::ApiError::Sensitive(_)) {
+        return;
+    }
     if ui.button(t("errors.copy_details")).clicked() {
         let detail = crate::errors::scrub_line(&cl_core::OwnerFacing::scrubbed_detail(error));
         ui.ctx().copy_text(crate::errors::details_text(

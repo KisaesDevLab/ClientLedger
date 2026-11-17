@@ -348,6 +348,8 @@ fn build(
         label,
         value,
         description,
+        // P29 QA-13: what a screen reader announces for a check box.
+        checked: n.toggled().map(|t| t != accesskit::Toggled::False),
         bounds,
         focused: id == focus,
         enabled: !n.is_disabled(),
@@ -1337,6 +1339,9 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
         // The rail's Bank Feed badge (a count only).
         "rail": {"bank_feed": shell.counts.bank_feed},
         "palette_open": shell.palette.open,
+        // P29: the signed-in user is an Admin in the open company (false
+        // with no company open, as on the sign-in card: QA-2).
+        "is_admin": shell.company.is_some() && shell.rights().is_admin(),
         "shortcuts_open": shell.shortcuts_open(),
         "about_open": shell.about_open(),
         "error_dialog_open": shell.error_dialog().is_some(),
@@ -1347,6 +1352,9 @@ fn state_json(ctx: &Context, shell: &Shell) -> Value {
         "quit_approved": shell.quit_approved(),
         "company_open": shell.company.is_some(),
         "signed_in": shell.status.user.is_some(),
+        // P29 WP2: the lock screen covers the app.
+        "locked": shell.idle_locked(),
+        "lock_message": shell.idle_message(),
         "screen": shell.active_screen_state(),
         // A02: the pop-out viewer (geometry, ids and the viewer's flags;
         // never a file or form name).

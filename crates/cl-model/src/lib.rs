@@ -18,6 +18,7 @@
 )]
 
 pub mod amount_entry;
+pub mod audit_view;
 pub mod bank_feed;
 pub mod closing;
 pub mod commands;
@@ -31,11 +32,14 @@ pub mod keymap;
 pub mod lists;
 pub mod lookup;
 pub mod numbering;
+// P29: who may do what (the engine's permission map).
+pub mod permissions;
 pub mod quick_add;
 // P27: Reconcile (begin form, panes, tick queue).
 pub mod reconcile;
 pub mod register;
 pub mod reports;
+pub mod roles;
 pub mod rowkey;
 pub mod statement_match;
 pub mod tags;

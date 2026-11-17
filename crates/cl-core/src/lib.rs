@@ -14,6 +14,7 @@
     clippy::cast_precision_loss
 )]
 
+pub mod audit;
 pub mod balance_token;
 pub mod dates;
 pub mod errors;
@@ -23,6 +24,7 @@ pub mod intake;
 pub mod money;
 pub mod report;
 pub mod secret;
+pub mod sensitive_doors;
 pub mod tax_rate;
 pub mod unit_cost;
 pub mod unit_factor;

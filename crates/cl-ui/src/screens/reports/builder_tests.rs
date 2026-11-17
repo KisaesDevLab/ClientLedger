@@ -492,6 +492,8 @@ fn an_unreadable_memorized_builder_report_says_why() {
             updated_at: None,
             can_edit: true,
             missing: Vec::new(),
+            hidden_refs: false,
+            hidden: Vec::new(),
         };
     super::memorized::open_row(
         &mut w,
@@ -908,6 +910,57 @@ fn a_missing_name_says_so_instead_of_an_empty_report() {
     assert_eq!(json["nodes"][0]["groupBy"][0]["tagGroupId"], "kept-group");
     assert_eq!(w.builder.as_ref().expect("builder").missing.len(), 0);
     assert_eq!(w.problem, None);
+}
+
+/// P29 QA-7: a builder report whose "missing" names are all accounts hidden
+/// for the role is said to use a hidden account (no fix offered); a real
+/// deletion, a merge, or another kind of name keeps the PR-A2 message.
+#[test]
+fn a_hidden_account_is_not_called_deleted() {
+    use super::builder_run::{HiddenKnown, hidden_for_role};
+    let gone = |kind: &str,
+                id: &str,
+                reason: &str|
+     -> cl_api::resources::reports::definitions::MissingRef {
+        serde_json::from_value(serde_json::json!({"path": "p", "nodeId": "n",
+            "field": "accountIds", "kind": kind, "ids": [id], "reason": reason}))
+        .expect("entry")
+    };
+    let known = HiddenKnown {
+        ids: vec!["acct-wages".into()],
+        any: true,
+    };
+    assert!(hidden_for_role(
+        &known,
+        &[gone("account", "acct-wages", "deleted")]
+    ));
+    assert!(
+        !hidden_for_role(&known, &[gone("account", "acct-other", "deleted")]),
+        "another account was really deleted"
+    );
+    assert!(!hidden_for_role(
+        &known,
+        &[gone("tag", "acct-wages", "deleted")]
+    ));
+    assert!(!hidden_for_role(&known, &[]));
+    assert!(
+        !hidden_for_role(
+            &HiddenKnown::default(),
+            &[gone("account", "acct-wages", "deleted")]
+        ),
+        "a row that hides nothing"
+    );
+    // The row says it names hidden accounts but not which: every account
+    // it misses is taken as hidden.
+    let unnamed = HiddenKnown {
+        ids: Vec::new(),
+        any: true,
+    };
+    assert!(hidden_for_role(
+        &unnamed,
+        &[gone("account", "x", "deleted")]
+    ));
+    assert!(crate::i18n::has("reports.builder.hidden_for_role"));
 }
 
 /// Q-PRA2a: an opening row reads "Balance before <date>" in the app's

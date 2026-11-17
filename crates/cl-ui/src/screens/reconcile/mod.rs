@@ -324,10 +324,11 @@ impl ReconcileScreen {
         ));
     }
 
-    /// The user is an Admin (engine role `owner`, Q-A01k): Undo is shown
-    /// only then (Q-P27s; the engine still refuses anyone else).
+    /// The user is an Admin (the engine `owner` or the super admin,
+    /// Q-P29k): Undo is shown only then (Q-P27s; the engine still refuses
+    /// anyone else). Nothing is shown until the role was read.
     pub(crate) fn is_admin(&self) -> bool {
-        self.role.as_deref() == Some(intake_source::ADMIN_ROLE)
+        self.role.is_some() && self.link.rights().is_admin()
     }
 
     /// The engine has what the window needs (the demo always does).
@@ -1165,11 +1166,22 @@ impl ReconcileScreen {
         );
     }
 
+    /// P29 review B2: the detail and discrepancy reports are refused by
+    /// the engine while an account is hidden from this role.
+    pub(crate) fn reports_open(&self) -> bool {
+        self.link
+            .rights()
+            .door_open(cl_model::permissions::Door::ReconcileReports)
+    }
+
     /// The discrepancy report of the account.
     pub(crate) fn open_discrepancy(&mut self) {
         let Some(a) = self.form.account else {
             return;
         };
+        if !self.reports_open() {
+            return;
+        }
         self.dialog = Some(Dialog::Discrepancy);
         self.discrepancy = None;
         self.disc_job = Some(engine::read(

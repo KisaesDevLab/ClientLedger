@@ -262,6 +262,12 @@ pub(crate) fn memo_key_for_test(s: &BuilderScreen) -> Option<String> {
     s.save.memo_key.as_ref().map(|(k, _)| k.as_header())
 }
 
+/// A Save changes refusal, as the engine's answer would arrive (tests).
+#[cfg(test)]
+pub(crate) fn refused_for_test(s: &mut BuilderScreen, e: &ApiError) {
+    refused(s, Kind::Update, e);
+}
+
 fn set_problem(s: &mut BuilderScreen, key: &'static str) {
     if let Some(d) = s.save.memorize.as_mut() {
         d.problem = Some(key);
@@ -310,6 +316,8 @@ fn saved_of(sent: Sent, row: &DefinitionRow) -> Saved {
         version: row.version,
         kind: SavedKind::Builder,
         can_edit: row.can_edit,
+        hidden_refs: row.hidden_refs,
+        hidden_ids: crate::screens::reports::builder_run::hidden_ids(row),
         def: sent.def,
         name: sent.name,
         group_id: sent.group_id,
@@ -374,6 +382,16 @@ pub(crate) fn poll(s: &mut BuilderScreen) {
     }
 }
 
+/// Why a memorized row this user can't change is read-only: an account
+/// hidden for this role (U-33) or someone else's report (Q-310).
+pub(super) fn read_only_key(saved: &Saved) -> &'static str {
+    if saved.hidden_refs {
+        "sensitive.definition_read_only"
+    } else {
+        "builder.save.not_author"
+    }
+}
+
 fn refused(s: &mut BuilderScreen, kind: Kind, e: &ApiError) {
     s.save.close_after = false;
     match (definition_refusal(e), kind) {
@@ -387,6 +405,12 @@ fn refused(s: &mut BuilderScreen, kind: Kind, e: &ApiError) {
         (Some(DefinitionRefusal::NotAuthor), _) => {
             s.ed.not_author();
             s.status = Some(t("builder.save.not_author"));
+        }
+        // U-33: it names an account hidden for this role; read-only for
+        // this user (Memorize as a copy still works).
+        (Some(DefinitionRefusal::Hidden), _) => {
+            s.ed.hidden_refs();
+            s.status = Some(t("sensitive.definition_read_only"));
         }
         (Some(DefinitionRefusal::TooLarge), _) => {
             set_problem(s, "builder.save.too_big");

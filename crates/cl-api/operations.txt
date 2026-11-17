@@ -79,6 +79,7 @@ POST    /api/v1/accounts                        keyable
 GET     /api/v1/accounts/{id}                   idempotent
 PUT     /api/v1/accounts/{id}                   pre-handler-only
 DELETE  /api/v1/accounts/{id}                   pre-handler-only
+PUT     /api/v1/accounts/{id}/sensitive         pre-handler-only
 GET     /api/v1/contacts                        idempotent
 POST    /api/v1/contacts                        keyable
 GET     /api/v1/contacts/{id}                   idempotent
@@ -507,3 +508,24 @@ POST    /api/v1/report-builder/definitions/export pre-handler-only
 POST    /api/v1/report-builder/definitions/import/preview pre-handler-only
 # A10: AI drafting (U-120 report-builder-ai-v1; one audit row per draft, nothing else written)
 POST    /api/v1/report-builder/draft            query
+# P29: change your own password (U-230 clears must-change; ends every other session)
+POST    /api/v1/auth/change-password            never
+# P29 WP3: team management (users, roles as permission templates, permission rows; plan section 1 fail-closed order)
+GET     /api/v1/company/users                   idempotent
+POST    /api/v1/company/invite-user             never
+PATCH   /api/v1/company/users/{userId}          pre-handler-only
+POST    /api/v1/company/users/{userId}/deactivate pre-handler-only
+POST    /api/v1/company/users/{userId}/reactivate pre-handler-only
+POST    /api/v1/company/users/{userId}/unlock   pre-handler-only
+POST    /api/v1/company/users/{userId}/temporary-password never
+GET     /api/v1/company/permission-templates    idempotent
+POST    /api/v1/company/permission-templates    pre-handler-only
+PUT     /api/v1/company/permission-templates/{id} pre-handler-only
+DELETE  /api/v1/company/permission-templates/{id} pre-handler-only
+GET     /api/v1/company/users/{userId}/permissions idempotent
+PUT     /api/v1/company/users/{userId}/permissions pre-handler-only
+# P29 WP8: the company's own 1099 threshold per box (U-215 1099-thresholds-v1; owner or super admin writes)
+GET     /api/v1/company/1099-thresholds         idempotent
+PUT     /api/v1/company/1099-thresholds         pre-handler-only
+# P29 review B2: routes still refused while an account is hidden (sensitive-accounts-doors-v1)
+GET     /api/v1/sensitive-doors                 idempotent

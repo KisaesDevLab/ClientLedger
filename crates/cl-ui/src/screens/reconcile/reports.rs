@@ -59,6 +59,14 @@ impl Reports {
         let Some(id) = id else {
             return;
         };
+        // P29 review B2: refused by the engine while an account is hidden
+        // from this role; the buttons are disabled with the reason.
+        if !link
+            .rights()
+            .door_open(cl_model::permissions::Door::ReconcileReports)
+        {
+            return;
+        }
         self.failed = false;
         self.job = Some((
             kind,
@@ -270,9 +278,12 @@ pub(crate) fn report(r: &ReconReport, kind: Kind) -> Report {
 /// The Reports button's menu.
 pub(crate) fn menu(s: &mut ReconcileScreen, _ui: &mut Ui, button: &Response) {
     egui::Popup::menu(button).show(|ui| {
-        let has = s.report_target().is_some();
+        let open = s.reports_open();
+        let has = s.report_target().is_some() && open;
+        let closed = t("sensitive.door_closed");
         if ui
             .add_enabled(has, egui::Button::new(t("reconcile.reports.summary")))
+            .on_disabled_hover_text(&closed)
             .clicked()
         {
             s.reports
@@ -280,6 +291,7 @@ pub(crate) fn menu(s: &mut ReconcileScreen, _ui: &mut Ui, button: &Response) {
         }
         if ui
             .add_enabled(has, egui::Button::new(t("reconcile.reports.detail")))
+            .on_disabled_hover_text(&closed)
             .clicked()
         {
             s.reports
@@ -293,10 +305,14 @@ pub(crate) fn menu(s: &mut ReconcileScreen, _ui: &mut Ui, button: &Response) {
         }
         let disc = ui
             .add_enabled(
-                s.discrepancy_supported(),
+                s.discrepancy_supported() && open,
                 egui::Button::new(t("reconcile.reports.discrepancy")),
             )
-            .on_disabled_hover_text(t("reconcile.reports.needs_update"));
+            .on_disabled_hover_text(if open {
+                t("reconcile.reports.needs_update")
+            } else {
+                closed.clone()
+            });
         if disc.clicked() {
             s.open_discrepancy();
         }

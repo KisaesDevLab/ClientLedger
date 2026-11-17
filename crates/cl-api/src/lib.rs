@@ -46,6 +46,11 @@ pub use errors::{
     ValidationError, ValidationIssue, delete_linked_to_bank_feed, delete_links,
     is_deposit_links_dropped, reconciled_statement_date,
 };
+// P29: sensitive accounts (U-33).
+pub use errors::{
+    SENSITIVE_ACCOUNT, SENSITIVE_DEFINITION, SENSITIVE_HIDDEN, SENSITIVE_NOT_ALLOWED,
+    SensitiveRefusal, is_sensitive_not_allowed,
+};
 // A04 WP-D: the demo engine's refusals read as the engine's.
 pub use errors::engine_refusal;
 pub use idempotency::IdempotencyKey;
@@ -62,7 +67,10 @@ pub use resources::ai::{
     AiUsageSummary, CompanyConsent, ConsentRow, ConsentStatus, DESKTOP_PROVIDERS, ProviderModels,
     ProviderTest, UsageSummaryRow, UsageTotals,
 };
-pub use resources::audit::{Audit, AuditAction, AuditEntity, AuditEntry, AuditImage, AuditLine};
+pub use resources::audit::{
+    Audit, AuditAction, AuditEntity, AuditEntry, AuditFilter, AuditImage, AuditLine, AuditPage,
+    AuditRow,
+};
 pub use resources::bank_postings::{
     BankPosting, BankPostingKind, CASH_BACK_MEMO_MAX, CardChargeDraft, CashBack, CheckDraft,
     DepositCaps, DepositDraft, DepositSource, GroupedPayment, PAYEE_ADDRESS_MAX, PAYEE_NAME_MAX,
@@ -86,7 +94,10 @@ pub use resources::contacts::{
     NewContact,
 };
 pub use resources::export::{ExportFile, ExportManifest};
-pub use resources::form1099::{Form1099, TinType, Vendor1099Profile, Vendor1099Update};
+pub use resources::form1099::{
+    Form1099, THRESHOLDS_1099, Threshold1099Box, Thresholds1099, TinType, Vendor1099Profile,
+    Vendor1099Update,
+};
 pub use resources::inventory::{
     ADJUSTMENT_MAX_LINES, ADJUSTMENT_MEMO_MAX, AdjustmentLine, AdjustmentRecord,
     AdjustmentRecordLine, CountLine, CountResult, CountSheet, CountSheetRow, Inventory,
@@ -101,6 +112,7 @@ pub use resources::items::{
 };
 pub use resources::ledger::LedgerStamp;
 pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, ContactImportRow};
+pub use resources::me::Me;
 pub use resources::operations::{KeySet, OPERATIONS, Operation, RetryClass};
 pub use resources::posting::{ClosedPeriodAuthorization, PostingOptions};
 pub use resources::reconcile::Recheck;
@@ -111,7 +123,9 @@ pub use resources::reconciliations::{
     StatementCharge, UndoMode, last_finished_date, reconcile_refusal, reconciliation_from,
     report_from as reconciliation_report_from, screen_supported as reconcile_screen_supported,
 };
-pub use resources::recovery::{PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key};
+pub use resources::recovery::{
+    PASSWORD_MAX_BYTES, PASSWORD_MIN_CHARS, PasswordRecovery, normalize_recovery_key, password_fits,
+};
 pub use resources::register::{
     Category, ClearState, ClearedFilter, EntryType, REGISTER_MAX_PER_PAGE, Register,
     RegisterAccount, RegisterAmount, RegisterLine, RegisterPage, RegisterQuery, RegisterSort,
@@ -139,6 +153,10 @@ pub use resources::smtp::{SmtpSettings, SmtpSettingsUpdate};
 pub use resources::system::{SmtpTest, SmtpTestResult};
 pub use resources::tags::{
     Tag, TagFields, TagFilter, TagGroup, TagGroupFields, TagUpdate, TagUsage, Tags,
+};
+pub use resources::team::{
+    Added, NewTeamUser, PermissionMap, PermissionRow, RolePlan, RoleTemplate, Team, TeamFailure,
+    TeamStep, TeamUser,
 };
 pub use resources::tenants::{
     ArchiveFileName, ArchiveJob, ArchiveJobStatus, ArchiveRequest, ArchiveResult, CreatedTenant,

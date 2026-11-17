@@ -138,6 +138,8 @@ pub(crate) struct SaveState {
     /// The idempotency key of the request being retried.
     pub key: Option<(save::SaveIdentity, IdempotencyKey)>,
     pub problems: Vec<DepositProblem>,
+    /// P29 WP7: the lines the tag rules refused, in words (Q-276).
+    pub tag_refusal: Vec<String>,
     pub error: Option<ApiError>,
     /// The deposit changed somewhere else since it was read.
     pub stale: bool,
@@ -693,6 +695,7 @@ impl DepositScreen {
             "save": {
                 "refused": self.save.problems.first().map(|p| p.name()),
                 "problems": self.save.problems.len(),
+                "tag_refusal": self.save.tag_refusal,
                 "error": self.save.error.is_some(),
                 "stale": self.save.stale,
                 "clearing_warning": self.save.clearing_warning,

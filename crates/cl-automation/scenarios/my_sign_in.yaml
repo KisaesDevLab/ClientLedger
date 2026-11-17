@@ -1,0 +1,50 @@
+# Company > My Sign-in (P29 WP2) against `clientledger --demo`: a wrong
+# current password is refused in plain words, the owner changes their own
+# password, automatic sign-in explains why it is not offered (the demo has
+# no OS keychain), and the idle-lock time is picked and put back. Every
+# email and password is synthetic demo data; the demo's users are reset at
+# the start and the end.
+name: my_sign_in
+description: Change your own password, the automatic sign-in note, the idle-lock time.
+steps:
+  - resize: {width: 1280, height: 900}
+  - set_zoom: {percent: 100}
+  - command: dev.demo_auth_reset
+  - command: company.my_sign_in
+  - wait: {ms: 300}
+  - assert_state: {key: screen.auto_offer, equals: mysignin.auto.no_keychain}
+  - assert_state: {key: screen.idle_minutes, equals: 0}
+  - assert_exists: {role: radio_button, label: 15 minutes}
+  - screenshot: my-sign-in
+  # A wrong current password.
+  - click: {role: password_input, label: Current password}
+  - type: {text: not-the-password}
+  - click: {role: password_input, label: New password}
+  - type: {text: owner-new-password}
+  - click: {role: password_input, label: Confirm new password}
+  - type: {text: owner-new-password}
+  - click: {role: button, label: Change password}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.message, equals: login.msg.current_wrong}
+  - screenshot: wrong-current
+  # The right one.
+  - click: {role: password_input, label: Current password}
+  - type: {text: demo-password-1}
+  - click: {role: password_input, label: New password}
+  - type: {text: owner-new-password}
+  - click: {role: password_input, label: Confirm new password}
+  - type: {text: owner-new-password}
+  - click: {role: button, label: Change password}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.message, equals: mysignin.changed}
+  - screenshot: changed
+  # The idle-lock time, then back to Never.
+  - click: {role: radio_button, label: 15 minutes}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.idle_minutes, equals: 15}
+  - assert_state: {key: screen.message, equals: mysignin.idle.saved}
+  - screenshot: idle-15
+  - click: {role: radio_button, label: Never}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.idle_minutes, equals: 0}
+  - command: dev.demo_auth_reset

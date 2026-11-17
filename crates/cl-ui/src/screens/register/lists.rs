@@ -85,8 +85,12 @@ impl<I> Default for List<I> {
 pub struct RegisterLists {
     accounts: List<AccountId>,
     classes: Vec<AccountClass>,
+    /// Each account's type (P29 WP7: required tag groups, Q-180).
+    kinds: Vec<cl_model::lists::accounts::AccountKind>,
     names: List<ContactId>,
     tags: List<TagId>,
+    /// The tags as read (P29 WP7: the tag gate needs groups and state).
+    tag_entries: Vec<cl_model::lists::tags::TagEntry>,
 }
 
 impl RegisterLists {
@@ -94,6 +98,10 @@ impl RegisterLists {
     /// its number (DESIGN.md: `5100 · Materials:Plants`) and is found by
     /// any segment of it (`Plants`, `Mulch`).
     pub fn set_accounts(&mut self, accounts: &[Account]) {
+        self.kinds = accounts
+            .iter()
+            .map(|a| kind_of(a.fields.account_type))
+            .collect();
         self.classes = accounts
             .iter()
             .map(|a| {
@@ -149,6 +157,7 @@ impl RegisterLists {
     /// Area`), is found by its number or its name, and the full list
     /// (Ctrl+L) runs by number, then name.
     pub fn set_tags(&mut self, tags: &[Tag]) {
+        self.tag_entries = tags.iter().map(crate::tag_names::entry).collect();
         self.tags = List::new(
             crate::tag_names::sorted(tags)
                 .into_iter()
@@ -163,6 +172,19 @@ impl RegisterLists {
                 .collect(),
             |name, number| cl_model::tags::label(number, name),
         );
+    }
+
+    /// An account's type (None when it is not in the chart).
+    #[must_use]
+    pub fn kind(&self, id: AccountId) -> Option<cl_model::lists::accounts::AccountKind> {
+        let i = self.accounts.ids.iter().position(|x| *x == id)?;
+        self.kinds.get(i).copied()
+    }
+
+    /// The tags as read, for the tag gate (P29 WP7).
+    #[must_use]
+    pub fn tag_entries(&self) -> &[cl_model::lists::tags::TagEntry] {
+        &self.tag_entries
     }
 
     /// The account behind a picker id.

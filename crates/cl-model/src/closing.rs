@@ -265,5 +265,118 @@ impl<S> fmt::Debug for ClosingFlow<S> {
     }
 }
 
+/// Shortest closing-date password the engine takes (mirrors cl-api's
+/// `CLOSING_PASSWORD_MIN_CHARS`; layering keeps the crates apart).
+pub const ADMIN_PASSWORD_MIN_CHARS: usize = 4;
+
+/// What Set Closing Date (P29 WP5) refuses before anything is sent, as an
+/// i18n key; `None` when the change may go to the engine.
+///
+/// - `date`: the date typed (`None` when the text is not a date); ignored
+///   when `clearing`.
+/// - With a password set, the current one is needed; without one, a new
+///   password and its confirmation are (the engine sets the first one with
+///   the date, owner only).
+#[must_use]
+pub fn date_change_problem(
+    date: Option<CalendarDate>,
+    clearing: bool,
+    password_set: bool,
+    password: &str,
+    new_password: &str,
+    confirm: &str,
+) -> Option<&'static str> {
+    if !clearing && date.is_none() {
+        return Some("closing.admin.date_needed");
+    }
+    if password_set {
+        return password
+            .is_empty()
+            .then_some("closing.admin.password_needed");
+    }
+    if clearing {
+        return None;
+    }
+    new_password_problem(new_password, confirm)
+}
+
+/// The checks of a new closing-date password and its confirmation.
+#[must_use]
+pub fn new_password_problem(new_password: &str, confirm: &str) -> Option<&'static str> {
+    if new_password.chars().count() < ADMIN_PASSWORD_MIN_CHARS {
+        Some("closing.admin.password_short")
+    } else if new_password != confirm {
+        Some("closing.admin.password_mismatch")
+    } else {
+        None
+    }
+}
+
+/// Changing the closing-date password: the current one when one is set,
+/// then the new one twice.
+#[must_use]
+pub fn password_change_problem(
+    password_set: bool,
+    current: &str,
+    new_password: &str,
+    confirm: &str,
+) -> Option<&'static str> {
+    if password_set && current.is_empty() {
+        return Some("closing.admin.password_needed");
+    }
+    new_password_problem(new_password, confirm)
+}
+
+#[cfg(test)]
+mod admin_tests {
+    use super::*;
+
+    fn d() -> Option<CalendarDate> {
+        CalendarDate::from_ymd(2026, 9, 30).ok()
+    }
+
+    #[test]
+    fn a_date_change_needs_the_password_once_one_is_set() {
+        assert_eq!(
+            date_change_problem(d(), false, true, "", "", ""),
+            Some("closing.admin.password_needed")
+        );
+        assert_eq!(date_change_problem(d(), false, true, "pw", "", ""), None);
+        assert_eq!(date_change_problem(None, true, true, "pw", "", ""), None);
+        assert_eq!(
+            date_change_problem(None, false, true, "pw", "", ""),
+            Some("closing.admin.date_needed")
+        );
+    }
+
+    #[test]
+    fn the_first_date_sets_the_first_password() {
+        assert_eq!(
+            date_change_problem(d(), false, false, "", "abc", "abc"),
+            Some("closing.admin.password_short")
+        );
+        assert_eq!(
+            date_change_problem(d(), false, false, "", "abcd", "abce"),
+            Some("closing.admin.password_mismatch")
+        );
+        assert_eq!(
+            date_change_problem(d(), false, false, "", "abcd", "abcd"),
+            None
+        );
+        // Clearing with no password set needs nothing more.
+        assert_eq!(date_change_problem(None, true, false, "", "", ""), None);
+    }
+
+    #[test]
+    fn a_password_change_needs_the_current_one() {
+        assert_eq!(
+            password_change_problem(true, "", "abcd", "abcd"),
+            Some("closing.admin.password_needed")
+        );
+        assert_eq!(password_change_problem(true, "old", "abcd", "abcd"), None);
+        assert_eq!(password_change_problem(false, "", "abcd", "abcd"), None);
+    }
+}
+
 #[cfg(test)]
 mod tests;

@@ -263,6 +263,8 @@ impl Mapping {
                 .or_else(|| name.clone())
                 .unwrap_or_default(),
             Category::Split => t("register.split"),
+            // U-33 (Q-P29e): the other side is hidden for this role.
+            Category::Hidden => t("sensitive.hidden_account"),
             Category::None => String::new(),
         };
         let void = l.status == TxnStatus::Void;

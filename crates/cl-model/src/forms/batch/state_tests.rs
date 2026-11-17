@@ -62,6 +62,7 @@ fn je_row(
 
 fn section(kind: SectionKind, context: Option<u8>, rows: Vec<RowDraft>) -> Section {
     Section {
+        tag: None,
         kind,
         context: context.map(acct),
         rows,
@@ -688,4 +689,47 @@ proptest! {
             }
         }
     }
+}
+
+/// Q-276 (P29 review S3): rows saved without a tag take their section's
+/// tag; a row's own tag wins, the section tag never makes a blank row
+/// count, a section without one sends none, and the tag is part of the
+/// content (a changed section tag is a new save, never a replay).
+#[test]
+fn rows_without_a_tag_are_sent_with_the_section_tag() {
+    let mut b = mixed();
+    let default = TagId::parse("7a900000-0000-4000-8000-000000000001").expect("id");
+    let own = TagId::parse("7a900000-0000-4000-8000-000000000002").expect("id");
+    let filled_before = b.filled().count();
+    let untagged = b.content_hash();
+    let key = b.sections[0].rows[0].key;
+    let row_before = b.row_hash(key);
+    for s in &mut b.sections {
+        s.tag = Some(default);
+    }
+    assert_ne!(b.content_hash(), untagged);
+    assert_ne!(b.row_hash(key), row_before);
+    assert_eq!(b.filled().count(), filled_before);
+    if let Some(r) = b.sections[0].rows.first_mut() {
+        r.tag = Some(own);
+    }
+    let out = b.outgoing(None, None);
+    let tags: Vec<Option<TagId>> = out
+        .groups
+        .iter()
+        .flat_map(|g| g.rows.iter().map(|r| r.tag))
+        .collect();
+    assert_eq!(tags.first().copied().flatten(), Some(own));
+    assert!(tags.iter().skip(1).all(|t| *t == Some(default)), "{tags:?}");
+    // Cleared on the section: nothing is added at send time.
+    for s in &mut b.sections {
+        s.tag = None;
+    }
+    let out = b.outgoing(None, None);
+    let tags: Vec<Option<TagId>> = out
+        .groups
+        .iter()
+        .flat_map(|g| g.rows.iter().map(|r| r.tag))
+        .collect();
+    assert!(tags.iter().skip(1).all(Option::is_none), "{tags:?}");
 }

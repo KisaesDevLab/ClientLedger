@@ -439,6 +439,8 @@ pub(crate) struct Intake {
     saves_seen: u64,
     /// The user's engine role (`owner` is the Admin until P29).
     pub role: Option<String>,
+    /// `Rights::is_admin` when the folders were last read (P29).
+    admin: bool,
     /// Every folder, in the engine's order.
     pub runs: Vec<Run>,
     copy: Option<Copy>,
@@ -510,6 +512,7 @@ impl Intake {
             refreshed: None,
             saves_seen: 0,
             role: None,
+            admin: false,
             runs: Vec::new(),
             copy: None,
             upload_keys: BTreeMap::new(),
@@ -586,7 +589,9 @@ impl Intake {
 
     /// Whether the user may change the folders.
     pub(crate) fn is_admin(&self) -> bool {
-        self.role.as_deref() == Some(source::ADMIN_ROLE)
+        // P29 (Q-P29k): the rights read from `/auth/me` decide (owner or
+        // super admin), once the folders and role have loaded.
+        self.role.is_some() && self.admin
     }
 
     /// Look in every folder now.
@@ -983,6 +988,7 @@ impl Intake {
             Ok((stored, role)) => {
                 self.folders_failed = false;
                 self.role = role;
+                self.admin = link.rights().is_admin();
                 self.apply_folders(link, stored.folders);
             }
             Err(e) => {

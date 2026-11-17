@@ -116,6 +116,8 @@ pub struct PersonalFundsScreen {
     pub(crate) inputs: Inputs,
     pub(crate) flow: SaveFlow,
     pub(crate) problems: Vec<PersonalFundsProblem>,
+    /// P29 WP7: the lines the tag rules refused, in words (Q-276).
+    pub(crate) tag_refusal: Vec<String>,
     /// Where the account came from (`None`: the owner picked it).
     pub(crate) offset_source: Option<EquitySource>,
     /// The treatment is still the entity type's default.
@@ -202,6 +204,7 @@ impl PersonalFundsScreen {
             },
             flow: SaveFlow::default(),
             problems: Vec::new(),
+            tag_refusal: Vec::new(),
             offset_source: None,
             treatment_default: true,
             quick_add: None,
@@ -294,6 +297,17 @@ impl PersonalFundsScreen {
                     f.offset = Some(a);
                     self.offset_source = Some(src);
                 }
+                self.header.load(f);
+            }
+            if let Some(tags) = kit::default_header_tags(
+                &self.flow,
+                &self.books.tag_list,
+                self.header.is_dirty(),
+                &self.header.current().header_tags,
+            ) {
+                // Q-276: part of the blank form.
+                let mut f = self.header.current().clone();
+                f.header_tags = tags;
                 self.header.load(f);
             }
         }
@@ -443,6 +457,7 @@ impl PersonalFundsScreen {
                     created_at: None,
                     updated_at: None,
                     card_last4: None,
+                    is_sensitive: false,
                 });
             }
             drop(demo);
@@ -625,6 +640,7 @@ impl PersonalFundsScreen {
         }
         self.left_lines();
         self.problems.clear();
+        self.tag_refusal.clear();
         self.flow.reset_messages();
         if !self.is_dirty() {
             self.follow_up(intent);
@@ -638,6 +654,11 @@ impl PersonalFundsScreen {
                 return false;
             }
         };
+        // P29 WP7: the company's tag rules (Q-276, Q-180).
+        if let Err(texts) = self.tag_gate(&form) {
+            self.tag_refusal = texts;
+            return false;
+        }
         let out = match self.outbound(&checked) {
             Ok(o) => o,
             Err(LocalValidation::LineBillableUnavailable) => {
@@ -752,7 +773,9 @@ impl PersonalFundsScreen {
         );
         f.who = c.who;
         f.offset = c.offset;
+        f.header_tags = cl_model::forms::tag_rule::new_form_header_tags(&self.books.tag_list);
         self.header.load(f);
+        self.tag_refusal.clear();
         let lists = Arc::clone(&self.books.lists);
         let fresh =
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
@@ -1237,6 +1260,7 @@ impl PersonalFundsScreen {
         crate::widgets::label_with_check(ui, job, false);
         let keys: Vec<&'static str> = self.problems.iter().map(|p| p.key().0).collect();
         kit::problems(ui, tokens, &keys);
+        kit::problem_texts(ui, tokens, &self.tag_refusal);
         if let Some(ev) = kit::status(
             ui,
             tokens,
@@ -1393,6 +1417,7 @@ impl PersonalFundsScreen {
             "save": {
                 "refused": self.problems.first().map(|p| p.name()),
                 "problems": self.problems.len(),
+                "tag_refusal": self.tag_refusal,
             },
             "nav_prompt": self.records.prompt.is_some(),
             "nav_at": self.records.at,
@@ -1539,9 +1564,23 @@ impl RecordForm for PersonalFundsScreen {
 }
 
 impl PersonalFundsScreen {
+    /// The tag rules on the form as composed (P29 WP7, Q-276).
+    pub(crate) fn tag_gate(&self, form: &PersonalFundsForm) -> Result<(), Vec<String>> {
+        // The company's rules as they are now (Preferences may have changed
+        // them since this window read its lists).
+        let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
+        let lines =
+            cl_model::forms::tag_rule::expense_lines(&form.header_tags, &form.lines, &list, false);
+        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
+    }
+
     /// A refused save's problems, checked again against the form as it is
     /// now (a fixed problem goes away at once, P13).
     pub(crate) fn recheck_problems(&mut self) {
+        if !self.tag_refusal.is_empty() {
+            let form = self.compose();
+            self.tag_refusal = self.tag_gate(&form).err().unwrap_or_default();
+        }
         if self.problems.is_empty() {
             return;
         }

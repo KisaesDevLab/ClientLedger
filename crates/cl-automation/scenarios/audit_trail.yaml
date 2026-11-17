@@ -1,0 +1,64 @@
+# The Audit Trail viewer (P29 WP6, Q-156) against `clientledger --demo`:
+# 130 synthetic changes in pages of 100, a filter, a change's fields before
+# and after as saved (a taxpayer id never shows), CSV and PDF export for the
+# Admin, and no export for a Bookkeeper. Synthetic data only.
+name: audit_trail
+description: Audit Trail filters, paging, field details and Admin-only export.
+steps:
+  - resize: {width: 1280, height: 860}
+  - set_zoom: {percent: 100}
+  - command: dev.demo_rights_all
+  - command: company.audit_trail
+  - wait: {ms: 300}
+  - assert_state: {key: screen.screen, equals: audit_trail}
+  - assert_state: {key: screen.rows, equals: 100}
+  - assert_state: {key: screen.total, equals: 130}
+  - assert_state: {key: screen.can_export, equals: true}
+  - assert_exists: {role: button, label: Export CSV}
+  - screenshot: audit-trail
+  # Paging.
+  - click: {role: button, label: Next page}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.offset, equals: 100}
+  - assert_state: {key: screen.rows, equals: 30}
+  - click: {role: button, label: Previous page}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.offset, equals: 0}
+  # A text filter finds the vendor whose address changed.
+  - click: {role: text_input, label: Search}
+  - type: {text: pine supply}
+  - click: {role: button, label: Show}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.total, equals: 1}
+  - assert_state: {key: screen.filter.search, equals: true}
+  - click: {label_contains: "11/14/2026", index: 0}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.selected, equals: 128}
+  - assert_exists: {role: label, label: "65802"}
+  - assert_not_exists: {role: label, label: "98-7654321"}
+  - screenshot: details
+  # The Admin exports what the filter shows.
+  - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/audit_trail/audit-{theme}.csv"]}
+  - click: {role: button, label: Export CSV}
+  - wait: {ms: 500}
+  - assert_state: {key: screen.exported, equals: 1}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/audit_trail/audit-{theme}.pdf"]}
+  - click: {role: button, label: Save PDF}
+  - wait: {ms: 800}
+  - assert_state: {key: screen.exported, equals: 1}
+  - screenshot: exported
+  - click: {role: button, label: Clear filters}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.total, equals: 130}
+  - command: file.close_window
+  - wait: {ms: 200}
+  # A Bookkeeper reads the trail but has no export.
+  - command: dev.demo_rights_bookkeeper
+  - command: company.audit_trail
+  - wait: {ms: 300}
+  - assert_state: {key: screen.can_export, equals: false}
+  - assert_not_exists: {role: button, label: Export CSV}
+  - screenshot: bookkeeper
+  - command: file.close_window
+  - command: dev.demo_rights_all
+  - wait: {ms: 200}

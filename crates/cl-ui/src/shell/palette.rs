@@ -2,6 +2,7 @@
 //! Every registered command is listed, with its shortcut.
 
 use cl_model::commands::DEV_COMMANDS;
+use cl_model::permissions::Rights;
 use cl_model::{COMMANDS, Command, CommandId, Keymap, Scope};
 use eframe::egui::{self, Align2, Context, Key, Modifiers, RichText};
 
@@ -94,9 +95,16 @@ pub fn matches(query: &str) -> Vec<&'static Command> {
 /// [`matches`], with the developer-only commands when `include_dev`.
 #[must_use]
 pub fn matches_in(query: &str, include_dev: bool) -> Vec<&'static Command> {
+    matches_for(query, include_dev, &Rights::all())
+}
+
+/// [`matches_in`], listing only the commands the user's role includes
+/// (P29). Developer-only commands are not in the rights table and stay.
+#[must_use]
+pub fn matches_for(query: &str, include_dev: bool, rights: &Rights) -> Vec<&'static Command> {
     let dev: &'static [Command] = if include_dev { DEV_COMMANDS } else { &[] };
-    let mut scored: Vec<(u32, bool, &'static Command)> = COMMANDS
-        .iter()
+    let shipped = COMMANDS.iter().filter(|c| rights.allows(c.id));
+    let mut scored: Vec<(u32, bool, &'static Command)> = shipped
         .chain(dev)
         .filter(|c| c.palette)
         .filter_map(|c| {
@@ -119,12 +127,17 @@ pub fn matches_in(query: &str, include_dev: bool) -> Vec<&'static Command> {
 }
 
 /// Draw the palette. Returns the command the owner chose.
-pub fn show(ctx: &Context, state: &mut State, _keymap: &Keymap) -> Option<CommandId> {
+pub fn show(
+    ctx: &Context,
+    state: &mut State,
+    _keymap: &Keymap,
+    rights: &Rights,
+) -> Option<CommandId> {
     if !state.open {
         return None;
     }
     let tokens = Tokens::of(ctx);
-    let results = matches_in(&state.query, state.include_dev);
+    let results = matches_for(&state.query, state.include_dev, rights);
     let rows = rows_that_fit(ctx.content_rect().height());
     let shown = results.len().min(rows);
     if shown > 0 {
@@ -286,6 +299,26 @@ mod tests {
                 c.id
             );
         }
+    }
+
+    #[test]
+    fn the_palette_lists_only_what_the_role_includes() {
+        let ap = cl_model::permissions::BuiltinRole::Payables.rights();
+        let ids: Vec<&str> = matches_for("invoice", false, &ap)
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert!(!ids.contains(&"clients.create_invoice"), "{ids:?}");
+        assert!(
+            matches_for("enter bill", false, &ap)
+                .iter()
+                .any(|c| c.id.as_str() == "vendors.enter_bill")
+        );
+        assert!(
+            matches_for("grid demo", true, &Rights::none())
+                .iter()
+                .any(|c| c.id.as_str() == "dev.grid_demo")
+        );
     }
 
     #[test]

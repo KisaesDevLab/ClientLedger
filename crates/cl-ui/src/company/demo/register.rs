@@ -81,7 +81,12 @@ fn debit_normal(t: AccountType) -> bool {
 /// Every line of `account` in date order with its running balance (in the
 /// account's natural sign, like the engine's register). `None` when a
 /// figure leaves the supported money range.
-fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Option<Vec<Built>> {
+fn build(
+    ledger: &DemoLedger,
+    chart: &[Account],
+    account: &Account,
+    hidden: &std::collections::BTreeSet<AccountId>,
+) -> Option<Vec<Built>> {
     let Some(number) = number_of(account) else {
         return Some(Vec::new());
     };
@@ -121,6 +126,15 @@ fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Option<Ve
                 }),
             _ => Category::Split,
         };
+        // U-33 (Q-P29e): a line on an account hidden from this user leaves
+        // the other side as "Hidden account"; the row itself stays.
+        let hides = others.iter().any(|n| {
+            chart
+                .iter()
+                .find(|a| number_of(a) == Some(*n))
+                .is_some_and(|a| hidden.contains(&a.id))
+        });
+        let category = if hides { Category::Hidden } else { category };
         for (i, l) in t
             .lines
             .iter()
@@ -169,7 +183,8 @@ fn build(ledger: &DemoLedger, chart: &[Account], account: &Account) -> Option<Ve
                     balance: RegisterAmount::Exact(running),
                     cleared,
                     has_splits: matches!(category, Category::Split),
-                    engine_editable: cleared != ClearState::Reconciled && !void,
+                    // U-33: a line whose other side is hidden can't be edited.
+                    engine_editable: cleared != ClearState::Reconciled && !void && !hides,
                     status: if void {
                         TxnStatus::Void
                     } else {
@@ -241,8 +256,35 @@ pub fn page(
     page: u32,
     per_page: u16,
 ) -> Option<RegisterPage> {
+    page_hiding(
+        ledger,
+        chart,
+        &std::collections::BTreeSet::new(),
+        account,
+        q,
+        page,
+        per_page,
+    )
+}
+
+/// [`page`] for a user from whom `hidden` accounts are hidden (U-33): the
+/// register of one is `None` (the engine's 404); other registers show
+/// `Category::Hidden` as the other side.
+#[must_use]
+pub fn page_hiding(
+    ledger: &DemoLedger,
+    chart: &[Account],
+    hidden: &std::collections::BTreeSet<AccountId>,
+    account: AccountId,
+    q: &RegisterQuery,
+    page: u32,
+    per_page: u16,
+) -> Option<RegisterPage> {
+    if hidden.contains(&account) {
+        return None;
+    }
     let acct = chart.iter().find(|a| a.id == account)?;
-    let all = build(ledger, chart, acct)?;
+    let all = build(ledger, chart, acct, hidden)?;
     let balance_forward = all
         .iter()
         .take_while(|b| b.line.date < q.start)
@@ -321,7 +363,7 @@ pub fn summary(
     end: Option<CalendarDate>,
 ) -> Option<RegisterSummary> {
     let acct = chart.iter().find(|a| a.id == account)?;
-    let all = build(ledger, chart, acct)?;
+    let all = build(ledger, chart, acct, &std::collections::BTreeSet::new())?;
     let through = |b: &&Built| end.is_none_or(|e| b.line.date <= e);
     let last_balance = |it: &mut dyn Iterator<Item = &Built>| {
         it.last()

@@ -58,6 +58,7 @@ fn je_row(
 
 fn section(kind: SectionKind, context: Option<u8>, rows: Vec<RowDraft>) -> Section {
     Section {
+        tag: None,
         kind,
         context: context.map(acct),
         rows,

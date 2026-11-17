@@ -333,11 +333,30 @@ impl WriteCheckScreen {
         self.save.problems = problems;
     }
 
+    /// The tag rules on the check as composed (P29 WP7).
+    pub(crate) fn tag_gate(&self, form: &CheckForm) -> Result<(), Vec<String>> {
+        // The company's rules as they are now (Preferences may have changed
+        // them since this window read its lists).
+        let list = crate::forms::tag_gate::form_list(&self.tags, &self.link);
+        let lines = cl_model::forms::tag_rule::tabbed_lines(
+            &form.header_tags,
+            &form.lines,
+            &form.items,
+            &list,
+        );
+        crate::forms::tag_gate::check(&list, &lines, &self.accounts)
+    }
+
     /// The problems a refused save showed, checked again against the form
     /// as it is now (each frame while any show): one the owner fixed since
     /// goes away, one still there shows its current figures. Nothing new is
     /// added here; the next save reports those.
     pub(crate) fn recheck_problems(&mut self) {
+        if !self.save.tag_refusal.is_empty() {
+            // A line the owner tagged since drops from the refusal.
+            let form = self.compose();
+            self.save.tag_refusal = self.tag_gate(&form).err().unwrap_or_default();
+        }
         if self.save.problems.is_empty() {
             return;
         }
@@ -428,6 +447,7 @@ impl WriteCheckScreen {
         }
         self.left_lines();
         self.save.problems.clear();
+        self.save.tag_refusal.clear();
         self.save.error = None;
         self.save.duplicate = None;
         self.save.stale = false;
@@ -453,6 +473,11 @@ impl WriteCheckScreen {
                 return false;
             }
         };
+        // P29 WP7: the company's tag rules (Q-276, Q-180).
+        if let Err(texts) = self.tag_gate(&form) {
+            self.save.tag_refusal = texts;
+            return false;
+        }
         let display = self
             .lists
             .name_text(checked.payee)
@@ -846,7 +871,10 @@ impl WriteCheckScreen {
             .proposal
             .map_or_else(|| NumberField::Typed(String::new()), NumberField::Proposed);
         let lists = Arc::clone(&self.lists);
-        self.header.load(blank(bank, date, number));
+        let mut fresh_check = blank(bank, date, number);
+        fresh_check.header_tags = cl_model::forms::tag_rule::new_form_header_tags(&self.tag_list);
+        self.header.load(fresh_check);
+        self.save.tag_refusal.clear();
         let fresh =
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
         self.lines.load(fresh, &*lists);

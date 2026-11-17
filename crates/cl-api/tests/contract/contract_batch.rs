@@ -32,7 +32,8 @@ const SAVE_CAPS: [(&str, &str); 4] = [
 ];
 
 const CHECK_CAP: (&str, &str) = (Capabilities::BATCH_CHECK, "engine #163 batch-check-v1");
-const CLOSING_CAP: (&str, &str) = (Capabilities::BATCH_CLOSING, "engine #163 batch-closing-v1");
+pub(crate) const CLOSING_CAP: (&str, &str) =
+    (Capabilities::BATCH_CLOSING, "engine #163 batch-closing-v1");
 
 /// True when the engine has every capability; each missing one is listed
 /// as PENDING (no short-circuit, so the list names them all).
@@ -44,7 +45,7 @@ fn ready(h: &Harness, caps: &[(&str, &str)]) -> bool {
     missing == 0
 }
 
-fn save_ready(h: &Harness, more: &[(&str, &str)]) -> bool {
+pub(crate) fn save_ready(h: &Harness, more: &[(&str, &str)]) -> bool {
     let all: Vec<(&str, &str)> = SAVE_CAPS.iter().chain(more).copied().collect();
     ready(h, &all)
 }
@@ -54,8 +55,8 @@ fn amount(s: &str) -> BatchAmount {
 }
 
 /// A fresh bank account with a vendor, a customer and the line accounts.
-struct Books {
-    bank: AccountId,
+pub(crate) struct Books {
+    pub(crate) bank: AccountId,
     expense: AccountId,
     income: AccountId,
     vendor: ContactId,
@@ -87,7 +88,7 @@ fn bank_account(h: &Harness, s: &Session) -> AccountId {
         .id
 }
 
-fn books(h: &Harness, s: &Session) -> Books {
+pub(crate) fn books(h: &Harness, s: &Session) -> Books {
     Books {
         bank: bank_account(h, s),
         expense: account(h, s, AccountType::Expense, "Batch supplies").id,
@@ -111,7 +112,7 @@ fn check_row(b: &Books, n: u32, amt: &str, number: Option<&str>) -> BatchRowIn {
     r
 }
 
-fn deposit_row(b: &Books, n: u32, amt: &str) -> BatchRowIn {
+pub(crate) fn deposit_row(b: &Books, n: u32, amt: &str) -> BatchRowIn {
     let mut r = BatchRowIn::new(n, on());
     r.contact = Some(b.customer);
     r.account = Some(b.income);
@@ -119,7 +120,11 @@ fn deposit_row(b: &Books, n: u32, amt: &str) -> BatchRowIn {
     r
 }
 
-fn group(kind: BatchKind, context: Option<AccountId>, rows: Vec<BatchRowIn>) -> BatchGroup {
+pub(crate) fn group(
+    kind: BatchKind,
+    context: Option<AccountId>,
+    rows: Vec<BatchRowIn>,
+) -> BatchGroup {
     BatchGroup {
         kind,
         context,

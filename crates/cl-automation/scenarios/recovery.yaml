@@ -1,0 +1,78 @@
+# Forgot password? (P29 WP4) against `clientledger --demo`: the main Admin
+# resets the password with the recovery key. A wrong key changes nothing
+# and reads the same as an unknown email; the right one resets the
+# password, and the fresh key from the reply is shown once in the
+# recovery-key window (masked in screenshots); the old key no longer
+# works; the new password signs in. Key and passwords are the demo's
+# synthetic values (typed only into masked fields). The demo's users and
+# key are reset at the start and the end.
+name: recovery
+description: Recovery key resets the password once and hands out a fresh key, shown once.
+steps:
+  - resize: {width: 1280, height: 860}
+  - set_zoom: {percent: 100}
+  - command: dev.demo_auth_reset
+  - command: file.sign_out
+  - wait: {ms: 200}
+  - click_if_present: {role: button, label: Discard changes}
+  - wait: {ms: 300}
+  - assert_state: {key: signed_in, equals: false}
+  - click: {role: link, label: Forgot password?}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.forgot_open, equals: true}
+  - assert_exists: {role: label, label: Reset your password with the recovery key}
+  - screenshot: recovery-form
+  # A wrong key.
+  - click: {role: text_input, label: Email}
+  - key: Ctrl+A
+  - type: {text: owner@example.com}
+  - click: {role: password_input, label: Recovery key}
+  - type: {text: WRONG-WRONG-WRONG}
+  - click: {role: password_input, label: New password}
+  - type: {text: recovered-password-1}
+  - click: {role: password_input, label: Confirm new password}
+  - type: {text: recovered-password-1}
+  - click: {role: button, label: Reset password}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.recovery_message, equals: reset.msg.wrong}
+  - screenshot: wrong-key
+  # The right key (typed with spaces and lower case).
+  - click: {role: password_input, label: Recovery key}
+  - type: {text: k7f2 9qmd 3xtb 8rvc pl6n wy4h}
+  - click: {role: password_input, label: New password}
+  - type: {text: recovered-password-1}
+  - click: {role: password_input, label: Confirm new password}
+  - type: {text: recovered-password-1}
+  - click: {role: button, label: Reset password}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.screen, equals: recovery_key}
+  - assert_state: {key: screen.has_key, equals: true}
+  - assert_state: {key: screen.revealed, equals: false}
+  - screenshot: fresh-key
+  - click: {role: check_box, label: I saved my recovery key somewhere safe}
+  - click: {role: button, label: Done}
+  - wait: {ms: 300}
+  - command: file.open_company
+  - wait: {ms: 200}
+  # The old key works no more.
+  - click: {role: link, label: Forgot password?}
+  - click: {role: password_input, label: Recovery key}
+  - type: {text: K7F2-9QMD-3XTB-8RVC-PL6N-WY4H}
+  - click: {role: password_input, label: New password}
+  - type: {text: another-password-12}
+  - click: {role: password_input, label: Confirm new password}
+  - type: {text: another-password-12}
+  - click: {role: button, label: Reset password}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.recovery_message, equals: reset.msg.wrong}
+  - click: {role: button, label: Back to sign in}
+  # The new password signs in.
+  - click: {role: text_input, label: Email}
+  - key: Ctrl+A
+  - type: {text: owner@example.com}
+  - click: {role: password_input, label: Password}
+  - type: {text: recovered-password-1}
+  - click: {role: button, label: Sign in}
+  - wait: {ms: 400}
+  - assert_state: {key: signed_in, equals: true}
+  - command: dev.demo_auth_reset

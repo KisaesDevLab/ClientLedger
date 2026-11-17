@@ -155,6 +155,16 @@ impl ExemptionsScreen {
             },
         ));
         let today = self.today;
+        // P29 review B2: the engine refuses the expiring list while an
+        // account is hidden from this role; the panel stays empty.
+        if !self
+            .link
+            .rights()
+            .door_open(cl_model::permissions::Door::ExemptionsExpiring)
+        {
+            self.poll();
+            return;
+        }
         self.expiring_job = Some(engine::read(
             &self.link,
             self.group.as_ref(),

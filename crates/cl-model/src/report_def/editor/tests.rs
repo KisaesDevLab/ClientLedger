@@ -366,6 +366,8 @@ fn saved_from(e: &BuilderEditor, kind: SavedKind, can_edit: bool) -> Saved {
         version: 3,
         kind,
         can_edit,
+        hidden_refs: false,
+        hidden_ids: Vec::new(),
         def: e.definition().clone(),
         name: e.name().into(),
         group_id: None,
@@ -404,6 +406,12 @@ fn dirty_compares_structure_and_save_changes_needs_the_right() {
     assert!(
         e.dirty() && !e.can_save_changes(),
         "NOT_AUTHOR keeps the edits"
+    );
+    assert!(e.saved().is_some_and(|s| !s.hidden_refs));
+    e.hidden_refs();
+    assert!(
+        e.dirty() && !e.can_save_changes() && e.saved().is_some_and(|s| s.hidden_refs),
+        "SENSITIVE_DEFINITION keeps the edits and says why"
     );
     let mut std = BuilderEditor::new(
         e.definition().clone(),

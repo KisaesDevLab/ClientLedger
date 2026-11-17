@@ -23,6 +23,31 @@ use super::ledger::type_label;
 use super::{col, row};
 use crate::errors::{ApiError, LocalValidation};
 
+/// The date on this computer's clock of an engine timestamp (P29 QA-8:
+/// an edit made in the evening is not dated tomorrow); a bare
+/// `YYYY-MM-DD` is taken as given. Reads RFC 3339 (`…T…Z`) and
+/// PostgreSQL's own text (`2026-11-17 00:53:00.123456+00`), which the
+/// engine's raw queries pass through as stored (its database driver keeps
+/// `timestamptz` as text).
+pub(crate) fn local_date(s: &str) -> Option<cl_core::CalendarDate> {
+    let utc = cl_core::Timestamp::parse_wire(s)
+        .ok()
+        .map(cl_core::Timestamp::as_utc)
+        .or_else(|| {
+            // `%#z`: an offset with or without minutes (`+00`, `-05:30`).
+            chrono::DateTime::parse_from_str(&s.replacen('T', " ", 1), "%Y-%m-%d %H:%M:%S%.f%#z")
+                .ok()
+                .map(|t| t.with_timezone(&chrono::Utc))
+        });
+    match utc {
+        Some(t) => {
+            cl_core::CalendarDate::from_naive(t.with_timezone(&chrono::Local).date_naive()).ok()
+        }
+        // Not a timestamp this build reads: its date part, as before.
+        None => cl_core::CalendarDate::parse_wire(s.get(..10).unwrap_or(s)).ok(),
+    }
+}
+
 /// How a cell is read.
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum F {
@@ -42,6 +67,9 @@ pub(crate) enum F {
     Account(&'static str, &'static str),
     /// A `YYYY-MM-DD` date (`null`: empty).
     Date(&'static str),
+    /// An engine timestamp (UTC), shown as its date on this computer's
+    /// clock (P29 QA-8); a bare date is taken as given.
+    LocalDate(&'static str),
     /// A required exact amount string.
     Amount(&'static str),
     /// A count (a JSON number or numeric text).
@@ -673,6 +701,12 @@ pub(crate) fn read(v: &Value, f: F) -> Result<Cell, ApiError> {
                 cl_core::CalendarDate::parse_wire(s.get(..10).unwrap_or(s))
                     .map_err(|_| shape(k))?,
             ),
+            _ => return Err(shape(k)),
+        },
+        F::LocalDate(k) => match v.get(k) {
+            None | Some(Value::Null) => Cell::Empty,
+            Some(Value::String(s)) if s.is_empty() => Cell::Empty,
+            Some(Value::String(s)) => Cell::Date(local_date(s).ok_or_else(|| shape(k))?),
             _ => return Err(shape(k)),
         },
         F::Amount(k) => exact_at(v, k)?,

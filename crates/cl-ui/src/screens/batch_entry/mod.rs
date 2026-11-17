@@ -149,6 +149,8 @@ pub struct BulkEntryScreen {
     // ------------------------------------------------------------ save (D3)
     /// Why the last Save all was refused.
     pub(crate) refused: Option<cl_model::forms::batch::Blocker>,
+    /// P29 WP7: the rows the tag rules refused, in words (Q-276).
+    pub(crate) tag_refusal: Vec<String>,
     /// Save all waits for the rows being checked.
     pub(crate) save_after_check: Option<cl_model::forms::SaveIntent>,
     pub(crate) save_task: Option<save::Saving>,
@@ -185,6 +187,9 @@ pub struct BulkEntryScreen {
     pub(crate) select_all_armed: Option<(cl_grid::CellPos, u64)>,
     /// What the last bulk action did ("Set on 3 rows."), under the grid.
     pub(crate) bulk_note: Option<String>,
+    /// P29 review S3: the company's default tag still goes on the blank
+    /// sections once the tags are read (a new window or a new batch).
+    pub(crate) tag_default_due: bool,
 }
 
 /// Half a second after the last change, the changed rows go to the engine.
@@ -269,6 +274,7 @@ impl BulkEntryScreen {
             pasted_rows: 0,
             suggest: suggest::BatchSuggest::default(),
             refused: None,
+            tag_refusal: Vec::new(),
             save_after_check: None,
             save_task: None,
             key: None,
@@ -287,6 +293,7 @@ impl BulkEntryScreen {
             kept_apart: 0,
             select_all_armed: None,
             bulk_note: None,
+            tag_default_due: true,
         };
         s.load_columns();
         s.seen_rev = s.grid.form().revision();
@@ -353,10 +360,52 @@ impl BulkEntryScreen {
             self.grid.adapter_mut().lists = Arc::clone(&self.books.lists);
             self.default_contexts();
         }
+        // After any read: the tags may arrive after the accounts.
+        self.fill_default_tag();
         if lists_changed || self.books.closing != closing_before {
             // A name, account or tag the engine resolved may be gone, and
             // the closed-period rows may differ: ask again.
             self.forget_engine_results();
+        }
+    }
+
+    /// The company's active default tag (Q-276), as the forms read it.
+    pub(crate) fn default_tag(&self) -> Option<cl_core::ids::TagId> {
+        crate::forms::tag_gate::form_list(&self.books.tags, &self.link).default_tag()
+    }
+
+    /// P29 review S3: blank sections of a new window or batch start with the
+    /// company's default tag as their section tag, shown in the section
+    /// header where it can be changed or cleared; part of the blank window
+    /// (no unsaved mark). Once done, a cleared tag stays cleared.
+    pub(crate) fn fill_default_tag(&mut self) {
+        // Not before every list is read (the tags may come after the
+        // accounts that mark the books loaded).
+        if !self.tag_default_due || !self.books.loaded || self.books.busy() {
+            return;
+        }
+        self.tag_default_due = false;
+        let Some(tag) = self.default_tag() else {
+            return;
+        };
+        let mut b = self.batch().clone();
+        let mut changed = false;
+        for s in b
+            .sections
+            .iter_mut()
+            .filter(|s| s.tag.is_none() && s.filled_count() == 0)
+        {
+            s.tag = Some(tag);
+            changed = true;
+        }
+        if !changed {
+            return;
+        }
+        let lists = Arc::clone(&self.books.lists);
+        if self.grid.form().is_dirty() {
+            self.grid.edit_step(|v| *v = b);
+        } else {
+            self.grid.load(b, &*lists);
         }
     }
 
@@ -612,6 +661,7 @@ impl BulkEntryScreen {
             })),
             "confirm_remove": self.confirm_remove.is_some(),
             "refused": self.refused.map(validate::blocker_name),
+            "tag_refusal": self.tag_refusal,
             "summary": if self.summary_open { self.summary.as_ref().map(summary::Summary::state_json) } else { None },
             "mapping": self.mapping_json(),
             "import_open": self.import_open,

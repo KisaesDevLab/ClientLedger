@@ -1011,12 +1011,15 @@ impl ItemsScreen {
             .selected()
             .and_then(|id| self.list.entry(id))
             .map(|e| e.active);
+        let write = super::can_change(&self.link, KIND);
         ui.horizontal_wrapped(|ui| {
-            let b = |ui: &mut Ui, key: &str, cmd: &str| {
-                ui.button(t(key))
-                    .on_hover_text(format!("{} ({})", t(key), shortcut_hint(cmd)))
+            let tip = |key: &str, cmd: &str| format!("{} ({})", t(key), shortcut_hint(cmd));
+            let b =
+                |ui: &mut Ui, key: &str, cmd: &str| ui.button(t(key)).on_hover_text(tip(key, cmd));
+            let w = |ui: &mut Ui, key: &str, cmd: &str| {
+                super::change_button(ui, write, t(key), tip(key, cmd))
             };
-            if b(ui, "items.new", "list.new").clicked() {
+            if w(ui, "items.new", "list.new").clicked() {
                 self.open_new();
             }
             if b(ui, "items.edit", "edit.edit_transaction").clicked() {
@@ -1027,7 +1030,7 @@ impl ItemsScreen {
             } else {
                 "items.make_inactive"
             };
-            if b(ui, toggle_key, "list.toggle_active").clicked() {
+            if w(ui, toggle_key, "list.toggle_active").clicked() {
                 self.toggle_active();
             }
             ui.separator();

@@ -134,6 +134,12 @@ fn opt_id<T: std::str::FromStr>(v: &Value, key: &str) -> Result<Option<T>, ApiEr
 }
 
 impl AuditImage {
+    /// An image from JSON (the demo backend, tests).
+    #[must_use]
+    pub fn from_value(v: Value) -> AuditImage {
+        AuditImage(v)
+    }
+
     /// The raw image (owner data: never log it).
     #[must_use]
     pub fn raw(&self) -> &Value {
@@ -250,6 +256,138 @@ fn audit_time(text: &str) -> Option<Timestamp> {
     Timestamp::parse_wire(&s).ok()
 }
 
+/// The Audit Trail viewer's filters (P29 WP6). Every field is optional;
+/// the user and record filters need `audit-filters-v1`.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct AuditFilter {
+    /// The record kind (`transaction`, `contact`, …).
+    pub entity_type: Option<String>,
+    /// The engine's action word (`create`, `update`, …).
+    pub action: Option<String>,
+    /// Changes by this user.
+    pub user: Option<UserId>,
+    /// On or after this day.
+    pub from: Option<cl_core::CalendarDate>,
+    /// On or before this day.
+    pub to: Option<cl_core::CalendarDate>,
+    /// Text in the before/after images (owner data: not in `Debug`).
+    pub search: Option<String>,
+    /// One record ("this record").
+    pub entity_id: Option<uuid::Uuid>,
+}
+
+impl fmt::Debug for AuditFilter {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuditFilter")
+            .field("entity_type", &self.entity_type)
+            .field("action", &self.action)
+            .field("user", &self.user)
+            .field("from", &self.from)
+            .field("to", &self.to)
+            .field("search", &self.search.as_ref().map(|_| ".."))
+            .field("entity_id", &self.entity_id)
+            .finish()
+    }
+}
+
+/// One row of the Audit Trail viewer.
+#[derive(Clone, PartialEq, Eq)]
+pub struct AuditRow {
+    /// Row id (the engine's row counter).
+    pub id: u64,
+    /// The engine's action word, as sent.
+    pub action: String,
+    /// The record kind, as sent.
+    pub entity_type: String,
+    /// The record id, as sent.
+    pub entity_id: Option<String>,
+    /// Who (`None` for automatic changes).
+    pub user: Option<UserId>,
+    /// The user's display name, else email (owner data: not in `Debug`).
+    pub user_name: Option<String>,
+    /// When.
+    pub at: Timestamp,
+    /// The record before.
+    pub before: Option<AuditImage>,
+    /// The record after.
+    pub after: Option<AuditImage>,
+}
+
+impl fmt::Debug for AuditRow {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AuditRow")
+            .field("id", &self.id)
+            .field("action", &self.action)
+            .field("entity_type", &self.entity_type)
+            .field("user", &self.user)
+            .field("at", &self.at)
+            .finish_non_exhaustive()
+    }
+}
+
+/// One page of the trail, newest first, and how many rows match.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AuditPage {
+    /// The rows.
+    pub rows: Vec<AuditRow>,
+    /// Rows matching the filter in all.
+    pub total: u64,
+}
+
+#[derive(Deserialize)]
+struct WireListRow {
+    id: Value,
+    action: String,
+    #[serde(default)]
+    entity_type: Option<String>,
+    #[serde(default)]
+    entity_id: Option<String>,
+    #[serde(default)]
+    user_id: Option<UserId>,
+    #[serde(default, rename = "userName")]
+    user_name: Option<String>,
+    #[serde(default)]
+    before_data: Option<Value>,
+    #[serde(default)]
+    after_data: Option<Value>,
+    created_at: String,
+}
+
+#[derive(Deserialize)]
+struct WireListPage {
+    data: Vec<WireListRow>,
+    total: u64,
+}
+
+fn row_id(v: &Value) -> Result<u64, ApiError> {
+    match v {
+        Value::String(t) => t.parse().ok(),
+        Value::Number(n) => n.as_u64(),
+        _ => None,
+    }
+    .ok_or(ApiError::Decode { what: "audit id" })
+}
+
+/// The query of one viewer page (`company=current`, as the report does).
+fn list_query(f: &AuditFilter, limit: u32, offset: u64) -> Vec<(String, String)> {
+    let mut q: Vec<(String, String)> = vec![("company".into(), "current".into())];
+    let mut push = |k: &str, v: Option<String>| {
+        if let Some(v) = v.filter(|v| !v.trim().is_empty()) {
+            q.push((k.into(), v));
+        }
+    };
+    push("entity_type", f.entity_type.clone());
+    push("action", f.action.clone());
+    push("start_date", f.from.map(cl_core::CalendarDate::to_wire));
+    push("end_date", f.to.map(cl_core::CalendarDate::to_wire));
+    push("search", f.search.as_ref().map(|s| s.trim().to_string()));
+    push("user_id", f.user.map(|u| u.to_string()));
+    push("entity_id", f.entity_id.map(|u| u.to_string()));
+    q.push(("limit".into(), limit.to_string()));
+    q.push(("offset".into(), offset.to_string()));
+    q
+}
+
 /// Audit trail reads of a session (`session.audit()`).
 #[derive(Clone, Copy, Debug)]
 pub struct Audit<'a>(pub(crate) &'a Session);
@@ -263,6 +401,55 @@ impl Session {
 }
 
 impl Audit<'_> {
+    /// One page of the company's audit trail, newest first (P29 WP6).
+    /// `limit` is capped at 500.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` for a user or record filter on an engine without
+    /// `audit-filters-v1`; `Forbidden` without `audit_log:read`; `Decode`
+    /// when a row cannot be read; any [`ApiError`].
+    pub async fn list(
+        &self,
+        filter: &AuditFilter,
+        limit: u32,
+        offset: u64,
+    ) -> Result<AuditPage, ApiError> {
+        if (filter.user.is_some() || filter.entity_id.is_some())
+            && !self
+                .0
+                .client()
+                .capabilities()
+                .has(crate::resources::reports::run::AUDIT)
+        {
+            return Err(ApiError::Local(crate::LocalValidation::Unsupported));
+        }
+        let mut call = Call::at(Method::Get, AUDIT_LOG.route());
+        call.query = list_query(filter, limit.clamp(1, 500), offset);
+        let reply = self.0.send(&AUDIT_LOG, call, None).await?;
+        let page: WireListPage = decode(&reply, "audit log")?;
+        let rows = page
+            .data
+            .into_iter()
+            .map(|r| {
+                Ok(AuditRow {
+                    id: row_id(&r.id)?,
+                    action: r.action,
+                    entity_type: r.entity_type.unwrap_or_default(),
+                    entity_id: r.entity_id,
+                    user: r.user_id,
+                    user_name: r.user_name,
+                    at: audit_time(&r.created_at).ok_or(ApiError::Decode { what: "audit time" })?,
+                    before: image(r.before_data),
+                    after: image(r.after_data),
+                })
+            })
+            .collect::<Result<Vec<_>, ApiError>>()?;
+        Ok(AuditPage {
+            rows,
+            total: page.total,
+        })
+    }
+
     /// The audit rows of one record, newest first.
     ///
     /// # Errors
@@ -392,6 +579,81 @@ mod tests {
         let q = query(&requests(&server, "GET").await[0]);
         assert!(q.contains("entity_type=transaction"), "{q}");
         assert!(q.contains(&format!("search={TXN}")), "{q}");
+    }
+
+    #[tokio::test]
+    async fn a_viewer_page_sends_the_filters_and_keeps_names_out_of_debug() {
+        let server = MockServer::start().await;
+        let body = r#"{"data":[
+            {"id":"9","action":"update","entity_type":"contact","entity_id":null,
+             "user_id":null,"userName":"Pat Owner","before_data":"{\"name\":\"A\"}",
+             "after_data":{"name":"B"},"created_at":"2026-11-02T10:00:00.000Z"},
+            {"id":8,"action":"create","entity_type":"tag","user_id":null,
+             "created_at":"2026-11-01 09:00:00-05"}],"total":42}"#;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/audit-log"))
+            .respond_with(json(200, body))
+            .mount(&server)
+            .await;
+        let s = crate::resources::testkit::session_with_caps(
+            &server,
+            &[crate::resources::reports::run::AUDIT],
+        )
+        .await;
+        let f = AuditFilter {
+            entity_type: Some("contact".into()),
+            action: Some("update".into()),
+            from: cl_core::CalendarDate::from_ymd(2026, 11, 1).ok(),
+            to: cl_core::CalendarDate::from_ymd(2026, 11, 30).ok(),
+            search: Some("  Secret words ".into()),
+            user: Some(TXN.parse::<UserId>().expect("u")),
+            entity_id: None,
+        };
+        let page = s.audit().list(&f, 9999, 500).await.expect("page");
+        assert_eq!(page.total, 42);
+        assert_eq!(page.rows.len(), 2);
+        assert_eq!(page.rows[0].id, 9);
+        assert_eq!(page.rows[0].user_name.as_deref(), Some("Pat Owner"));
+        assert_eq!(page.rows[0].before.as_ref().expect("b").raw()["name"], "A");
+        assert_eq!(page.rows[1].entity_type, "tag");
+        let shown = format!("{page:?} {f:?}");
+        assert!(
+            !shown.contains("Pat") && !shown.contains("Secret"),
+            "{shown}"
+        );
+        let gets = requests(&server, "GET").await;
+        let q = gets
+            .iter()
+            .find(|r| r.url.path() == "/api/v1/audit-log")
+            .map(query)
+            .expect("an audit read");
+        for want in [
+            "company=current",
+            "entity_type=contact",
+            "action=update",
+            "start_date=2026-11-01",
+            "end_date=2026-11-30",
+            "search=Secret",
+            "limit=500",
+            "offset=500",
+        ] {
+            assert!(q.contains(want), "{want} in {q}");
+        }
+        assert!(q.contains(&format!("user_id={TXN}")), "{q}");
+    }
+
+    #[tokio::test]
+    async fn user_and_record_filters_need_audit_filters_v1() {
+        let server = MockServer::start().await;
+        let s = crate::resources::testkit::session_with_caps(&server, &[]).await;
+        let f = AuditFilter {
+            entity_id: Some(uuid::Uuid::parse_str(TXN).expect("id")),
+            ..AuditFilter::default()
+        };
+        assert!(matches!(
+            s.audit().list(&f, 100, 0).await,
+            Err(ApiError::Local(crate::LocalValidation::Unsupported))
+        ));
     }
 
     #[test]

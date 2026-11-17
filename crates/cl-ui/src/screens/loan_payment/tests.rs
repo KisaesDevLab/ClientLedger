@@ -206,3 +206,24 @@ fn esc_reverts_the_focused_field_first() {
     assert!(!s.is_dirty());
     assert!(!s.command(CommandId::new("form.revert")));
 }
+
+/// P29 review S2: Loan payment and the tag options: the principal and
+/// interest lines have no tag field and are not checked (P29 WP7), so with
+/// "tag every line" on a payment without extra lines still saves and
+/// nothing is refused.
+#[test]
+fn tag_options_on_loan_payments() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let v = statement();
+    let text = |k: &str| v[k].as_str().expect("string").to_string();
+    s.pick_lender(NameOutcome::Picked(lakeview(&s)));
+    s.poll();
+    type_amounts(&mut s, &text("payment"), &text("interest"));
+    link.demo_state().expect("demo").require_tag_every_line = true;
+    let form = s.compose();
+    assert!(s.tag_gate(&form).is_ok(), "no extra lines, nothing to tag");
+    let before = posted(&link);
+    assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
+    assert_eq!(posted(&link), before + 1);
+}

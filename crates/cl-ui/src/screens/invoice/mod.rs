@@ -391,6 +391,8 @@ pub struct InvoiceScreen {
     pub(crate) attach: attach::InvoiceAttach,
     pub(crate) email: email::EmailFlow,
     pub(crate) problems: Vec<InvoiceProblem>,
+    /// P29 WP7: the lines the tag rules refused, in words (Q-276).
+    pub(crate) tag_refusal: Vec<String>,
     pub(crate) error: Option<ApiError>,
     pub(crate) notice: Option<&'static str>,
     /// P24: an inventory refusal in plain words (closed period).
@@ -517,6 +519,7 @@ impl InvoiceScreen {
             attach: attach::InvoiceAttach::default(),
             email: email::EmailFlow::default(),
             problems: Vec::new(),
+            tag_refusal: Vec::new(),
             error: None,
             notice: None,
             inventory_note: None,
@@ -820,6 +823,7 @@ impl InvoiceScreen {
         }
         if lists {
             self.apply_lists();
+            self.fill_default_tag();
         }
         if let Some(r) = engine::poll(&mut self.save_job) {
             match r {
@@ -1083,6 +1087,33 @@ impl InvoiceScreen {
         self.inputs.rev = self.header.revision();
     }
 
+    /// The tag rules on the form's lines (P29 WP7, Q-276).
+    pub(crate) fn tag_gate(&self, form: &InvoiceForm) -> Result<(), Vec<String>> {
+        // The company's rules as they are now (Preferences may have changed
+        // them since this window read its lists).
+        let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
+        let lines = cl_model::forms::tag_rule::invoice_lines(form, &list);
+        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
+    }
+
+    /// Q-276: a new, untouched form starts with the company's default tag
+    /// in its header (part of the clean form). Never on an edit.
+    pub(crate) fn fill_default_tag(&mut self) {
+        let tags = cl_model::forms::tag_rule::new_form_header_tags(&self.books.tag_list);
+        if tags.is_empty()
+            || self.editing.is_some()
+            || self.saved_count > 0
+            || self.nav_at.is_some()
+            || self.header.is_dirty()
+            || !self.header.current().header_tags.is_empty()
+        {
+            return;
+        }
+        let mut f = self.header.current().clone();
+        f.header_tags = tags;
+        self.header.load(f);
+    }
+
     /// A blank invoice; Save & New keeps the date.
     pub(crate) fn new_form(&mut self, keep_date: bool) {
         let date = if keep_date {
@@ -1090,7 +1121,10 @@ impl InvoiceScreen {
         } else {
             self.today
         };
-        self.header.load(blank(self.kind, date));
+        let mut fresh = blank(self.kind, date);
+        fresh.header_tags = cl_model::forms::tag_rule::new_form_header_tags(&self.books.tag_list);
+        self.header.load(fresh);
+        self.tag_refusal.clear();
         self.grid.load(Vec::new());
         self.editing = None;
         self.credit = CreditMemoForm::default();
@@ -1229,6 +1263,7 @@ impl InvoiceScreen {
             "editing_id": self.editing.as_ref().map(|e| e.id.to_string()),
             "save": {
                 "refused": self.problems.first().map(|p| p.key().0),
+                "tag_refusal": self.tag_refusal,
                 "problems": self.problems.len(),
                 "error": self.error.is_some(),
                 "stale": self.stale,
@@ -1304,6 +1339,10 @@ impl InvoiceScreen {
     /// A refused save's problems, checked again against the form as it is
     /// now (a fixed problem goes away at once).
     pub(crate) fn recheck_problems(&mut self) {
+        if !self.tag_refusal.is_empty() {
+            let form = self.compose();
+            self.tag_refusal = self.tag_gate(&form).err().unwrap_or_default();
+        }
         if self.problems.is_empty() {
             return;
         }

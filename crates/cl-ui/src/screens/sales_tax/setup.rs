@@ -642,11 +642,15 @@ impl SetupScreen {
     }
 
     fn items_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let write = crate::screens::lists::can_change(&self.link, KIND);
         ui.horizontal(|ui| {
-            if ui.button(t("sales_tax.setup.new_item")).clicked() {
+            let w = |ui: &mut Ui, key: &str| {
+                crate::screens::lists::change_button(ui, write, t(key), t(key))
+            };
+            if w(ui, "sales_tax.setup.new_item").clicked() {
                 self.new_entry();
             }
-            if ui.button(t("sales_tax.setup.new_group")).clicked() {
+            if w(ui, "sales_tax.setup.new_group").clicked() {
                 self.new_group();
             }
         });

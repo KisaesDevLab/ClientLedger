@@ -69,7 +69,7 @@ pub fn closing_exceptions(v: &Value, req: &ReportRequest) -> Result<ReportTable,
             RowPath::of(["rows", i.to_string().as_str()]),
             String::new(),
             vec![
-                read(e, F::Date("at"))?,
+                read(e, F::LocalDate("at"))?,
                 read(e, F::Text("userName"))?,
                 read(e, F::Code("reports.audit.action", "action"))?,
                 read(e, F::TxnType("txnType"))?,
@@ -146,69 +146,10 @@ pub const AUDIT_FIELDS: [&str; 16] = [
     "voidReason",
 ];
 
-/// Bookkeeping fields the trail leaves out, and taxpayer ids and secrets
-/// (Q-P28p, non-negotiable 11), which never show.
-const QUIET: [&str; 14] = [
-    "taxId",
-    "tax_id",
-    "tin",
-    "password",
-    "passwordHash",
-    "password_hash",
-    "id",
-    "tenantId",
-    "tenant_id",
-    "createdAt",
-    "updatedAt",
-    "created_at",
-    "updated_at",
-    "companyId",
-];
-
-/// Name tokens that mark a taxpayer id or a secret (S2): a field whose
-/// name has one of them as a whole word (`ein`, `companyEin`, `smtp_pass`),
-/// or runs them together (`apiKey`, `taxId`), never shows. Whole words are
-/// compared, so `settings` or `reportKey` still show.
-const SECRET_WORDS: [&str; 12] = [
-    "ein", "tin", "ssn", "taxid", "pass", "password", "secret", "token", "apikey", "hash", "pin",
-    "iban",
-];
-
-/// The field's name split into lower-case words (`smtpPassHash` → smtp,
-/// pass, hash; `tax_id` → tax, id).
-fn words(name: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    let mut cur = String::new();
-    let mut prev_lower = false;
-    for ch in name.chars() {
-        if ch == '_' || ch == '-' || ch == '.' {
-            if !cur.is_empty() {
-                out.push(std::mem::take(&mut cur));
-            }
-            prev_lower = false;
-            continue;
-        }
-        if ch.is_uppercase() && prev_lower && !cur.is_empty() {
-            out.push(std::mem::take(&mut cur));
-        }
-        prev_lower = ch.is_lowercase() || ch.is_ascii_digit();
-        cur.extend(ch.to_lowercase());
-    }
-    if !cur.is_empty() {
-        out.push(cur);
-    }
-    out
-}
-
-/// True for a field that must never show in the trail.
+/// Secrets and taxpayer ids never show (`cl_core::audit`, shared with the
+/// Audit Trail viewer).
 fn secret(name: &str) -> bool {
-    let w = words(name);
-    let joined: String = w.concat();
-    w.iter().any(|x| SECRET_WORDS.contains(&x.as_str()))
-        || SECRET_WORDS.contains(&joined.as_str())
-        || ["taxid", "apikey", "privatekey"]
-            .iter()
-            .any(|k| joined.contains(k))
+    cl_core::audit::secret_field(name)
 }
 
 fn camel(s: &str) -> String {
@@ -435,7 +376,7 @@ pub fn audit_trail(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiErr
             RowPath::of(["rows", k.as_str()]),
             String::new(),
             vec![
-                read(e, F::Date("created_at"))?,
+                read(e, F::LocalDate("created_at"))?,
                 read(e, F::Text("userName"))?,
                 match (extra_action(e, entity), report_file_action(e, entity)) {
                     (Some(text), _) => Cell::Text(text),
@@ -477,7 +418,7 @@ pub fn audit_trail(v: &Value, req: &ReportRequest) -> Result<ReportTable, ApiErr
             let a = after.and_then(|o| o.get(key.as_str()));
             // An update lists what changed; a create or delete what it had.
             if (before.is_some() && after.is_some() && a == b)
-                || QUIET.contains(&key.as_str())
+                || cl_core::audit::QUIET.contains(&key.as_str())
                 // A memorized report's action already says it came from a
                 // file (A09 QA-4: "Imported").
                 || (report_row && key == "origin")
@@ -554,6 +495,54 @@ mod tests {
         assert!(t.meta.truncated.is_none());
         let bad = json!({"data": [{"amountBeforeExact": 1234}]});
         assert!(closing_exceptions(&bad, &req(Source::ClosingDateExceptions)).is_err());
+        // P29 QA-8: "Changed on" is the date on this computer's clock, not
+        // the UTC timestamp's date (an evening edit in the US is "tomorrow"
+        // in UTC).
+        let at = "2026-11-17T00:53:00.000Z";
+        let local = chrono::DateTime::parse_from_rfc3339(at)
+            .expect("ts")
+            .with_timezone(&chrono::Local)
+            .date_naive();
+        let evening = json!({"data": [{"at": at, "userName": "QA"}]});
+        let t = closing_exceptions(&evening, &req(Source::ClosingDateExceptions)).expect("table");
+        assert_eq!(
+            t.rows[0].cells[0],
+            Cell::Date(cl_core::CalendarDate::from_naive(local).expect("day"))
+        );
+        assert_eq!(
+            super::super::lists::local_date("2026-09-30"),
+            Some(cl_core::CalendarDate::from_ymd(2026, 9, 30).expect("day")),
+            "a bare date is taken as given"
+        );
+    }
+
+    /// P29 QA-8: the engine's raw queries hand `timestamptz` over as
+    /// PostgreSQL's text (its driver keeps it as stored); those read as the
+    /// same instant, so the local date is the same as for the `Z` form.
+    #[test]
+    fn postgres_text_timestamps_take_the_local_date() {
+        use super::super::lists::local_date;
+        let local = |rfc: &str| {
+            cl_core::CalendarDate::from_naive(
+                chrono::DateTime::parse_from_rfc3339(rfc)
+                    .expect("ts")
+                    .with_timezone(&chrono::Local)
+                    .date_naive(),
+            )
+            .expect("day")
+        };
+        for (pg, same) in [
+            (
+                "2026-11-17 00:53:00.123456+00",
+                "2026-11-17T00:53:00.123456Z",
+            ),
+            ("2026-11-17 00:53:00+00", "2026-11-17T00:53:00Z"),
+            ("2026-11-16 18:53:00.5-06", "2026-11-17T00:53:00.5Z"),
+            ("2026-11-17 06:23:00+05:30", "2026-11-17T00:53:00Z"),
+            ("2026-11-17T00:53:00.000Z", "2026-11-17T00:53:00Z"),
+        ] {
+            assert_eq!(local_date(pg), Some(local(same)), "{pg}");
+        }
     }
 
     #[test]

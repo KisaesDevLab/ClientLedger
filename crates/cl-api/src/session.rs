@@ -33,8 +33,8 @@ use crate::idempotency::{
     AttemptCreds, AuthHook, BoxFuture, Executor, IdempotencyKey, Reconciler, StaticAuth, unix_now,
 };
 use crate::resources::operations::{
-    AUTH_ME, COMPANY_GET, CREATE_TENANT, DESKTOP_INFO, HEALTH, LOGIN, LOGOUT, Operation, REFRESH,
-    SWITCH_TENANT, TFA_VERIFY,
+    AUTH_ME, CHANGE_PASSWORD, COMPANY_GET, CREATE_TENANT, DESKTOP_INFO, HEALTH, LOGIN, LOGOUT,
+    Operation, REFRESH, SWITCH_TENANT, TFA_VERIFY,
 };
 use crate::wire::{Capabilities, DesktopInfo, Health};
 
@@ -375,6 +375,9 @@ struct TokensWire {
 #[derive(Deserialize)]
 struct UserWire {
     id: UserId,
+    /// U-230: signed in with a temporary password.
+    #[serde(default, rename = "passwordChangeRequired")]
+    password_change_required: Option<bool>,
 }
 
 /// Where a session's requests go.
@@ -485,6 +488,12 @@ struct SessionInner {
     /// Probes of saves whose outcome stayed unknown, newest last (bounded),
     /// for the owner's recheck (B2).
     lost: Mutex<VecDeque<(IdempotencyKey, crate::resources::reconcile::LostProbe)>>,
+    /// Requests the engine refused with 403 (P29): the app reads
+    /// `/auth/me` again when this grows, because rights may have changed.
+    forbidden: std::sync::atomic::AtomicU64,
+    /// U-230: the user must choose a new password before anything else
+    /// works (from the sign-in answer; cleared by [`Session::change_password`]).
+    must_change: std::sync::atomic::AtomicBool,
 }
 
 /// How many unknown saves a session keeps a probe for.
@@ -605,9 +614,15 @@ impl Session {
             }
         };
         let access = Secret::new(tokens.access_token);
+        let must_change = wire
+            .user
+            .as_ref()
+            .and_then(|u| u.password_change_required)
+            .unwrap_or(false);
         Ok(Session {
             inner: Arc::new(SessionInner {
                 client,
+                must_change: std::sync::atomic::AtomicBool::new(must_change),
                 user_id: wire.user.map(|u| u.id),
                 state: Mutex::new(AuthState {
                     access_exp: jwt_exp(access.expose()),
@@ -621,6 +636,7 @@ impl Session {
                 rotate: tokio::sync::Mutex::new(()),
                 created: Mutex::new(VecDeque::new()),
                 lost: Mutex::new(VecDeque::new()),
+                forbidden: std::sync::atomic::AtomicU64::new(0),
             }),
             pin: None,
         })
@@ -867,6 +883,72 @@ impl Session {
         result
     }
 
+    /// The user signed in with a temporary password and must choose a new
+    /// one before anything else works (U-230, `temp-password-v1`). Always
+    /// false on engines without it.
+    #[must_use]
+    pub fn password_change_required(&self) -> bool {
+        self.inner
+            .must_change
+            .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// `POST /api/v1/auth/change-password`: the signed-in user's own
+    /// password. The engine ends every session of the user and answers with
+    /// a fresh token pair for this one, which this session keeps (the same
+    /// way a company switch rotates them). Clears the must-change flag.
+    /// Never retried; nothing is logged.
+    ///
+    /// # Errors
+    /// `Local(InvalidValue)` (nothing sent) for an empty current password,
+    /// or a new one shorter than [`crate::PASSWORD_MIN_CHARS`] characters or
+    /// longer than [`crate::PASSWORD_MAX_BYTES`] bytes; `Validation` with
+    /// code `INVALID_CURRENT_PASSWORD`, `PASSWORD_UNCHANGED` or
+    /// `PASSWORD_BREACHED`; `RateLimited`; any [`ApiError`].
+    pub async fn change_password(&self, current: &Secret, new: &Secret) -> Result<(), ApiError> {
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Body<'a> {
+            current_password: &'a str,
+            new_password: &'a str,
+        }
+        if current.is_empty() || !crate::resources::recovery::password_fits(new) {
+            return Err(ApiError::Local(
+                crate::errors::LocalValidation::InvalidValue,
+            ));
+        }
+        self.inner.ensure_fresh(None).await?;
+        let _g = self.inner.rotate.lock().await;
+        let (bearer, cookie) = {
+            let st = lock(&self.inner.state);
+            if st.ended {
+                return Err(ApiError::Unauthorized(AuthFailure::SessionExpired));
+            }
+            (st.access.clone(), st.refresh.clone())
+        };
+        let auth = StaticAuth(AttemptAuth {
+            bearer: Some(bearer),
+            refresh_cookie: cookie,
+        });
+        let body = json_body(&Body {
+            current_password: current.expose(),
+            new_password: new.expose(),
+        })?;
+        let call = Call::at(Method::Post, CHANGE_PASSWORD.route())
+            .json_body(body)
+            .timeout(TimeoutClass::Auth);
+        let reply = self
+            .client()
+            .exec()
+            .run(&CHANGE_PASSWORD, call, &auth, None)
+            .await?;
+        self.inner.store_rotated(&reply)?;
+        self.inner
+            .must_change
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
     pub(crate) fn set_scope(&self, scope: Scope) {
         let mut st = lock(&self.inner.state);
         st.scope = scope;
@@ -940,11 +1022,13 @@ impl Session {
         reconciler: Option<&dyn Reconciler>,
     ) -> Result<EngineReply, ApiError> {
         if !op.company_scoped() {
-            return self
+            let out = self
                 .client()
                 .exec()
                 .run(op, call, self.inner.as_ref(), reconciler)
                 .await;
+            self.count_forbidden(&out);
+            return out;
         }
         let pin = self.pin_now();
         match pin.scope {
@@ -955,7 +1039,26 @@ impl Session {
             inner: self.inner.as_ref(),
             epoch: pin.epoch,
         };
-        self.client().exec().run(op, call, &auth, reconciler).await
+        let out = self.client().exec().run(op, call, &auth, reconciler).await;
+        self.count_forbidden(&out);
+        out
+    }
+
+    fn count_forbidden<T>(&self, out: &Result<T, ApiError>) {
+        if matches!(out, Err(ApiError::Forbidden { .. })) {
+            self.inner
+                .forbidden
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// How many requests the engine refused with 403 so far (P29:
+    /// the shell re-reads the rights when this grows).
+    #[must_use]
+    pub fn forbidden_seen(&self) -> u64 {
+        self.inner
+            .forbidden
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -1258,6 +1361,8 @@ pub fn stub_session(port: u16) -> Session {
             rotate: tokio::sync::Mutex::new(()),
             created: Mutex::new(VecDeque::new()),
             lost: Mutex::new(VecDeque::new()),
+            forbidden: std::sync::atomic::AtomicU64::new(0),
+            must_change: std::sync::atomic::AtomicBool::new(false),
         }),
         pin: None,
     }
@@ -1358,6 +1463,8 @@ pub(crate) mod tests {
                 rotate: tokio::sync::Mutex::new(()),
                 created: Mutex::new(VecDeque::new()),
                 lost: Mutex::new(VecDeque::new()),
+                forbidden: std::sync::atomic::AtomicU64::new(0),
+                must_change: std::sync::atomic::AtomicBool::new(false),
             }),
             pin: None,
         }
@@ -1434,5 +1541,142 @@ pub(crate) mod tests {
         assert_eq!(e, ApiError::Unauthorized(AuthFailure::SessionExpired));
         assert_eq!(server.received_requests().await.expect("r").len(), 0);
         assert!(format!("{s:?}").contains("Workspace"));
+    }
+
+    const USER: &str = "5b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a05";
+
+    fn token_reply(body: &str, cookie: &str) -> ResponseTemplate {
+        ResponseTemplate::new(200)
+            .set_body_raw(body.to_string(), "application/json")
+            .append_header(
+                "set-cookie",
+                format!("kb_refresh={cookie}; HttpOnly; Path=/api/v1/auth").as_str(),
+            )
+    }
+
+    /// U-230: the sign-in answer's must-change flag is kept on the session.
+    #[tokio::test]
+    async fn login_reads_the_must_change_flag() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/auth/login"))
+            .respond_with(token_reply(
+                &format!(
+                    r#"{{"user":{{"id":"{USER}","passwordChangeRequired":true}},"tokens":{{"accessToken":"a.b.c"}}}}"#
+                ),
+                &"k".repeat(32),
+            ))
+            .mount(&server)
+            .await;
+        let s = session_on(&server, Scope::Workspace);
+        let LoginOutcome::Session(signed) = s
+            .client()
+            .login("pat@example.test", &Secret::new("temporary-pw-16x"))
+            .await
+            .expect("login")
+        else {
+            panic!("no tfa here");
+        };
+        assert!(signed.password_change_required());
+        assert!(
+            !s.password_change_required(),
+            "a stub session never must change"
+        );
+    }
+
+    /// Change-password rotates the tokens like a switch (the engine ends
+    /// every other session), clears must-change, and refuses a password
+    /// that doesn't fit without sending anything.
+    #[tokio::test]
+    async fn change_password_keeps_the_new_tokens() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/auth/change-password"))
+            .respond_with(token_reply(
+                r#"{"message":"Password changed","tokens":{"accessToken":"new.access.token"}}"#,
+                &"n".repeat(32),
+            ))
+            .mount(&server)
+            .await;
+        let s = session_on(&server, Scope::Workspace);
+        s.inner
+            .must_change
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        let short = s
+            .change_password(&Secret::new("old-password-1"), &Secret::new("short"))
+            .await
+            .expect_err("short");
+        assert_eq!(
+            short,
+            ApiError::Local(crate::errors::LocalValidation::InvalidValue)
+        );
+        let long = s
+            .change_password(&Secret::new("old-password-1"), &Secret::new("é".repeat(40)))
+            .await
+            .expect_err("over 72 bytes");
+        assert_eq!(
+            long,
+            ApiError::Local(crate::errors::LocalValidation::InvalidValue)
+        );
+        assert_eq!(server.received_requests().await.expect("r").len(), 0);
+
+        s.change_password(
+            &Secret::new("old-password-1"),
+            &Secret::new("a-brand-new-password"),
+        )
+        .await
+        .expect("changed");
+        assert!(!s.password_change_required());
+        {
+            let st = lock(&s.inner.state);
+            assert_eq!(st.access.expose(), "new.access.token");
+            assert_eq!(
+                st.refresh.as_ref().map(Secret::expose),
+                Some("n".repeat(32).as_str())
+            );
+            assert_eq!(st.auth_epoch, 1);
+        }
+        let posts = server.received_requests().await.expect("r");
+        assert_eq!(posts.len(), 1, "never retried");
+        let body: serde_json::Value = serde_json::from_slice(&posts[0].body).expect("json");
+        assert_eq!(body["currentPassword"], "old-password-1");
+        assert_eq!(body["newPassword"], "a-brand-new-password");
+        let cookie = posts[0]
+            .headers
+            .get("cookie")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            cookie.contains(&"r".repeat(32)),
+            "the old cookie goes along"
+        );
+    }
+
+    /// 403 `PASSWORD_CHANGE_REQUIRED` is its own error, not a rights refusal.
+    #[tokio::test]
+    async fn must_change_refusal_is_not_counted_as_forbidden() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/auth/me"))
+            .respond_with(
+                ResponseTemplate::new(403).set_body_raw(
+                    r#"{"error":{"message":"Choose a new password to continue","code":"PASSWORD_CHANGE_REQUIRED"}}"#,
+                    "application/json",
+                ),
+            )
+            .mount(&server)
+            .await;
+        let s = session_on(&server, Scope::Workspace);
+        let e = s
+            .send(&AUTH_ME, Call::at(Method::Get, AUTH_ME.route()), None)
+            .await
+            .expect_err("must change");
+        assert_eq!(e, ApiError::PasswordChangeRequired);
+        assert_eq!(s.forbidden_seen(), 0);
+        assert_eq!(
+            cl_core::errors::OwnerFacing::owner_message(&e).key,
+            "error.api.password_change_required"
+        );
     }
 }

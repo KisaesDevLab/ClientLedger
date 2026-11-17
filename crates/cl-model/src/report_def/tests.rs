@@ -642,3 +642,32 @@ fn caps_on_filters_group_bys_compare_text_and_headers() {
         ("definition.columns.headers.Total".into(), Code::Schema)
     );
 }
+
+/// P29 QA-3, QA-6: a report whose every section needs a right the role
+/// lacks is wholly denied; one with a section it sees is not.
+#[test]
+fn a_report_the_role_cant_see_at_all_is_wholly_denied() {
+    use crate::permissions::{BuiltinRole, Rights};
+    let def = parse(PNL).expect("valid");
+    let ap = BuiltinRole::Payables.rights();
+    let (sections, denied) = outline::sections_denied(&def.nodes, &ap);
+    assert!(sections > 0);
+    assert_eq!(denied, sections, "an A/P user sees no part of a P&L");
+    assert!(outline::wholly_denied(&def.nodes, &ap));
+    assert!(!outline::wholly_denied(&def.nodes, &Rights::all()));
+    assert!(!outline::wholly_denied(
+        &def.nodes,
+        &BuiltinRole::Bookkeeper.rights()
+    ));
+    let mut v = pnl();
+    v["nodes"]
+        .as_array_mut()
+        .expect("nodes")
+        .push(section("bills", "ap_open", "open_balance"));
+    let mixed = parse_value(&v).expect("valid");
+    assert!(
+        !outline::wholly_denied(&mixed.nodes, &ap),
+        "the A/P part shows"
+    );
+    assert!(!outline::wholly_denied(&[], &ap), "no sections: not denied");
+}

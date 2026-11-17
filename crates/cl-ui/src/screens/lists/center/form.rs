@@ -331,7 +331,11 @@ impl CenterScreen {
             backup_withholding: (vendor && checked.backup_withholding != backup0)
                 .then_some(checked.backup_withholding),
         };
-        let update = (!update.is_empty()).then_some(update);
+        let profile_ok = self
+            .link
+            .rights()
+            .door_open(cl_model::permissions::Door::Vendor1099Profile);
+        let update = (profile_ok && !update.is_empty()).then_some(update);
         if self.link.is_demo() {
             let saved = demo_save(&self.link, existing, fields, update.as_ref());
             let Panel::Form(panel) = &mut self.panel else {
@@ -469,6 +473,12 @@ impl CenterScreen {
     pub(super) fn form_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let accounts = self.accounts.clone();
         let role = self.role;
+        // P29 review B2: the engine refuses the 1099 profile while an
+        // account is hidden from this role.
+        let profile_ok = self
+            .link
+            .rights()
+            .door_open(cl_model::permissions::Door::Vendor1099Profile);
         let sales = &mut self.sales;
         let Panel::Form(panel) = &mut self.panel else {
             return;
@@ -750,27 +760,32 @@ impl CenterScreen {
                         panel.form.edit(F_TAX_ID, |x| x.clear_tax_id = true);
                     }
                 }
-                let kinds = [None, Some(TaxIdKind::Ein), Some(TaxIdKind::Ssn)];
-                let labels = [
-                    t("center.tin.unknown"),
-                    t("center.tin.ein"),
-                    t("center.tin.ssn"),
-                ];
-                let cur = kinds.iter().position(|k| *k == d.tax_id_kind).unwrap_or(0);
-                if let Some(i) = pane::picker(
-                    ui,
-                    egui::Id::unique("center-form-tin-kind"),
-                    &t("center.field.tin_type"),
-                    &labels,
-                    cur,
-                    false,
-                ) {
-                    let v = kinds[i];
-                    panel.form.edit(F_TAX_KIND, |x| x.tax_id_kind = v);
-                }
-                let mut backup = d.backup_withholding;
-                if ui.checkbox(&mut backup, t("center.field.backup")).changed() {
-                    panel.form.edit(F_BACKUP, |x| x.backup_withholding = backup);
+                ui.add_enabled_ui(profile_ok, |ui| {
+                    let kinds = [None, Some(TaxIdKind::Ein), Some(TaxIdKind::Ssn)];
+                    let labels = [
+                        t("center.tin.unknown"),
+                        t("center.tin.ein"),
+                        t("center.tin.ssn"),
+                    ];
+                    let cur = kinds.iter().position(|k| *k == d.tax_id_kind).unwrap_or(0);
+                    if let Some(i) = pane::picker(
+                        ui,
+                        egui::Id::unique("center-form-tin-kind"),
+                        &t("center.field.tin_type"),
+                        &labels,
+                        cur,
+                        false,
+                    ) {
+                        let v = kinds[i];
+                        panel.form.edit(F_TAX_KIND, |x| x.tax_id_kind = v);
+                    }
+                    let mut backup = d.backup_withholding;
+                    if ui.checkbox(&mut backup, t("center.field.backup")).changed() {
+                        panel.form.edit(F_BACKUP, |x| x.backup_withholding = backup);
+                    }
+                });
+                if !profile_ok {
+                    cform::hint(ui, tokens, &t("sensitive.door_closed"));
                 }
                 let w9 = match panel.w9_on_file {
                     Some(true) => t("center.yes"),

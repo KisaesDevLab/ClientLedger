@@ -137,6 +137,18 @@ pub(crate) fn draw(s: &mut BankFeedScreen, ui: &mut Ui) {
     {
         form::hint(ui, &tokens, &t_with(k, &[("n", &n.to_string())]));
     }
+    // P29 review B1: the rows an accept left out for want of a tag, named.
+    if !s.tag_skipped.is_empty() {
+        form::hint(
+            ui,
+            &tokens,
+            &format!(
+                "{} {}",
+                t("bank_feed.tag_skipped"),
+                s.tag_skipped.join("; ")
+            ),
+        );
+    }
     let avail = ui.available_size();
     let side = |s: &mut BankFeedScreen, ui: &mut Ui| {
         if s.rules.open {
