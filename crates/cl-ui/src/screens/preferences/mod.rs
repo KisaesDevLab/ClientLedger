@@ -112,6 +112,14 @@ impl Category {
         Category::Updates,
     ];
 
+    /// Only an Admin sees and changes it (P29 QA-17): every company
+    /// setting, and this computer's backup choices. Updates holds nothing
+    /// but the signed-in user's own check.
+    #[must_use]
+    pub fn admin_only(self) -> bool {
+        self.group() == Group::Company && self != Category::Updates
+    }
+
     /// Which group it belongs to.
     #[must_use]
     pub fn group(self) -> Group {
@@ -825,6 +833,9 @@ impl PreferencesScreen {
                 return false;
             }
         };
+        if self.tenant.is_some() && !self.link.rights().is_admin() {
+            return self.save_just_for_me(edits);
+        }
         // Keys and the SMTP password: keychain only (Q-P09a).
         let secrets = self.link.secrets();
         if let Err(e) = edits
@@ -1155,6 +1166,21 @@ impl PreferencesScreen {
         true
     }
 
+    /// P29 QA-17: someone who is not an Admin saves "Just for me" only; the
+    /// company's settings, this computer's backup choices and the keychain
+    /// stay as they were (the window shows those to Admins only).
+    fn save_just_for_me(&mut self, edits: Edits) -> bool {
+        if edits.user != self.committed.user {
+            self.link.push(CompanyEvent::UserPrefs(edits.user));
+        }
+        let mut after = self.committed.clone();
+        after.user = edits.user;
+        after.past_days = edits.past_days;
+        after.future_days = edits.future_days;
+        self.finish_save(&SaveOutcome::default(), after);
+        true
+    }
+
     fn finish_save(&mut self, outcome: &SaveOutcome, mut after: Edits) {
         let (cloud, cloud_reset) = cloud_after_save(
             self.committed.cloud_reading,
@@ -1347,12 +1373,19 @@ impl PreferencesScreen {
 
     fn nav(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let has_company = self.tenant.is_some();
+        let admin = self.link.rights().is_admin();
         let mut last_group = None;
+        let mut held_back = false;
         for c in Category::ALL {
             if !c.matches(&self.search) {
                 continue;
             }
             if c.group() == Group::Company && !has_company {
+                continue;
+            }
+            // P29 QA-17: company settings are an Admin's.
+            if c.admin_only() && !admin {
+                held_back = true;
                 continue;
             }
             if last_group != Some(c.group()) {
@@ -1387,6 +1420,10 @@ impl PreferencesScreen {
                 self.category = c;
             }
         }
+        if held_back {
+            ui.add_space(8.0);
+            form::hint(ui, tokens, &t("prefs.admin_only"));
+        }
     }
 
     /// Whether the Reading documents online switches can change: the
@@ -1416,10 +1453,18 @@ impl PreferencesScreen {
     fn panel(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let caps = self.link.capabilities();
         let demo = self.link.is_demo();
+        let admin = self.link.rights().is_admin();
+        if self.category.admin_only() && !admin {
+            // P29 QA-17: never drawn for someone who is not an Admin (a
+            // window opened on it, or left open across a sign-in).
+            form::heading(ui, tokens, &t(self.category.label_key()));
+            form::hint(ui, tokens, &t("prefs.admin_only"));
+            return;
+        }
         match self.category {
             Category::LookAndFeel => user::look_and_feel(ui, tokens, &mut self.edits),
             Category::DatesNumbers => user::dates_numbers(ui, tokens, &mut self.edits),
-            Category::Reminders => user::reminders(ui, tokens, &mut self.edits),
+            Category::Reminders => user::reminders(ui, tokens, &mut self.edits, admin),
             Category::Accounting => company::accounting(ui, tokens, &mut self.edits, &self.loaded),
             Category::ChecksForms => company::checks_forms(ui, tokens),
             Category::Tags => {
@@ -2601,6 +2646,42 @@ mod tests {
         assert!(s.save());
         let off = crate::company::store_tag_rules(&store, Some(id));
         assert!(!off.every_line && off.default_tag.is_none());
+    }
+
+    /// P29 QA-17: someone who is not an Admin saves "Just for me" only; the
+    /// company's settings are neither listed nor written.
+    #[test]
+    fn a_bookkeeper_saves_only_their_own_preferences() {
+        let (_d, mut s) = demo_screen(true);
+        s.link
+            .set_rights(cl_model::permissions::BuiltinRole::Bookkeeper.rights());
+        assert!(Category::Tags.admin_only() && Category::Ai.admin_only());
+        assert!(Category::Backups.admin_only() && Category::Accounting.admin_only());
+        assert!(!Category::LookAndFeel.admin_only() && !Category::Updates.admin_only());
+        let (id, _) = s.tenant.clone().expect("open");
+        let store = s.link.store().clone();
+        let before = store.load().expect("load").get(id).cloned().expect("rec");
+        s.edits_mut().company.require_tag_every_line = true;
+        s.edits_mut().bills_due_days = "30".into();
+        s.edits_mut().backup_folder = "C:/Elsewhere".into();
+        s.edits_mut().user.theme = cl_settings::ThemeChoice::Dark;
+        assert!(s.save());
+        let after = store.load().expect("load").get(id).cloned().expect("rec");
+        assert_eq!(after.prefs, before.prefs, "nothing of the company written");
+        assert!(!store_tag_rules_on(&s).every_line);
+        assert!(store.load().expect("load").backup_folder.is_none());
+        assert!(
+            s.link
+                .drain()
+                .iter()
+                .any(|e| matches!(e, CompanyEvent::UserPrefs(u) if u.theme == cl_settings::ThemeChoice::Dark)),
+            "the theme is theirs"
+        );
+        assert!(!s.dirty(), "the window shows what is kept");
+    }
+
+    fn store_tag_rules_on(s: &PreferencesScreen) -> cl_model::lists::tags::TagRules {
+        crate::company::store_tag_rules(s.link.store(), s.tenant.as_ref().map(|(id, _)| *id))
     }
 
     /// Q-P26l: the Bank Feed's transfer window is kept within 1-10 days.

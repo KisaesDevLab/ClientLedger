@@ -100,16 +100,23 @@ pub fn dates_numbers(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
 }
 
 /// Bills-due window (Q-169) and the backup reminder.
-pub fn reminders(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits) {
+pub fn reminders(ui: &mut Ui, tokens: &Tokens, edits: &mut Edits, admin: bool) {
     form::heading(ui, tokens, &t("prefs.cat.reminders"));
     form::hint(ui, tokens, &t("prefs.user.reminders_intro"));
     ui.add_space(8.0);
     form::card(ui, tokens, |ui| {
-        form::field(ui, &t("prefs.user.bills_due"), &mut edits.bills_due_days);
-        form::hint(ui, tokens, &t("prefs.user.bills_due_hint"));
-        ui.add_space(6.0);
-        ui.checkbox(&mut edits.backup_on_close, t("prefs.user.backup_on_close"));
-        form::hint(ui, tokens, &t("prefs.user.backup_on_close_hint"));
+        // P29 QA-17: both are kept for the company and this computer, so
+        // an Admin changes them.
+        if !admin {
+            form::hint(ui, tokens, &t("prefs.admin_only"));
+        }
+        ui.add_enabled_ui(admin, |ui| {
+            form::field(ui, &t("prefs.user.bills_due"), &mut edits.bills_due_days);
+            form::hint(ui, tokens, &t("prefs.user.bills_due_hint"));
+            ui.add_space(6.0);
+            ui.checkbox(&mut edits.backup_on_close, t("prefs.user.backup_on_close"));
+            form::hint(ui, tokens, &t("prefs.user.backup_on_close_hint"));
+        });
     });
 }
 

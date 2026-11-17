@@ -828,6 +828,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("prefs.cat.tags", "Tags"),
     ("prefs.tags.title", "Tags"),
     ("prefs.tags.admin_only", "Only an Admin can change these."),
+    (
+        "prefs.admin_only",
+        "The company's settings are changed by an Admin. Ask your Admin if one needs to change.",
+    ),
     ("prefs.tags.every_line", "Require a tag on every line"),
     ("prefs.tags.every_line_tip", "A tag sorts income and spending into groups you report on, such as a job site or a location."),
     ("prefs.tags.every_line_hint", "Checks, bills, card charges, journal entries, deposits, sales forms, Bulk Entry and the Bank Feed won't save a line without a tag. A tag at the top of a form counts for every line."),
