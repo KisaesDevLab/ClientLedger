@@ -16,6 +16,8 @@ steps:
   - click_if_present: {role: button, label: Discard changes}
   - wait: {ms: 300}
   - assert_state: {key: signed_in, equals: false}
+  # P29 QA-2: nobody signed in is no Admin.
+  - assert_state: {key: is_admin, equals: false}
   - assert_state: {key: screen.stage, equals: signin}
   - assert_exists: {role: link, label: Forgot password?}
   - screenshot: sign-in

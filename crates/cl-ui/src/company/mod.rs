@@ -879,6 +879,29 @@ pub fn user_text(display_name: &str, role: &str) -> String {
     format!("{display_name} \u{b7} {role}")
 }
 
+/// [`user_text`] with the rights read for the company (P29 QA-4): a
+/// `bookkeeper` on the A/R or A/P template reads as the Users list names
+/// it, and one on a custom role (or with overrides) as "Custom role" (the
+/// engine tells a non-Admin no template name).
+#[must_use]
+pub fn user_text_for(
+    display_name: &str,
+    role: &str,
+    rights: &cl_model::permissions::Rights,
+) -> String {
+    use cl_model::permissions::BuiltinRole;
+    if role.trim() != "bookkeeper" || rights.is_admin() {
+        return user_text(display_name, role);
+    }
+    let key = match rights.builtin_role() {
+        Some(BuiltinRole::Bookkeeper) => "status.role.bookkeeper",
+        Some(BuiltinRole::Receivables) => "status.role.receivables",
+        Some(BuiltinRole::Payables) => "status.role.payables",
+        None => "status.role.custom",
+    };
+    format!("{display_name} \u{b7} {}", crate::i18n::t(key))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -943,5 +966,38 @@ mod tests {
         assert_eq!(user_text("v", "readonly"), "v \u{b7} View only");
         assert_eq!(user_text("x", "client_viewer"), "x \u{b7} Client viewer");
         assert_eq!(user_text("x", ""), "x");
+    }
+
+    /// P29 QA-4: the A/R and A/P templates are named as the Users list
+    /// names them; a custom role is not called "Bookkeeper".
+    #[test]
+    fn the_status_bar_names_the_role_template() {
+        use cl_model::permissions::{BuiltinRole, Level, Resource, Rights};
+        let ap = BuiltinRole::Payables.rights();
+        assert_eq!(
+            user_text_for("qa-ap", "bookkeeper", &ap),
+            "qa-ap \u{b7} Accounts payable"
+        );
+        let ar = BuiltinRole::Receivables.rights();
+        assert_eq!(
+            user_text_for("r", "bookkeeper", &ar),
+            "r \u{b7} Accounts receivable"
+        );
+        let bk = BuiltinRole::Bookkeeper.rights();
+        assert_eq!(user_text_for("b", "bookkeeper", &bk), "b \u{b7} Bookkeeper");
+        let mut custom = ap.clone();
+        custom.set(Resource::Reports, Level::None);
+        assert_eq!(
+            user_text_for("c", "bookkeeper", &custom),
+            "c \u{b7} Custom role"
+        );
+        assert_eq!(
+            user_text_for("o", "owner", &Rights::all()),
+            "o \u{b7} Admin"
+        );
+        assert_eq!(
+            user_text_for("v", "readonly", &Rights::view_only()),
+            "v \u{b7} View only"
+        );
     }
 }

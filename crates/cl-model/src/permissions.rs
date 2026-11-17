@@ -336,6 +336,20 @@ impl Rights {
         self.admin
     }
 
+    /// The built-in role template these rights are exactly (P29 QA-4: the
+    /// status bar names the role the Users list shows). `None` for an
+    /// Admin, view-only, or a custom role or overrides.
+    #[must_use]
+    pub fn builtin_role(&self) -> Option<BuiltinRole> {
+        if self.admin {
+            return None;
+        }
+        BuiltinRole::ALL
+            .iter()
+            .copied()
+            .find(|b| b.rights().levels == self.levels)
+    }
+
     /// May the user run the catalog report with this source.
     #[must_use]
     pub fn allows_report(&self, source: Source) -> bool {
@@ -1291,6 +1305,19 @@ mod tests {
         assert!(bk.allows(CommandId::new("clients.create_invoice")));
         assert!(bk.allows(CommandId::new("company.audit_trail")));
         assert!(!bk.allows(CommandId::new("company.users")));
+    }
+
+    /// P29 QA-4: rights are named by the built-in template they are.
+    #[test]
+    fn rights_name_their_builtin_role() {
+        for b in BuiltinRole::ALL {
+            assert_eq!(b.rights().builtin_role(), Some(*b), "{b:?}");
+        }
+        assert_eq!(Rights::all().builtin_role(), None, "an Admin");
+        assert_eq!(Rights::view_only().builtin_role(), None);
+        let mut custom = BuiltinRole::Payables.rights();
+        custom.set(Resource::Reports, Level::None);
+        assert_eq!(custom.builtin_role(), None, "a custom role");
     }
 
     #[test]

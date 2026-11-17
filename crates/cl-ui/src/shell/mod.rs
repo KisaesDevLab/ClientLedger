@@ -509,13 +509,22 @@ impl Shell {
                 }
                 CompanyEvent::CompanyRole(role) => {
                     if let Some(name) = &self.signed_in_name {
-                        self.status.user = Some(crate::company::user_text(name, &role));
+                        self.status.user =
+                            Some(crate::company::user_text_for(name, &role, &link.rights()));
                     }
                     self.company_role = role;
                 }
                 // Menus, the rail and the palette read the link's rights
-                // each frame; nothing to keep here.
-                CompanyEvent::Rights(_) => {}
+                // each frame; the status bar names the role they make
+                // (P29 QA-4).
+                CompanyEvent::Rights(r) => {
+                    if let Some(name) = &self.signed_in_name
+                        && !self.company_role.is_empty()
+                    {
+                        self.status.user =
+                            Some(crate::company::user_text_for(name, &self.company_role, &r));
+                    }
+                }
                 CompanyEvent::ClosingDate(d) => {
                     if let Some(b) = self.company.as_mut() {
                         b.closed_through = d;
