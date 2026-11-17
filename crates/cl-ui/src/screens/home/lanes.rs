@@ -156,6 +156,21 @@ pub(crate) fn footer_view(home: &HomeScreen, footer: LaneFooter, style: MoneySty
     let summary = home.data.summary.value.as_ref();
     let days = home.local.bills_due_days;
     match footer {
+        // P29 QA-5: what clients owe is not shown to a role without
+        // invoices (as Sales tax owed, P29).
+        LaneFooter::ClientsOwe
+            if !home.link.rights().can(
+                cl_model::permissions::Resource::Invoices,
+                cl_model::permissions::Action::Read,
+            ) =>
+        {
+            FooterView {
+                label: t("home.footer.clients_owe"),
+                value: None,
+                money: true,
+                tip: Some(t("rights.not_for_role")),
+            }
+        }
         LaneFooter::ClientsOwe => {
             let figure = summary
                 .and_then(|s| s.receivables.as_ref())

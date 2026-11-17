@@ -732,8 +732,12 @@ impl HomeScreen {
         (refresh, todo)
     }
 
-    /// The setup checklist when Home shows it: read, not hidden, not done.
+    /// The setup checklist when Home shows it: read, not hidden, not done,
+    /// and to an Admin (setting the company up is theirs, P29 QA-5).
     pub(crate) fn checklist_shown(&self) -> Option<cl_model::home::Checklist> {
+        if !self.link.rights().is_admin() {
+            return None;
+        }
         checklist::checklist(self).filter(|c| c.visible(self.local.checklist_dismissed))
     }
 

@@ -1165,6 +1165,30 @@ fn the_setup_checklist_ticks_from_the_reads() {
     assert!(!checklist::profile_filled(&p));
 }
 
+/// P29 QA-5: an A/P user's Home shows nothing of what clients owe, no
+/// past-due invoices and no setup checklist.
+#[test]
+fn an_ap_home_shows_no_receivables() {
+    let (_d, link) = demo_link();
+    link.set_rights(cl_model::permissions::BuiltinRole::Payables.rights());
+    let mut h = home(&link);
+    let nodes = tree(&mut h, 1440.0);
+    assert!(
+        !nodes.iter().any(|(_, n)| n.contains("Setup checklist")),
+        "setting up is the Admin's"
+    );
+    assert!(
+        !nodes.iter().any(|(_, n)| n.contains("past due")),
+        "no invoice line"
+    );
+    let owe = lanes::footer_view(&h, LaneFooter::ClientsOwe, cl_core::MoneyStyle::default());
+    assert_eq!(owe.value, None);
+    assert_eq!(
+        owe.tip.as_deref(),
+        Some(crate::i18n::t("rights.not_for_role").as_str())
+    );
+}
+
 /// The demo's title row: "Setup checklist 5 of 6 done · Set up email for
 /// invoices"; the summary opens the full list, a link opens its window, and
 /// Hide checklist is kept in the company's preferences.

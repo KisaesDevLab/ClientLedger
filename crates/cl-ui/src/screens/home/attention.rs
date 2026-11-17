@@ -290,6 +290,12 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
             // Inventory off (or an engine without U-78): no line at all.
             AttentionKind::Reorder if !item.available => {}
             AttentionKind::Backup => {}
+            // P29 QA-5: no invoice line for a role without invoices.
+            AttentionKind::InvoicesOverdue
+                if !home.link.rights().can(
+                    cl_model::permissions::Resource::Invoices,
+                    cl_model::permissions::Action::Read,
+                ) => {}
             _ if !item.available => {
                 out.push(Line::dash(name(kind.key()), t("home.footer.later.tip")));
             }
