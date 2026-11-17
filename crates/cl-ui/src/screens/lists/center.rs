@@ -139,7 +139,8 @@ struct MergePanel {
     /// The source is tracked for 1099s (its payments move with the merge).
     source_1099: bool,
     targets: Vec<(ContactId, String)>,
-    choice: usize,
+    /// Nothing is chosen until the user picks the contact to keep (QA-20).
+    choice: Option<usize>,
     focus: bool,
     task: Option<Task<Versioned<Contact>>>,
     error: Option<ApiError>,
@@ -765,7 +766,7 @@ impl CenterScreen {
             source_name: source.name,
             source_1099,
             targets,
-            choice: 0,
+            choice: None,
             focus: true,
             task: None,
             error: None,
@@ -781,7 +782,7 @@ impl CenterScreen {
         if m.task.is_some() || m.closing.dialog_open() {
             return;
         }
-        let Some(&(target, _)) = m.targets.get(m.choice) else {
+        let Some(&(target, _)) = m.choice.and_then(|c| m.targets.get(c)) else {
             return;
         };
         self.send_merge(target, None);
@@ -794,7 +795,7 @@ impl CenterScreen {
         let Panel::Merge(m) = &mut self.panel else {
             return;
         };
-        let target = m.targets.get(m.choice).map(|(id, _)| *id);
+        let target = m.choice.and_then(|c| m.targets.get(c)).map(|(id, _)| *id);
         let taken = target.is_some_and(|t| m.closing.failed(&e, t, supported, None));
         if taken {
             m.closing.set_verb(Verb::Merge);
@@ -1531,34 +1532,38 @@ impl CenterScreen {
         ui.add_enabled_ui(!busy, |ui| {
             let names: Vec<String> = m.targets.iter().map(|(_, n)| n.clone()).collect();
             let focus = std::mem::take(&mut m.focus);
-            if let Some(i) = pane::picker(
+            if let Some(i) = pane::picker_opt(
                 ui,
                 egui::Id::unique("center-merge-target"),
                 &t_with("center.merge.keep", &[("role", &role_word)]),
                 &names,
                 m.choice,
+                &t_with("center.merge.choose", &[("role", &role_word)]),
                 focus,
             ) {
-                m.choice = i;
+                m.choice = Some(i);
             }
-            let target = names.get(m.choice).cloned().unwrap_or_default();
+            let target = m.choice.and_then(|c| names.get(c).cloned());
             ui.add_space(4.0);
-            ui.add(
-                egui::Label::new(
-                    RichText::new(t_with(
-                        explain,
-                        &[("source", &m.source_name), ("target", &target)],
-                    ))
-                    .color(tokens.warn_text),
-                )
-                .wrap(),
-            );
-            if m.source_1099 {
+            let text = match &target {
+                Some(target) => t_with(
+                    explain,
+                    &[("source", &m.source_name), ("target", target.as_str())],
+                ),
+                None => t_with(
+                    "center.merge.pick_first",
+                    &[("source", &m.source_name), ("role", &role_word)],
+                ),
+            };
+            ui.add(egui::Label::new(RichText::new(text).color(tokens.warn_text)).wrap());
+            if m.source_1099
+                && let Some(target) = &target
+            {
                 ui.add(
                     egui::Label::new(
                         RichText::new(t_with(
                             "center.merge.explain_1099",
-                            &[("source", &m.source_name), ("target", &target)],
+                            &[("source", &m.source_name), ("target", target.as_str())],
                         ))
                         .color(tokens.warn_text),
                     )
@@ -1566,8 +1571,15 @@ impl CenterScreen {
                 );
             }
             ui.add_space(6.0);
+            let chosen = target.is_some();
             ui.horizontal_wrapped(|ui| {
-                if crate::widgets::primary_button(ui, &t("center.merge.confirm")).clicked() {
+                // Merge stays off until the contact to keep is chosen.
+                let merge = ui
+                    .add_enabled_ui(chosen, |ui| {
+                        crate::widgets::primary_button(ui, &t("center.merge.confirm"))
+                    })
+                    .inner;
+                if chosen && merge.clicked() {
                     confirm = true;
                 }
                 if ui.button(t("center.merge.cancel")).clicked() {
@@ -1858,6 +1870,13 @@ impl Screen for CenterScreen {
             "merge_available": true,
             "merging": matches!(&self.panel, Panel::Merge(m) if m.task.is_some()),
             "merge_source_1099": matches!(&self.panel, Panel::Merge(m) if m.source_1099),
+            "merge_target": match &self.panel {
+                Panel::Merge(m) => m
+                    .choice
+                    .and_then(|c| m.targets.get(c))
+                    .map_or(Value::Null, |(_, n)| Value::from(n.clone())),
+                _ => Value::Null,
+            },
             "merge_closing": match &self.panel {
                 Panel::Merge(m) => m.closing.state_json(self.merge_closing),
                 _ => Value::Null,

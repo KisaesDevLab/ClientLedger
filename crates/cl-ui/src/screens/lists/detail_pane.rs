@@ -125,16 +125,33 @@ pub fn picker(
     current: usize,
     focus: bool,
 ) -> Option<usize> {
+    picker_opt(ui, id, label, options, Some(current), "", focus)
+}
+
+/// [`picker`] that may start with nothing chosen: `placeholder` shows until
+/// the user picks (a merge target, QA-20). Down or a letter picks from the
+/// top; Up does nothing until something is chosen.
+pub fn picker_opt(
+    ui: &mut Ui,
+    id: egui::Id,
+    label: &str,
+    options: &[String],
+    current: Option<usize>,
+    placeholder: &str,
+    focus: bool,
+) -> Option<usize> {
     let mut picked = None;
     ui.horizontal(|ui| {
         let caption = caption(ui, RichText::new(label));
-        let shown = options.get(current).cloned().unwrap_or_default();
+        let shown = current
+            .and_then(|c| options.get(c).cloned())
+            .unwrap_or_else(|| placeholder.to_owned());
         let inner = egui::ComboBox::from_id_salt(id)
             .selected_text(shown)
             .width(ui.available_width().min(FIELD_WIDTH))
             .show_ui(ui, |ui| {
                 for (i, o) in options.iter().enumerate() {
-                    if ui.selectable_label(i == current, o).clicked() {
+                    if ui.selectable_label(Some(i) == current, o).clicked() {
                         picked = Some(i);
                     }
                 }
@@ -165,17 +182,18 @@ pub fn picker(
                     typed,
                 )
             });
-            if down && current + 1 < count {
-                picked = Some(current + 1);
+            let next = current.map_or(0, |c| c + 1);
+            if down && next < count {
+                picked = Some(next);
             }
-            if up && current > 0 {
-                picked = Some(current - 1);
+            if up && let Some(c) = current.filter(|c| *c > 0) {
+                picked = Some(c - 1);
             }
             if let Some(ch) = typed
                 && count > 0
             {
                 let ch = ch.to_lowercase().to_string();
-                let start = current + 1;
+                let start = next;
                 picked = (0..count)
                     .map(|k| (start + k) % count)
                     .find(|i| options[*i].to_lowercase().starts_with(&ch))
@@ -183,5 +201,5 @@ pub fn picker(
             }
         }
     });
-    picked.filter(|p| *p != current)
+    picked.filter(|p| Some(*p) != current)
 }

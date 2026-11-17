@@ -195,6 +195,14 @@ fn a_used_tag_is_not_deleted_and_names_stay_unique() {
     assert_eq!(r.state("panel"), "none");
 }
 
+/// Chooses the merge panel's first target, as the user would.
+fn pick_first_target(r: &mut Rig) {
+    let Panel::Merge(m) = &mut r.s.panel else {
+        panic!("merge panel");
+    };
+    m.pick = Some(0);
+}
+
 #[test]
 fn merge_only_for_header_only_tags() {
     let mut r = Rig::new();
@@ -206,7 +214,13 @@ fn merge_only_for_header_only_tags() {
     assert_eq!(r.state("merge_available"), true);
     r.cmd("list.merge");
     assert_eq!(r.state("panel"), "merge");
-    // The first target is the first active tag other than the source.
+    // QA-20: nothing is chosen, so Alt+S does nothing yet.
+    assert_eq!(r.state("merge_target"), serde_json::Value::Null);
+    assert!(r.cmd("form.save_close"));
+    r.frames(3);
+    assert_eq!(r.state("panel"), "merge", "no target, no merge");
+    pick_first_target(&mut r);
+    assert!(r.state("merge_target").is_string());
     assert!(r.cmd("form.save_close"));
     r.frames(3);
     assert_eq!(r.state("note"), "merged");
@@ -232,6 +246,7 @@ fn line_tags_merge_with_the_closing_password() {
     assert_eq!(r.state("merge_available"), true, "lines move too");
     r.cmd("list.merge");
     assert_eq!(r.state("panel"), "merge");
+    pick_first_target(&mut r);
     r.s.merge_failed(ApiError::ClosedPeriod(cl_api::ClosedPeriod {
         lock_date: cl_core::CalendarDate::from_ymd(2026, 3, 31).ok(),
         can_override: true,

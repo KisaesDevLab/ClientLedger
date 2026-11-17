@@ -68,7 +68,11 @@ steps:
   - assert_state: {key: screen.panel, equals: merge}
   - assert_exists: {label_contains: "Merge Galena Gravel Co"}
   - assert_exists: {label_contains: "A merge can't be undone"}
+  # Nothing is chosen until the vendor to keep is picked (QA-20).
+  - assert_state: {key: screen.merge_target, equals: null}
+  - assert_disabled: {role: button, label: Merge}
   - type: {text: g}
+  - assert_state: {key: screen.merge_target, equals: Galena Gravel}
   - assert_exists: {label_contains: "moves to Galena Gravel:"}
   - assert_no_clipping: {}
   - screenshot: merge

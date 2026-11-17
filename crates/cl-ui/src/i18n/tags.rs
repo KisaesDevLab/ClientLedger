@@ -82,6 +82,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("tags.merge.explain", "Every transaction tagged with this tag gets the tag you choose, and this tag is removed. This includes transactions dated on or before your closing date."),
     ("tags.merge.explain_closing", "Every transaction and transaction line tagged with this tag, and every default that uses it, gets the tag you choose, and this tag is removed. If any of those transactions is dated on or before your closing date, you'll be asked for the closing-date password."),
     ("tags.merge.into", "Merge into"),
+    ("tags.merge.choose", "Choose the tag to keep\u{2026}"),
+    ("tags.merge.summary", "{source} will be merged into {target}."),
     ("tags.merge.cant_undo", "A merge can't be undone."),
     ("tags.merge.working", "Merging\u{2026}"),
     ("tags.merge.confirm", "Merge"),

@@ -123,6 +123,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("center.merge.client", "customer"),
     ("center.merge.vendor", "vendor"),
     ("center.merge.keep", "Into {role}"),
+    ("center.merge.choose", "Choose the {role} to keep\u{2026}"),
+    ("center.merge.pick_first", "Choose the {role} to keep. Everything recorded for {source} will move to that {role}, and {source} will be made inactive. A merge can't be undone."),
     ("center.merge.explain", "Everything recorded for {source} moves to {target}: invoices, bills, payments, checks and bank rules. Memorized reports that use {source} switch to {target}. {source} is then made inactive. This includes transactions dated on or before your closing date. A merge can't be undone."),
     ("center.merge.explain_1099", "{source} is tracked for 1099s. Its payments move to {target}; make sure {target} is tracked for 1099s too, or those payments won't be on a 1099."),
     ("center.merge.explain_closing", "Everything recorded for {source} moves to {target}: invoices, bills, payments, checks and bank rules. Memorized reports that use {source} switch to {target}. {source} is then made inactive. If any of it is dated on or before your closing date, you'll be asked for the closing-date password. A merge can't be undone."),

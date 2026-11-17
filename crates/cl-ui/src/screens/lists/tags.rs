@@ -190,7 +190,8 @@ struct GroupForm {
 struct MergePanel {
     source: TagId,
     targets: Vec<TagId>,
-    pick: usize,
+    /// Nothing is chosen until the user picks the tag to keep (QA-20).
+    pick: Option<usize>,
     task: Option<Task<()>>,
     error: Option<ApiError>,
     focus: bool,
@@ -732,7 +733,7 @@ impl TagsScreen {
         self.panel = Panel::Merge(Box::new(MergePanel {
             source,
             targets,
-            pick: 0,
+            pick: None,
             task: None,
             error: None,
             focus: true,
@@ -1167,7 +1168,7 @@ impl TagsScreen {
         if m.task.is_some() || m.closing.dialog_open() {
             return;
         }
-        let Some(target) = m.targets.get(m.pick).copied() else {
+        let Some(target) = m.pick.and_then(|p| m.targets.get(p)).copied() else {
             return;
         };
         self.send_merge(target, None);
@@ -1324,7 +1325,7 @@ impl TagsScreen {
             match result {
                 Ok(()) => {
                     m.closing.saved();
-                    let target = m.targets.get(m.pick).copied();
+                    let target = m.pick.and_then(|p| m.targets.get(p)).copied();
                     self.panel = Panel::None;
                     self.usage = None;
                     self.want_cursor = target;
@@ -1347,8 +1348,8 @@ impl TagsScreen {
             return;
         };
         let taken = m
-            .targets
-            .get(m.pick)
+            .pick
+            .and_then(|p| m.targets.get(p))
             .copied()
             .is_some_and(|t| m.closing.failed(&e, t, supported, None));
         if taken {
@@ -1855,17 +1856,26 @@ impl TagsScreen {
         ui.label(t(explain));
         ui.add_enabled_ui(!asking, |ui| {
             let focus = std::mem::take(&mut m.focus);
-            if let Some(i) = pane::picker(
+            if let Some(i) = pane::picker_opt(
                 ui,
                 egui::Id::unique("tags-merge-target"),
                 &t("tags.merge.into"),
                 &names,
                 m.pick,
+                &t("tags.merge.choose"),
                 focus,
             ) {
-                m.pick = i;
+                m.pick = Some(i);
             }
         });
+        let chosen = m.pick.and_then(|p| names.get(p));
+        if let Some(target) = chosen {
+            ui.label(t_with(
+                "tags.merge.summary",
+                &[("source", source.as_str()), ("target", target.as_str())],
+            ));
+        }
+        let chosen = chosen.is_some();
         form::hint(ui, tokens, &t("tags.merge.cant_undo"));
         if let Some(e) = &m.error {
             form::inline_error(ui, tokens, e);
@@ -1875,10 +1885,14 @@ impl TagsScreen {
         }
         ui.add_enabled_ui(!asking, |ui| {
             ui.horizontal_wrapped(|ui| {
-                if crate::widgets::primary_button(ui, &t("tags.merge.confirm"))
-                    .on_hover_text(shortcut_hint("form.save_close"))
-                    .clicked()
-                {
+                // Merge stays off until the tag to keep is chosen.
+                let merge = ui
+                    .add_enabled_ui(chosen, |ui| {
+                        crate::widgets::primary_button(ui, &t("tags.merge.confirm"))
+                            .on_hover_text(shortcut_hint("form.save_close"))
+                    })
+                    .inner;
+                if chosen && merge.clicked() {
                     go = true;
                 }
                 if ui.button(t("tags.form.cancel")).clicked() {
@@ -2195,6 +2209,14 @@ impl Screen for TagsScreen {
             "merge_available": self.merge_available(),
             "merge_closing": match &self.panel {
                 Panel::Merge(m) => m.closing.state_json(self.caps.merge_closing),
+                _ => Value::Null,
+            },
+            "merge_target": match &self.panel {
+                Panel::Merge(m) => m
+                    .pick
+                    .and_then(|p| m.targets.get(p))
+                    .and_then(|id| self.list.tag(*id))
+                    .map_or(Value::Null, |e| Value::from(e.label())),
                 _ => Value::Null,
             },
             "panel": self.panel.name(),
