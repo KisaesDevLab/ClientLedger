@@ -168,7 +168,7 @@ fn every_department_in_the_file_is_listed_and_tagged() {
         u.samples.0.clear();
     }
     s.refresh_departments();
-    assert!(s.departments.is_empty());
+    assert_eq!(s.departments, Vec::<String>::new());
     assert_eq!(
         s.department_tags.get("Front"),
         Some(&Some(tag)),
@@ -373,7 +373,7 @@ fn new_amount_columns_stop_on_match_columns() {
     s.next();
     s.poll();
     assert_eq!(s.step, Step::Accounts);
-    assert!(s.new_columns.is_empty());
+    assert_eq!(s.new_columns, Vec::<String>::new());
     let t = s.templates_list()[0].column_map.clone().expect("map");
     assert_eq!(
         t.left_out.as_deref().map(<[String]>::len),
@@ -617,14 +617,14 @@ fn a_reverse_key_covers_reason_and_password() {
     assert_eq!(s.reversed, Some(1));
     assert!(!s.reverse_outstanding());
     // Same import and password, another reason: another key.
-    let a = ReversePrint::of(id, "Wrong file", None);
-    let b = ReversePrint::of(id, "Duplicate", None);
-    assert!(a != b);
+    let plain = ReversePrint::of(id, "Wrong file", None);
+    let other = ReversePrint::of(id, "Duplicate", None);
+    assert!(plain != other);
     let pw = |p: &str| Secret::new(p.to_string());
-    let c = ReversePrint::of(id, "Wrong file", Some(&pw("one")));
-    let d = ReversePrint::of(id, "Wrong file", Some(&pw("two")));
-    assert!(c != d && a != c);
-    assert!(c == ReversePrint::of(id, "Wrong file", Some(&pw("one"))));
+    let one = ReversePrint::of(id, "Wrong file", Some(&pw("one")));
+    let two = ReversePrint::of(id, "Wrong file", Some(&pw("two")));
+    assert!(one != two && plain != one);
+    assert!(one == ReversePrint::of(id, "Wrong file", Some(&pw("one"))));
 }
 
 /// A definite refusal settles the post: Cancel discards again.

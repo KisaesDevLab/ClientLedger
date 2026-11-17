@@ -1691,7 +1691,7 @@ impl PayrollImportScreen {
                 }
                 if several {
                     // Newest pay first across the draft statuses.
-                    p.sessions.sort_by(|a, b| b.check_date.cmp(&a.check_date));
+                    p.sessions.sort_by_key(|x| std::cmp::Reverse(x.check_date));
                 }
                 Ok(p)
             },

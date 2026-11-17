@@ -271,7 +271,7 @@ fn new_amount_columns_are_named_before_a_layout_applies() {
     );
     // The same columns as when it was saved: nothing new.
     let same = headers(&["Worker", "Wages", "Fed WH", "Take Home"]);
-    assert!(new_amount_columns(&layout, &same, &r).is_empty());
+    assert_eq!(new_amount_columns(&layout, &same, &r), Vec::<String>::new());
     // A layout saved before left-out columns were kept: every unmatched
     // amount column is new (stop once on Match columns).
     layout.left_out = None;
