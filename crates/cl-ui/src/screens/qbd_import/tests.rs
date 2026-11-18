@@ -452,6 +452,7 @@ fn an_undo_blocked_after_it_started_offers_the_restore() {
         batch: id,
         backup_ref: "b.clbackup".into(),
         password: None,
+        confirm_closed: false,
         key: IdempotencyKey::new(),
     });
     s.running = Some(Running::Undo);

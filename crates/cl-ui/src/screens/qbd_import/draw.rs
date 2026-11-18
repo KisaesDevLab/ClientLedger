@@ -119,6 +119,7 @@ impl ImportScreen {
                         }
                     }
                     self.undo_question_ui(ui, &tokens);
+                    self.closed_question_ui(ui, &tokens);
                 });
                 frame.bottom(|ui| {
                     ui.add_space(4.0);
@@ -589,6 +590,45 @@ impl ImportScreen {
             });
     }
 
+    /// A closed period with no closing-date password: the owner confirms
+    /// each time (nothing is sent until then).
+    fn closed_question_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let Some(date) = self.ask_closed else {
+            return;
+        };
+        let date = date.map(show_date).unwrap_or_default();
+        ui.add_space(10.0);
+        egui::Frame::new()
+            .fill(tokens.surface_subtle)
+            .stroke(egui::Stroke::new(1.0, tokens.border_strong))
+            .corner_radius(6)
+            .inner_margin(Margin::symmetric(14, 12))
+            .show(ui, |ui| {
+                ui.label(RichText::new(t("imports.closed.title")).strong());
+                note(
+                    ui,
+                    tokens,
+                    &t_with("imports.closed.body", &[("date", &date)]),
+                );
+                ui.horizontal(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                RichText::new(t("imports.closed.confirm")).color(tokens.on_warn),
+                            )
+                            .fill(tokens.warn),
+                        )
+                        .clicked()
+                    {
+                        self.confirm_closed();
+                    }
+                    if ui.button(t("imports.closed.cancel")).clicked() {
+                        self.cancel_closed();
+                    }
+                });
+            });
+    }
+
     fn history_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let Some(list) = self.history.clone() else {
             ui.label(t("imports.history.loading"));
@@ -627,6 +667,20 @@ impl ImportScreen {
                     });
                     let a = history::actions(e, admin);
                     ui.horizontal(|ui| {
+                        if a.tieout
+                            && ui
+                                .add_enabled(!locked, egui::Button::new(t("imports.history.open")))
+                                .clicked()
+                        {
+                            self.open_batch(b);
+                        }
+                        if a.retry
+                            && ui
+                                .add_enabled(!locked, egui::Button::new(t("imports.retry")))
+                                .clicked()
+                        {
+                            self.retry_batch(b);
+                        }
                         if a.undo
                             && ui
                                 .add_enabled(!locked, egui::Button::new(t("imports.undo.button")))

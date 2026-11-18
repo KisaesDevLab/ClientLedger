@@ -350,6 +350,8 @@ impl ImportScreen {
                     batch,
                     backup_ref: name,
                     password: self.password.take(),
+                    confirm_closed: what == Running::Commit
+                        && std::mem::take(&mut self.confirm_closed_next),
                     key: IdempotencyKey::new(),
                 };
                 self.send(held);
@@ -366,6 +368,7 @@ impl ImportScreen {
     fn send(&mut self, held: Held) {
         let (id, backup, key) = (held.batch, held.backup_ref.clone(), held.key.clone());
         let password = held.password.clone();
+        let confirm = held.confirm_closed;
         let what = held.what;
         self.held = Some(held);
         self.jobs_sent += 1;
@@ -387,6 +390,7 @@ impl ImportScreen {
                             id,
                             &CommitRequest {
                                 backup_ref: backup,
+                                confirm_closed_period: confirm,
                                 ..CommitRequest::default()
                             },
                             &key,
@@ -407,7 +411,7 @@ impl ImportScreen {
                         let req = CommitRequest {
                             backup_ref: backup,
                             closed_period: auth,
-                            confirm_closed_period: false,
+                            confirm_closed_period: confirm,
                         };
                         s.imports().commit(id, &req, key).await
                     }
@@ -455,6 +459,18 @@ impl ImportScreen {
             .link
             .demo_state()
             .and_then(|d| ImportScreen::demo_closing(&d));
+        // No closing-date password is set: the engine lets a commit in
+        // once the owner confirms (plan §2a E1, `confirmClosedPeriod`).
+        // Asked every time; an undo has no such path (the dialog explains).
+        if let (ApiError::ClosedPeriod(c), Locked::Commit) = (e, locked)
+            && c.password_required == Some(false)
+        {
+            tracing::info!(target: "imports", "closed period without a password: asking");
+            self.confirm_closed_next = false;
+            self.trouble = None;
+            self.ask_closed = Some(c.lock_date.or(closing));
+            return;
+        }
         if self.closing.failed(e, locked, true, closing) {
             if matches!(locked, Locked::Undo(_)) {
                 self.closing.set_ask("imports.closing.ask_undo", 1);
@@ -500,6 +516,26 @@ impl ImportScreen {
                 self.start_backup(Running::Undo, id);
             }
         }
+    }
+
+    /// "Import into the closed period": a new backup, then the commit
+    /// with the owner's confirmation (a new key: a new body).
+    pub(crate) fn confirm_closed(&mut self) {
+        if self.ask_closed.take().is_none() || self.locked() {
+            return;
+        }
+        let Some(id) = self.batch else {
+            return;
+        };
+        self.held = None;
+        self.confirm_closed_next = true;
+        self.start_backup(Running::Commit, id);
+    }
+
+    /// Cancel on the closed-period question: nothing is sent.
+    pub(crate) fn cancel_closed(&mut self) {
+        self.ask_closed = None;
+        self.confirm_closed_next = false;
     }
 
     pub(crate) fn cancel_password(&mut self) {
@@ -625,6 +661,8 @@ impl ImportScreen {
 
     fn committed(&mut self) {
         tracing::info!(target: "imports", source = self.wizard.source.key(), "import committed");
+        // The accounts the import made (the spot-check's banks).
+        self.load_chart();
         self.running = None;
         self.unsettled = false;
         self.held = None;
@@ -721,7 +759,54 @@ impl ImportScreen {
         ));
     }
 
-    // ---- Tie-out and verify (D4 draws them in full) ----------------------
+    // ---- History: Retry and the way back in ------------------------------
+
+    /// The window's wizard on `b` (its program, its batch).
+    fn take_batch(&mut self, b: &ImportBatch) {
+        if self.locked() {
+            return;
+        }
+        if let Some(source) = cl_model::imports::wizard::Source::ALL
+            .into_iter()
+            .find(|s| s.engine_source() == b.source.as_wire())
+        {
+            self.start_over();
+            self.wizard.set_source(source);
+        }
+        self.batch = Some(b.id);
+        self.view = super::View::Import;
+    }
+
+    /// Retry from History: a failed batch is imported again, a backup
+    /// first and a new key (a new attempt, never the failed one's key).
+    pub(crate) fn retry_batch(&mut self, b: &ImportBatch) {
+        if !self.allowed() || b.status != BatchStatus::Failed || self.locked() {
+            return;
+        }
+        self.take_batch(b);
+        self.wizard.step = Step::Import;
+        self.start_import();
+    }
+
+    /// "Check that it matches" from History: the batch's tie-out, or its
+    /// spot-check once verified (the saved list).
+    pub(crate) fn open_batch(&mut self, b: &ImportBatch) {
+        if b.status != BatchStatus::Committed || self.locked() {
+            return;
+        }
+        self.take_batch(b);
+        self.wizard.imported = true;
+        self.wizard.verified = b.is_verified();
+        if self.wizard.verified && self.wizard.source.steps().contains(&Step::SpotCheck) {
+            self.wizard.step = Step::SpotCheck;
+            self.load_spot_check(b);
+        } else {
+            self.wizard.step = Step::TieOut;
+            self.load_tieout();
+        }
+    }
+
+    // ---- Tie-out and verify ----------------------------------------------
 
     pub(crate) fn load_tieout(&mut self) {
         let Some(id) = self.batch else {

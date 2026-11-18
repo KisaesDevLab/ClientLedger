@@ -285,6 +285,9 @@ pub(crate) struct Held {
     pub(crate) batch: ImportBatchId,
     pub(crate) backup_ref: String,
     pub(crate) password: Option<Secret>,
+    /// The owner confirmed importing into a closed period that has no
+    /// closing-date password (commit only; never set by default).
+    pub(crate) confirm_closed: bool,
     pub(crate) key: IdempotencyKey,
 }
 
@@ -342,6 +345,11 @@ pub struct ImportScreen {
     pub(crate) closing: ClosingPrompt<Locked>,
     /// The closing-date password for the next send (dropped once sent).
     password: Option<Secret>,
+    /// A closed period with no closing-date password: the question is up
+    /// (its closing date).
+    pub(crate) ask_closed: Option<Option<CalendarDate>>,
+    /// The owner said yes: the next commit carries the confirmation.
+    confirm_closed_next: bool,
     pub(crate) status_answer: Option<bool>,
     pub(crate) trouble: Option<Trouble>,
     /// Why the last job failed, when its code has owner words (shown in
@@ -350,7 +358,17 @@ pub struct ImportScreen {
     // Tie-out (D4 draws it in full).
     tieout_job: Option<Job<TieOut>>,
     pub(crate) tieout: Option<TieOut>,
+    /// The tie-out's rows, tab and filter.
+    pub(crate) tie: Option<tieout::TieState>,
+    /// Save PDF waiting for its Save dialog.
+    pub(crate) pdf: Option<tieout::PdfSave>,
+    /// The last Save PDF's outcome (`ok`, words).
+    pub(crate) pdf_message: Option<(bool, String)>,
+    /// Tie-out PDFs written (control channel).
+    pub(crate) pdfs_saved: u32,
     verify_job: Option<Job<ImportBatch>>,
+    /// The spot-check list (step 7), saved with the batch.
+    pub(crate) spot: spot_check::SpotList,
     // Undo.
     pub(crate) confirm_undo: Option<ImportBatchId>,
     /// The batch an undo (its backup, its password, its send) is for.
@@ -411,12 +429,19 @@ impl ImportScreen {
             jobs_sent: 0,
             closing: ClosingPrompt::default(),
             password: None,
+            ask_closed: None,
+            confirm_closed_next: false,
             status_answer: None,
             trouble: None,
             failure: None,
             tieout_job: None,
             tieout: None,
+            tie: None,
+            pdf: None,
+            pdf_message: None,
+            pdfs_saved: 0,
             verify_job: None,
+            spot: spot_check::SpotList::default(),
             confirm_undo: None,
             undo_pending: None,
             undone: false,
@@ -543,7 +568,15 @@ impl ImportScreen {
         }
         if let Some(r) = poll(&mut self.tieout_job) {
             match r {
-                Ok(t) => self.tieout = Some(t),
+                Ok(t) => {
+                    let mut st = tieout::TieState::new(&t);
+                    if let Some(old) = &self.tie {
+                        st.tab = old.tab;
+                        st.view.differences_only = old.view.differences_only;
+                    }
+                    self.tie = Some(st);
+                    self.tieout = Some(t);
+                }
                 Err(e) => self.trouble = Some(Trouble::of(&e)),
             }
         }
@@ -552,13 +585,27 @@ impl ImportScreen {
                 Ok(b) => {
                     self.wizard.verified = b.is_verified();
                     if self.wizard.verified {
+                        tracing::info!(target: "imports", "import verified");
                         self.trouble = None;
+                        // The list comes from this tie-out: verify drops
+                        // the rows it was made from (E3).
+                        self.spot.build(&b, self.tieout.as_ref(), &self.chart);
+                        self.save_spot_check();
                         self.wizard.next(self.today);
                     }
                 }
-                Err(e) => self.trouble = Some(Trouble::of(&e)),
+                Err(e) => {
+                    let t = Trouble::of(&e);
+                    if matches!(t, Trouble::Refused(ImportRefusal::TieOutNotZero { .. })) {
+                        // The books moved since: show the engine's rows now.
+                        self.load_tieout();
+                    }
+                    self.trouble = Some(t);
+                }
             }
         }
+        self.poll_pdf();
+        self.poll_spot_check();
         if let Some(r) = poll(&mut self.history_job) {
             match r {
                 Ok(list) => self.history = Some(list),
@@ -651,6 +698,7 @@ impl ImportScreen {
                     && !self.wizard.imported
                     && self.held.is_none()
                     && !self.closing.dialog_open()
+                    && self.ask_closed.is_none()
             }
             Step::TieOut => {
                 self.tieout.as_ref().is_some_and(|t| t.all_zero)
@@ -670,6 +718,12 @@ impl ImportScreen {
         match self.wizard.step {
             Step::Import => self.start_import(),
             Step::TieOut => self.verify(),
+            Step::SpotCheck => {
+                if self.spot.unsaved() {
+                    self.save_spot_check();
+                }
+                self.wizard.next(self.today);
+            }
             _ => {
                 self.sync_dates();
                 if self.wizard.next(self.today) {
@@ -715,7 +769,11 @@ impl ImportScreen {
         self.trouble = None;
         self.status_answer = None;
         self.password = None;
+        self.ask_closed = None;
+        self.confirm_closed_next = false;
         self.undone = false;
+        self.tie = None;
+        self.spot = spot_check::SpotList::default();
     }
 
     /// Discards the uploaded files no batch holds (closing, Start over,
@@ -771,6 +829,11 @@ impl Drop for ImportScreen {
     /// Closing the window discards the files no batch holds; a commit or
     /// undo out (or whose answer was lost) keeps everything (B1).
     fn drop(&mut self) {
+        // The spot-check list is saved on close (its write outlives the
+        // window, as the discards do).
+        if self.spot.unsaved() {
+            self.save_spot_check();
+        }
         self.release_files();
     }
 }
@@ -817,7 +880,7 @@ impl Screen for ImportScreen {
 
     fn ui(&mut self, ui: &mut eframe::egui::Ui) {
         self.poll();
-        if self.busy() {
+        if self.busy() || self.spot.saving() || self.spot.unsaved() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
         }
@@ -847,6 +910,10 @@ impl Screen for ImportScreen {
             }
             "form.revert" => {
                 if self.confirm_undo.take().is_some() {
+                    return true;
+                }
+                if self.ask_closed.is_some() {
+                    self.cancel_closed();
                     return true;
                 }
                 if self.view == View::History {
@@ -913,6 +980,26 @@ impl Screen for ImportScreen {
             && let Value::Object(c) = self.closing.state_json(true)
         {
             m.extend(c);
+        }
+        // Tie-out, spot-check and the D4 flags (one more object: the macro's
+        // recursion limit).
+        let d4 = json!({
+            "tieout_tab": self.tie.as_ref().map(|x| x.tab.key()),
+            "tieout_tabs": self.tie.as_ref().map(|x| x.tabs().iter().map(|t| t.key()).collect::<Vec<_>>()),
+            "tieout_differences_only": self.tie.as_ref().map(|x| x.view.differences_only),
+            "tieout_rows_shown": self.tie.as_ref().map(|x| x.rows(x.tab).len() + x.checks(x.tab).len()),
+            "tieout_differences": self.tie.as_ref().map(|x| x.view.differences().len()),
+            "pdfs_saved": self.pdfs_saved,
+            "spot_items": self.spot.items.len(),
+            "spot_done": self.spot.items.iter().filter(|i| i.done).count(),
+            "spot_complete": !self.spot.items.is_empty() && self.spot.complete(),
+            "spot_unsaved": self.spot.unsaved(),
+            "spot_saves": self.spot.saves,
+            "ask_closed": self.ask_closed.is_some(),
+            "failure": self.failure.as_ref().map(refusal_code),
+        });
+        if let (Value::Object(m), Value::Object(d)) = (&mut s, d4) {
+            m.extend(d);
         }
         s
     }
