@@ -42,6 +42,7 @@ pub mod recent;
 pub mod secrets;
 pub mod smtp;
 mod store;
+pub mod txn_import;
 pub mod unconfirmed_checks;
 pub mod user_prefs;
 
@@ -65,6 +66,7 @@ pub use recent::{
 };
 pub use secrets::{KeyringSecrets, MemorySecrets, SecretError, SecretStore};
 pub use smtp::{SmtpFieldError, SmtpForm, SmtpSecurity};
+pub use txn_import::{TxnMappingEntry, TxnMappings, TxnMappingsStore};
 pub use unconfirmed_checks::{
     BatchState, TooManyBatches, UnconfirmedBatch, UnconfirmedCheck, UnconfirmedChecks,
     UnconfirmedChecksStore,
