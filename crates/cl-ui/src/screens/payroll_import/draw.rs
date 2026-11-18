@@ -1203,9 +1203,13 @@ impl PayrollImportScreen {
             {
                 self.cancel();
             }
+            // Cancel stops a backup before posting; Back waits for it.
             if self.step != Step::Choose
                 && ui
-                    .add_enabled(settled, egui::Button::new(t("payroll.back")))
+                    .add_enabled(
+                        settled && !self.backing_up(),
+                        egui::Button::new(t("payroll.back")),
+                    )
                     .on_hover_text(shortcut_hint("form.step_back"))
                     .clicked()
             {
