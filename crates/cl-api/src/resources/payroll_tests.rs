@@ -464,7 +464,7 @@ async fn upload_sends_the_period_and_a_neutral_file_name() {
         .respond_with(json(
             201,
             &format!(
-                r#"{{"session":{{"id":"{SESSION}"}},"preview":{{"headers":["Employee Name","Gross Pay"],
+                r#"{{"session":{{"id":"{SESSION}","idempotencyKey":"gusto:abc","fileHash":"f00d"}},"preview":{{"headers":["Employee Name","Gross Pay"],
                 "sampleRows":[["Test Worker 01","$1,845.35"]],"detectedProvider":"gusto","importMode":"employee_level",
                 "isDuplicate":false,"isDuplicateByKey":true,"rowCount":8}}}}"#
             ),
@@ -483,6 +483,9 @@ async fn upload_sends_the_period_and_a_neutral_file_name() {
     let out = s.payroll().upload(&req).await.expect("upload");
     assert_eq!(out.session, sid());
     assert!(out.is_duplicate_by_key && !out.is_duplicate);
+    assert_eq!(out.run_key.as_deref(), Some("gusto:abc"));
+    assert_eq!(out.file_hash.as_deref(), Some("f00d"));
+    assert!(!format!("{out:?}").contains("gusto:abc"), "never in a log");
     assert_eq!(out.row_count, 8);
     assert!(!format!("{out:?}").contains("Test Worker"));
     let sent = String::from_utf8_lossy(&requests(&server, "POST").await[0].body).to_string();
@@ -565,13 +568,24 @@ fn history_never_reads_the_file_name() {
         r#"{{"data":[{{"id":"{SESSION}","status":"posted","importMode":"employee_level","detectedProvider":"gusto",
         "originalFilename":"Test Worker.csv","payPeriodStart":"2024-12-28","payPeriodEnd":"2025-01-24",
         "checkDate":"2025-01-24","rowCount":8,"errorCount":0,"journalEntryIds":["{ENTRY}"],
-        "detailDiscardedAt":"2025-01-25T10:00:00.000Z"}}],"total":1}}"#
+        "detailDiscardedAt":"2025-01-25T10:00:00.000Z","createdAt":"2025-01-25T02:16:00.000Z",
+        "idempotencyKey":"gusto:abc","fileHash":"f00d"}}],"total":1}}"#
     );
     let page = sessions_from(body.as_bytes()).expect("page");
     assert_eq!(page.total, 1);
     let s = &page.sessions[0];
     assert_eq!(s.status, SessionStatus::Posted);
     assert!(s.detail_discarded);
+    // QA-12: the posted time the duplicate refusal names, and the keys
+    // that match an upload to it.
+    assert_eq!(s.posted_at.as_deref(), Some("2025-01-25T02:16:00.000Z"));
+    assert_eq!(s.run_key.as_deref(), Some("gusto:abc"));
+    assert_eq!(s.file_hash.as_deref(), Some("f00d"));
+    let draft = sessions_from(
+        body.replace("\"posted\"", "\"validated\"").as_bytes(),
+    )
+    .expect("page");
+    assert_eq!(draft.sessions[0].posted_at, None, "only a posted import has one");
     assert_eq!(s.entries.len(), 1);
     assert!(!format!("{page:?}").contains("Test Worker"));
 }

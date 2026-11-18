@@ -319,6 +319,13 @@ pub struct UploadOutcome {
     pub is_duplicate: bool,
     /// The same provider run was imported before.
     pub is_duplicate_by_key: bool,
+    /// The engine's run key for this file (`session.idempotencyKey`): with
+    /// the provider it finds the earlier posted import of the same run in
+    /// History (P30 QA-12). Never shown or logged.
+    pub run_key: Option<String>,
+    /// The file's hash (`session.fileHash`): finds the earlier posted
+    /// import of the same file. Never shown or logged.
+    pub file_hash: Option<String>,
 }
 
 impl fmt::Debug for UploadOutcome {
@@ -791,6 +798,15 @@ pub struct SessionSummary {
     pub entries: Vec<TransactionId>,
     /// The employee rows and upload were discarded (U-251).
     pub detail_discarded: bool,
+    /// For a posted import, when it was posted as the engine names it in
+    /// a duplicate refusal (`postedAt` there is the import's `createdAt`;
+    /// engine text, an ISO time); `None` otherwise (P30 QA-12).
+    pub posted_at: Option<String>,
+    /// The engine's run key (`idempotencyKey`), for matching an upload to
+    /// this import (P30 QA-12). Never shown or logged.
+    pub run_key: Option<String>,
+    /// The file's hash (`fileHash`), for the same. Never shown or logged.
+    pub file_hash: Option<String>,
 }
 
 /// One page of History.
@@ -1014,6 +1030,14 @@ pub(crate) fn upload_from(body: &[u8]) -> Result<UploadOutcome, ApiError> {
         row_count: count(&p["rowCount"]),
         is_duplicate: p["isDuplicate"].as_bool().unwrap_or(false),
         is_duplicate_by_key: p["isDuplicateByKey"].as_bool().unwrap_or(false),
+        run_key: v["session"]["idempotencyKey"]
+            .as_str()
+            .filter(|k| !k.is_empty())
+            .map(str::to_string),
+        file_hash: v["session"]["fileHash"]
+            .as_str()
+            .filter(|k| !k.is_empty())
+            .map(str::to_string),
     })
 }
 
@@ -1153,12 +1177,21 @@ fn session_from(s: &Value) -> Result<SessionSummary, ApiError> {
     {
         entries.push(id);
     }
+    let status = s["status"]
+        .as_str()
+        .and_then(SessionStatus::parse)
+        .ok_or_else(decode_err)?;
+    let text = |k: &str| s[k].as_str().filter(|v| !v.is_empty()).map(str::to_string);
     Ok(SessionSummary {
         id: PayrollSessionId::parse(s["id"].as_str().ok_or_else(decode_err)?)?,
-        status: s["status"]
-            .as_str()
-            .and_then(SessionStatus::parse)
-            .ok_or_else(decode_err)?,
+        status,
+        // The engine's duplicate refusal names the import's createdAt as
+        // its posted time; History says the same date (QA-12).
+        posted_at: (status == SessionStatus::Posted)
+            .then(|| text("createdAt"))
+            .flatten(),
+        run_key: text("idempotencyKey"),
+        file_hash: text("fileHash"),
         mode: s["importMode"].as_str().and_then(ImportMode::parse),
         provider: s["detectedProvider"].as_str().map(str::to_string),
         period_start: date(&s["payPeriodStart"]),

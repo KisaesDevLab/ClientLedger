@@ -185,6 +185,16 @@ fn refused(code: &str, details: Value) -> ApiError {
     ApiError::Validation(ValidationError::coded(code, details))
 }
 
+/// The demo's run key for a fixture (one pay run per fixture).
+fn demo_run_key(fixture: usize) -> String {
+    format!("demo-run-{fixture}")
+}
+
+/// The demo's file hash for a fixture.
+fn demo_file_hash(fixture: usize) -> String {
+    format!("demo-file-{fixture}")
+}
+
 fn uuid(n: u64, kind: u8) -> uuid::Uuid {
     uuid::Uuid::from_u128(
         (u128::from(kind) << 64) | u128::from(n) | 0x0d30_0000_0000_4000_8000_0000_0000_0000,
@@ -264,6 +274,8 @@ impl DemoPayroll {
             mode: Some(f.mode),
             is_duplicate: posted_same,
             is_duplicate_by_key: false,
+            run_key: Some(demo_run_key(fixture)),
+            file_hash: Some(demo_file_hash(fixture)),
         })
     }
 
@@ -623,6 +635,12 @@ impl DemoPayroll {
                 error_count: 0,
                 entries: s.entries.clone(),
                 detail_discarded: s.discarded,
+                // As the duplicate refusal names it (noon UTC on the pay
+                // date: the same local day here).
+                posted_at: (s.status == SessionStatus::Posted)
+                    .then(|| format!("{}T12:00:00.000Z", s.check_date.to_wire())),
+                run_key: Some(demo_run_key(s.fixture)),
+                file_hash: Some(demo_file_hash(s.fixture)),
             })
             .collect();
         SessionPage {
