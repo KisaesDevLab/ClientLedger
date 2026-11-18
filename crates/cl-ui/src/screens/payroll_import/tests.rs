@@ -315,10 +315,16 @@ fn an_overlap_asks_and_post_anyway_uses_a_new_key() {
     s.next();
     s.poll();
     assert_eq!(s.state()["overlap_open"], 1);
+    assert_eq!(backups_taken(&f), 2, "one per post attempt so far");
     let first = s.key.as_ref().map(|k| k.1.clone()).expect("key");
     s.post_anyway();
     s.poll();
     assert_eq!(s.step, Step::Done);
+    assert_eq!(
+        backups_taken(&f),
+        2,
+        "Post anyway reuses the attempt's backup"
+    );
     assert_ne!(
         s.key.as_ref().map(|k| k.1.clone()),
         Some(first),
