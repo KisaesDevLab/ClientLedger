@@ -119,7 +119,7 @@ impl ImportScreen {
         };
         if let Err(e) = req.check() {
             f.problem = Some(match e {
-                cl_api::LocalValidation::AttachmentTooLarge { .. } => "imports.file.too_large",
+                cl_api::LocalValidation::AttachmentTooLarge => "imports.file.too_large",
                 cl_api::LocalValidation::AttachmentType => "imports.file.type",
                 _ => "imports.file.unreadable",
             });
@@ -591,11 +591,23 @@ impl ImportScreen {
             (Running::Undo, BatchStatus::Committed) if self.running.is_some() || self.unsettled => {
                 // The undo ended without undoing (failed, or not taken).
                 self.running = None;
-                if self.unsettled {
+                if self.unsettled && !failed {
                     self.status_answer = Some(false);
                 } else {
+                    // E1: a blocker found after the 202 lands as the
+                    // batch's error (IMPORT_UNDO_BLOCKED); the restore is
+                    // offered the same way.
+                    self.unsettled = false;
                     self.held = None;
-                    self.trouble = Some(Trouble::Failed);
+                    let refusal = self
+                        .state
+                        .as_ref()
+                        .and_then(|s| s.error.as_ref())
+                        .and_then(cl_api::imports::BatchFailure::refusal);
+                    self.trouble = Some(match refusal {
+                        Some(r @ ImportRefusal::UndoBlocked { .. }) => Trouble::Refused(r),
+                        _ => Trouble::Failed,
+                    });
                 }
             }
             _ => self.running = None,
@@ -756,10 +768,10 @@ impl ImportScreen {
                 self.uploads.clear();
             }
             "backup_fail" => {
-                d.imports.backup_mode = crate::company::demo::imports::DemoBackup::FailOnce
+                d.imports.backup_mode = crate::company::demo::imports::DemoBackup::FailOnce;
             }
             "backup_hold" => {
-                d.imports.backup_mode = crate::company::demo::imports::DemoBackup::HoldOnce
+                d.imports.backup_mode = crate::company::demo::imports::DemoBackup::HoldOnce;
             }
             "not_empty" => d.imports.company_empty = false,
             "unmatched" => d.imports.unmatched = vec!["Old suspense".into()],

@@ -300,7 +300,7 @@ impl ImportScreen {
         }
     }
 
-    fn need_text(&self, need: Need) -> String {
+    fn need_text(need: Need) -> String {
         match need {
             Need::Required => t("imports.need.required"),
             Need::Optional => t("imports.need.optional"),
@@ -324,7 +324,7 @@ impl ImportScreen {
                     ui.set_width(ui.available_width());
                     ui.horizontal_wrapped(|ui| {
                         ui.label(RichText::new(&name).strong());
-                        note(ui, tokens, &self.need_text(slot.need));
+                        note(ui, tokens, &Self::need_text(slot.need));
                         if slot.multiple {
                             note(ui, tokens, &t("imports.files.several"));
                         }
@@ -545,10 +545,8 @@ impl ImportScreen {
                     Trouble::Refused(
                         ImportRefusal::AlreadyCommitted { .. }
                         | ImportRefusal::PeriodOverlap { batch: Some(_), .. },
-                    ) => {
-                        if ui.link(t("imports.open_history")).clicked() {
-                            self.show_history();
-                        }
+                    ) if ui.link(t("imports.open_history")).clicked() => {
+                        self.show_history();
                     }
                     _ => {}
                 }

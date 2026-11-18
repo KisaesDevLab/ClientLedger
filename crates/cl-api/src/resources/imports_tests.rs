@@ -200,13 +200,8 @@ fn account_matches_are_read_with_their_keys() {
     assert_eq!(m[2].status, MatchStatus::Unmatched);
     let dbg = format!("{m:?}");
     assert!(!dbg.contains("Mystery") && !dbg.contains("Feed"), "{dbg}");
-    assert!(
-        upload_from(UPLOADED.as_bytes())
-            .expect("read")
-            .preview
-            .account_matches
-            .is_empty()
-    );
+    let none = upload_from(UPLOADED.as_bytes()).expect("read");
+    assert_eq!(none.preview.account_matches, Vec::new(), "before E2b");
 }
 
 #[test]

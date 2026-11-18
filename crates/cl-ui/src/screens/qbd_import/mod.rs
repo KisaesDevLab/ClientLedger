@@ -592,10 +592,11 @@ impl ImportScreen {
             .filter(|(_, v)| !v.is_empty())
             .map(|(k, v)| (*k, v.iter().map(SlotFile::dropped).collect()))
             .collect();
-        if self.wizard.source.is_conversion() && self.date_text.trim().is_empty() {
-            if let Some(d) = self.wizard.reference_date() {
-                self.date_text = show_date(d);
-            }
+        if self.wizard.source.is_conversion()
+            && self.date_text.trim().is_empty()
+            && let Some(d) = self.wizard.reference_date()
+        {
+            self.date_text = show_date(d);
         }
         self.sync_mapping();
     }
@@ -675,8 +676,8 @@ impl ImportScreen {
     pub(crate) fn can_back(&self) -> bool {
         !self.locked()
             && self.wizard.step != Step::Source
-            && !(self.wizard.step == Step::Import && self.batch.is_some())
-            && !(self.wizard.imported && self.wizard.step <= Step::TieOut)
+            && (self.wizard.step != Step::Import || self.batch.is_none())
+            && (!self.wizard.imported || self.wizard.step > Step::TieOut)
     }
 
     pub(crate) fn back(&mut self) {

@@ -428,3 +428,42 @@ fn every_model_key_is_in_the_catalog() {
     }
     assert!(missing.is_empty(), "{missing:#?}");
 }
+
+/// E1 as built: a blocker found after the undo's 202 lands as the batch's
+/// error; it is shown as a blocked undo with the restore, not "stopped".
+#[test]
+fn an_undo_blocked_after_it_started_offers_the_restore() {
+    let f = fixture();
+    let mut s = screen(&f);
+    to_import(&mut s);
+    s.next();
+    finish(&mut s);
+    let id = s.batch.expect("batch");
+    let mut st = s.state.clone().expect("state");
+    assert_eq!(st.batch.status, cl_api::imports::BatchStatus::Committed);
+    st.error = Some(cl_api::imports::BatchFailure {
+        code: "IMPORT_UNDO_BLOCKED".into(),
+        row_number: None,
+        session: None,
+    });
+    s.undo_pending = Some(id);
+    s.held = Some(Held {
+        what: Running::Undo,
+        batch: id,
+        backup_ref: "b.clbackup".into(),
+        password: None,
+        key: IdempotencyKey::new(),
+    });
+    s.running = Some(Running::Undo);
+    s.after_batch_read(Ok(st));
+    assert!(
+        matches!(
+            s.trouble,
+            Some(Trouble::Refused(ImportRefusal::UndoBlocked { .. }))
+        ),
+        "{:?}",
+        s.trouble
+    );
+    assert!(s.running.is_none() && !s.undone);
+    assert!(s.blocked_backup().is_some());
+}
