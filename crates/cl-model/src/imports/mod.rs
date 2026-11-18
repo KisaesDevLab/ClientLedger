@@ -9,6 +9,8 @@
 //!   exactly, ✓ only on the engine's `allZero`).
 //! - [`spot_check`]: the guided spot-check list (Q-144) and its seeded
 //!   sample of transactions.
+//! - [`csv_txn`]: the spreadsheet transactions import (D5): mapping,
+//!   grouping, checks and the canonical `transactions` CSV.
 //!
 //! Nothing here adds an amount up: the engine computes every balance and
 //! difference (non-negotiable 7). Text is named by stable keys the UI maps
@@ -17,6 +19,7 @@
 // No floating point anywhere near imported amounts (plan §3).
 #![deny(clippy::float_arithmetic, clippy::float_cmp)]
 
+pub mod csv_txn;
 pub mod history;
 pub mod spot_check;
 pub mod tieout;

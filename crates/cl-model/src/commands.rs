@@ -236,6 +236,8 @@ pub const COMMANDS: &[Command] = &[
     built("file.backup", "Back Up Company", Some(Menu::File), 1, None),
     cmd("file.restore", "Restore a Backup", Some(Menu::File), 1, None, Scope::Global),
     built("file.export_all", "Export All Data", Some(Menu::File), 1, None),
+    // P31 D5 (Q-125): invoices, bills and journal entries from a spreadsheet.
+    built("file.import_transactions", "Import Transactions from a Spreadsheet", Some(Menu::File), 1, None),
     screen("file.full_backup", "Full Database Backup (Utilities)", Some(Menu::File), 1, None, "P34"),
     // P31: bring the books over from another program (Admins only; no
     // submenus, so a group of its own under File).
@@ -634,6 +636,31 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_bank_import_slow",
         "Slow Demo Bank Import Preparation (developer)",
     ),
+    // P31 D5: the spreadsheet import scenarios run light and dark in one app.
+    dev_action(
+        "dev.txn_import_demo_reset",
+        "Reset Demo Spreadsheet Import (developer)",
+    ),
+    dev_action(
+        "dev.txn_import_demo_file_good",
+        "Demo Spreadsheet: Good File (developer)",
+    ),
+    dev_action(
+        "dev.txn_import_demo_file_bad_rows",
+        "Demo Spreadsheet: File with Problems (developer)",
+    ),
+    dev_action(
+        "dev.txn_import_demo_close_books",
+        "Close Demo Books for Spreadsheet Import (developer)",
+    ),
+    dev_action(
+        "dev.txn_import_demo_lose_answer",
+        "Lose the Next Demo Import Answer (developer)",
+    ),
+    dev_action(
+        "dev.txn_import_demo_backup_fails",
+        "Fail the Next Demo Import Backup (developer)",
+    ),
     // P30: the payroll scenarios run light and dark in one app.
     dev_action("dev.payroll_demo_reset", "Reset Demo Payroll (developer)"),
     dev_action(
@@ -931,6 +958,7 @@ mod tests {
             // P31
             "file.import_qbd",
             "file.import_system",
+            "file.import_transactions",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

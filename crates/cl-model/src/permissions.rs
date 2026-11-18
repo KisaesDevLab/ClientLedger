@@ -977,10 +977,13 @@ pub fn need(id: CommandId) -> Option<Need> {
         | "file.sign_out" | "file.lock" | "file.restore" | "file.print" | "file.print_forms"
         | "file.printer_setup" | "file.close_window" | "file.quit" => Always,
         "file.backup" | "file.export_all" => Read(R::CompanySettings),
-        // P31 (S4): commit, undo and verify are the Admin's; the wizard is too.
-        "file.full_backup" | "file.delete_company" | "file.import_qbd" | "file.import_system" => {
-            AdminOnly
-        }
+        // P31 (S4): commit, undo and verify are the Admin's; the wizards are too
+        // (D5: the spreadsheet import's commit and undo, U-263).
+        "file.full_backup"
+        | "file.delete_company"
+        | "file.import_qbd"
+        | "file.import_system"
+        | "file.import_transactions" => AdminOnly,
         // Edit (Preferences hold personal settings too; company tabs check
         // their own rights)
         "edit.preferences" => Always,

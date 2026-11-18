@@ -1,0 +1,9 @@
+Group,Type,Date,Num,Name,Due Date,Memo,Account,Item,Description,Amount,Debit,Credit,Tag
+1,Invoice,10/05/2026,7101,,11/04/2026,,Service Income,,Leaf removal,250.00,,,
+2,Estimate,10/06/2026,7102,Riverbend HOA,,,Service Income,,,100.00,,,
+3,Bill,31/10/2026,OMS-6001,Ozark Mulch Supply,,,Mulch & stone,,,40.00,,,
+4,Bill,10/09/2026,OMS-6002,Ozark Mulch Supply,,,Mulch & stone,,,1.23456,,,
+5,Journal Entry,10/31/2026,JE-2001,,,,Rent,,,,500.00,,
+5,Journal Entry,10/31/2026,JE-2001,,,,Operating Checking,,,,,499.99,
+6,Invoice,10/12/2026,7103,Table Rock Dental,,,Service Income,,,1e3,,,
+7,Bill,10/20/2026,HF-3001,Hollister Fuel Stop,,,Fuel,,,,,,

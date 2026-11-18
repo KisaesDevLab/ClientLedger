@@ -149,6 +149,8 @@ mod bank_import;
 mod payroll;
 // P31: QuickBooks Desktop and other-program imports.
 mod imports;
+// P31 D5: Import Transactions from a Spreadsheet.
+mod csv_transactions;
 mod reconcile;
 // P28: the report window.
 mod report_builder;
@@ -166,7 +168,7 @@ mod auth;
 mod sensitive;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 60] = [
+const TABLES: [&[(&str, &str)]; 61] = [
     audit::ENGLISH,
     auth::ENGLISH,
     sensitive::ENGLISH,
@@ -221,6 +223,7 @@ const TABLES: [&[(&str, &str)]; 60] = [
     bank_import::ENGLISH,
     payroll::ENGLISH,
     imports::ENGLISH,
+    csv_transactions::ENGLISH,
     reconcile::ENGLISH,
     reports::ENGLISH,
     report_builder::ENGLISH,

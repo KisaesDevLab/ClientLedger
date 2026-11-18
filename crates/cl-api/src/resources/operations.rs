@@ -283,7 +283,7 @@ impl Operation {
     }
 }
 
-const fn op(
+pub(crate) const fn op(
     method: Method,
     route: &'static str,
     retry: RetryClass,

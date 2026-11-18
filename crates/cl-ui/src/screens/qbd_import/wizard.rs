@@ -313,9 +313,8 @@ impl ImportScreen {
                     tenant_id,
                     kind,
                     dest_dir,
-                    // Off until the before-import kind lands (see
-                    // `backup_kind`): nothing a batch needs is pruned.
-                    apply_retention: false,
+                    // See `backup_kind`: nothing a batch needs is pruned.
+                    apply_retention: super::BACKUP_RETENTION,
                 },
                 &cl_company::backup::silent(),
             )

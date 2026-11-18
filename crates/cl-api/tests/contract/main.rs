@@ -59,6 +59,8 @@ mod contract_money;
 mod contract_money_helpers;
 mod contract_pay_bills;
 mod contract_payroll;
+// P31 D5: spreadsheet transaction import (U-261, U-268).
+mod contract_import_transactions;
 mod contract_pr3;
 mod contract_preferences;
 mod contract_printing;
@@ -1176,6 +1178,16 @@ fn main() -> std::process::ExitCode {
         (
             "payroll::restricted_viewer_sees_no_payroll",
             contract_payroll::restricted_viewer_sees_no_payroll,
+        ),
+        // P31 D5 spreadsheet transaction import (U-261, U-268): own companies.
+        (
+            "import_transactions::bad_row_posts_nothing",
+            contract_import_transactions::bad_row_posts_nothing,
+        ),
+        ("import_transactions::undo", contract_import_transactions::undo),
+        (
+            "import_transactions::recommit",
+            contract_import_transactions::recommit,
         ),
         // P25 bank file import (U-06): its own accounts in Contract Co.
         (

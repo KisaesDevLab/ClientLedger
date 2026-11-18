@@ -49,6 +49,8 @@ pub enum PickUse {
     PayrollFile,
     /// A report exported from another accounting program (P31).
     ImportFile,
+    /// A spreadsheet of transactions to import (P31 D5).
+    TxnImportFile,
 }
 
 impl PickUse {
@@ -63,6 +65,7 @@ impl PickUse {
             PickUse::SaveReport => "picker.title.save_report",
             PickUse::PayrollFile => "picker.title.payroll_file",
             PickUse::ImportFile => "picker.title.import_file",
+            PickUse::TxnImportFile => "picker.title.txn_import_file",
         }
     }
 }
@@ -100,6 +103,12 @@ pub const BANK_FILES: Filter = Filter {
 pub const PAYROLL_FILES: Filter = Filter {
     name_key: "picker.filter.payroll_files",
     extensions: &["csv", "tsv", "txt", "xlsx", "xls"],
+};
+
+/// Spreadsheets of transactions saved as CSV (P31 D5).
+pub const TXN_IMPORT_FILES: Filter = Filter {
+    name_key: "picker.filter.txn_import_files",
+    extensions: &["csv", "txt"],
 };
 
 /// A company logo: PNG or JPEG (Q-P19v).
