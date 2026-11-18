@@ -338,6 +338,7 @@ impl ImportScreen {
         tracing::warn!(target: "imports", detail = %cl_core::OwnerFacing::scrubbed_detail(e), "backup before the import failed; nothing sent");
         self.waiting = None;
         self.password = None;
+        self.confirm_closed_next = false;
         self.trouble = Some(Trouble::BackupFailed);
     }
 
@@ -464,7 +465,8 @@ impl ImportScreen {
         // once the owner confirms (plan §2a E1, `confirmClosedPeriod`).
         // Asked every time; an undo has no such path (the dialog explains).
         if let (ApiError::ClosedPeriod(c), Locked::Commit) = (e, locked)
-            && c.password_required == Some(false)
+            && c.can_override
+            && c.password_required != Some(true)
         {
             tracing::info!(target: "imports", "closed period without a password: asking");
             self.confirm_closed_next = false;
@@ -643,10 +645,7 @@ impl ImportScreen {
                     let refusal = self.failure_refusal();
                     self.trouble = Some(match refusal {
                         Some(r @ ImportRefusal::UndoBlocked { .. }) => Trouble::Refused(r),
-                        other => {
-                            self.failure = other;
-                            Trouble::Failed
-                        }
+                        _ => Trouble::Failed,
                     });
                 }
             }
@@ -803,6 +802,9 @@ impl ImportScreen {
         if self.wizard.verified && self.wizard.source.steps().contains(&Step::SpotCheck) {
             self.wizard.step = Step::SpotCheck;
             self.load_spot_check(b);
+            // Back goes to the tie-out: read it (it may be gone once
+            // verified; the step then says it is loading).
+            self.load_tieout();
         } else {
             self.wizard.step = Step::TieOut;
             self.load_tieout();

@@ -742,8 +742,24 @@ fn a_closed_period_without_a_password_asks_and_sends_the_confirmation() {
     s.next();
     s.poll();
     assert!(s.ask_closed.is_some());
+    // A failed backup after the yes: nothing sent, and Try again asks
+    // again (the confirmation is not kept).
+    cmd(&mut s, "dev.imports_demo_backup_fail");
     cmd(&mut s, "dev.imports_demo_confirm_closed");
-    assert_eq!(backups(&f), 3, "a backup before every send");
+    assert_eq!(s.trouble, Some(Trouble::BackupFailed));
+    assert_eq!(
+        f.link.demo_state().expect("demo").imports.confirmed_closed,
+        0
+    );
+    s.start_import();
+    s.poll();
+    assert!(s.ask_closed.is_some(), "asked again: {}", s.state());
+    assert_eq!(
+        f.link.demo_state().expect("demo").imports.confirmed_closed,
+        0
+    );
+    cmd(&mut s, "dev.imports_demo_confirm_closed");
+    assert_eq!(s.running, Some(Running::Commit), "sent after a new backup");
     assert_eq!(
         f.link.demo_state().expect("demo").imports.confirmed_closed,
         1
@@ -786,7 +802,7 @@ fn every_new_message_resolves_with_a_fix() {
 }
 
 #[test]
-fn the_tie_out_pdf_has_every_comparison() {
+fn pdf_golden() {
     let f = fixture();
     let mut s = screen(&f);
     to_import(&mut s);

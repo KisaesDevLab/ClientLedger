@@ -598,8 +598,10 @@ impl ImportScreen {
                         self.trouble = None;
                         // The list comes from this tie-out: verify drops
                         // the rows it was made from (E3).
-                        self.spot.build(&b, self.tieout.as_ref(), &self.chart);
-                        self.save_spot_check();
+                        if self.wizard.source.steps().contains(&Step::SpotCheck) {
+                            self.spot.build(&b, self.tieout.as_ref(), &self.chart);
+                            self.save_spot_check();
+                        }
                         self.wizard.next(self.today);
                     }
                 }
@@ -889,7 +891,7 @@ impl Screen for ImportScreen {
 
     fn ui(&mut self, ui: &mut eframe::egui::Ui) {
         self.poll();
-        if self.busy() || self.spot.saving() || self.spot.unsaved() {
+        if self.busy() || self.spot.saving() || self.spot.unsaved() || self.pdf.is_some() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
         }

@@ -73,6 +73,12 @@ fn each_program_imports_and_ties_out() {
             "{source:?}"
         );
         assert!(s.tieout_pdf().is_some_and(|b| b.starts_with(b"%PDF")));
+        // Mark verified: no spot-check list (QuickBooks Desktop only).
+        s.next();
+        s.poll();
+        assert!(s.wizard.verified, "{source:?}");
+        assert_eq!(s.spot.items.len(), 0, "{source:?}");
+        assert_eq!(s.spot.saves, 0, "{source:?}");
     }
 }
 

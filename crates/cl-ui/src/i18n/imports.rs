@@ -319,7 +319,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("imports.history.col.source", "From"),
     ("imports.history.col.status", "Status"),
     ("imports.history.col.verified", "Verified"),
-    ("imports.history.col.actions", ""),
+    ("imports.history.col.actions", "Actions"),
     ("imports.history.verified", "Verified"),
     ("imports.history.open", "Check that it matches"),
     ("imports.status.draft", "Not imported"),
