@@ -36,10 +36,13 @@ steps:
   - click: {role: button, label: History}
   - assert_state: {key: screen.history.undone, equals: 1, within_ms: 4000}
   - assert_state: {key: screen.history.committed, equals: 0}
+  # D6: the Undone row says why it has no buttons.
+  - assert_exists: {label_contains: "Nothing from it is in your books", index: 0}
   - screenshot: history-undone
-  - click: {role: button, label: Import}
   # The same files go in again: nothing says they were imported before.
+  # Start over (the demo reset) goes back from History to the wizard.
   - command: dev.imports_demo_reset
+  - assert_state: {key: screen.view, equals: import}
   - key: Alt+N
   - command: dev.imports_demo_file_all
   - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}

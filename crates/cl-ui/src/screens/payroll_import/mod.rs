@@ -1851,6 +1851,9 @@ impl PayrollImportScreen {
                 .ok()
                 .and_then(|l| l.backup_folder)
                 .unwrap_or(default_dir);
+            // P31: the before-import backups share one retention, so a
+            // payroll post never prunes the one an import still needs.
+            let protected = crate::screens::qbd_import::protected_backups(&session).await;
             cl_company::backup(
                 &session,
                 &store,
@@ -1860,6 +1863,7 @@ impl PayrollImportScreen {
                     kind: cl_settings::BackupKind::BeforeImport,
                     dest_dir,
                     apply_retention: true,
+                    protected,
                 },
                 &cl_company::backup::silent(),
             )

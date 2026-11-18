@@ -95,6 +95,7 @@ pub async fn delete_company(
             kind: BackupKind::BeforeDelete,
             dest_dir: req.backup_dir.clone(),
             apply_retention: false,
+            protected: None,
         },
         progress,
     )

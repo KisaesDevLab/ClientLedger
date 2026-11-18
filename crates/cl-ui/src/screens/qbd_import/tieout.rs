@@ -327,33 +327,29 @@ impl TieState {
         let n = self.of(tab.section()).count();
         let differing = self.differences(tab);
         let total = tab.total(tie);
-        let figure = match tab {
+        let figure = if tab == Tab::TrialBalance {
             // No difference total from the engine: 0.00 when no account
             // differs, else how many do (nothing is subtracted here).
-            Tab::TrialBalance => {
-                let d = self.of(Section::Accounts).filter(|r| !r.zero).count();
-                if d == 0 {
-                    Money::ZERO.format(MoneyStyle::default())
-                } else {
-                    t_count("imports.tieout.accounts_differ", d, &[])
-                }
+            let d = self.of(Section::Accounts).filter(|r| !r.zero).count();
+            if d == 0 {
+                Money::ZERO.format(MoneyStyle::default())
+            } else {
+                t_count("imports.tieout.accounts_differ", d, &[])
             }
+        } else {
             // The aging total's difference, unless it is 0.00 and the
             // side's own check is not: the tile never reads 0.00 while the
             // side differs.
-            _ => {
-                let check = tab.tile_check().and_then(|k| {
-                    self.checks_of(tab)
-                        .find(|r| r.input.label == k.as_wire())
-                        .map(|r| (r.zero, r.diff_text.clone()))
-                });
-                match (total, check) {
-                    (Some(x), _) if !x.diff.is_zero() => diff_text(x.diff),
-                    (_, Some((false, d))) => d,
-                    (Some(x), _) => diff_text(x.diff),
-                    (None, Some((_, d))) => d,
-                    (None, None) => String::new(),
-                }
+            let check = tab.tile_check().and_then(|k| {
+                self.checks_of(tab)
+                    .find(|r| r.input.label == k.as_wire())
+                    .map(|r| (r.zero, r.diff_text.clone()))
+            });
+            match (total, check) {
+                (Some(x), _) if !x.diff.is_zero() => diff_text(x.diff),
+                (Some(x), None | Some((true, _))) => diff_text(x.diff),
+                (_, Some((_, d))) => d,
+                (None, None) => String::new(),
             }
         };
         let date = show_date(tie.as_of);

@@ -693,6 +693,7 @@ impl CsvTransactionsScreen {
                 .ok()
                 .and_then(|l| l.backup_folder)
                 .unwrap_or(default_dir);
+            let protected = crate::screens::qbd_import::protected_backups(&session).await;
             cl_company::backup(
                 &session,
                 &store,
@@ -702,6 +703,7 @@ impl CsvTransactionsScreen {
                     kind: crate::screens::qbd_import::backup_kind(),
                     dest_dir,
                     apply_retention: crate::screens::qbd_import::BACKUP_RETENTION,
+                    protected,
                 },
                 &cl_company::backup::silent(),
             )

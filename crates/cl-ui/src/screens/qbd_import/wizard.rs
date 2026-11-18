@@ -395,6 +395,7 @@ impl ImportScreen {
                 .ok()
                 .and_then(|l| l.backup_folder)
                 .unwrap_or(default_dir);
+            let protected = super::protected_backups(&session).await;
             cl_company::backup(
                 &session,
                 &store,
@@ -403,8 +404,10 @@ impl ImportScreen {
                     tenant_id,
                     kind,
                     dest_dir,
-                    // See `backup_kind`: the before-import kind's own rule.
+                    // See `backup_kind`: the before-import kind's own rule,
+                    // never deleting a backup an import still needs.
                     apply_retention: super::BACKUP_RETENTION,
+                    protected,
                 },
                 &cl_company::backup::silent(),
             )

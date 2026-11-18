@@ -11,6 +11,7 @@
 //! in the destination by the retention rule. Application metadata (app
 //! version, kind, name, colour, local flags) goes into `manifest.host`.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -120,6 +121,14 @@ pub struct BackupRequest {
     /// backups by [`prune_company_backups`], before-import ones by
     /// [`prune_before_import`]; before-delete copies never.
     pub apply_retention: bool,
+    /// The before-import backups an import still needs (file names: the
+    /// backup a committed, running or failed import batch's "Restore the
+    /// backup taken before the import" points at,
+    /// `cl_model::imports::history::protected_backups`). Before-import
+    /// retention never deletes them, and runs only when this is known:
+    /// `None` (the import list could not be read) prunes nothing. Other
+    /// kinds ignore it.
+    pub protected: Option<BTreeSet<String>>,
 }
 
 /// What [`backup`] produced.
@@ -362,15 +371,11 @@ pub async fn backup(
         kind: req.kind,
     };
     let dest_dir = req.dest_dir.clone();
-    let (apply, kind) = (req.apply_retention, req.kind);
     let pruned = store.update(|l| {
         l.record_backup(req.tenant_id, record.clone());
-        match (apply, kind, l.get_mut(req.tenant_id)) {
-            (true, BackupKind::Backup, Some(r)) => prune_company_backups(r, &dest_dir, now),
-            (true, BackupKind::BeforeImport, Some(r)) => prune_before_import(r, &dest_dir, now),
-            // Before-delete and old portable copies are never pruned.
-            _ => Vec::new(),
-        }
+        l.get_mut(req.tenant_id)
+            .map(|r| retain(r, req, &dest_dir, now))
+            .unwrap_or_default()
     })?;
     progress(Progress::Done);
     Ok(BackupOutcome {
@@ -378,6 +383,23 @@ pub async fn backup(
         bytes,
         pruned,
     })
+}
+
+/// The retention a backup asked for: regular backups by
+/// [`prune_company_backups`]; before-import ones by [`prune_before_import`]
+/// only when the backups imports still need are known; before-delete and
+/// old portable copies never.
+fn retain(
+    rec: &mut cl_settings::CompanyRecord,
+    req: &BackupRequest,
+    dir: &Path,
+    now: Timestamp,
+) -> Vec<PathBuf> {
+    match (req.apply_retention, req.kind, req.protected.as_ref()) {
+        (true, BackupKind::Backup, _) => prune_company_backups(rec, dir, now),
+        (true, BackupKind::BeforeImport, Some(keep)) => prune_before_import(rec, dir, now, keep),
+        _ => Vec::new(),
+    }
 }
 
 /// Applies the retention rule (last 10 plus monthly for 12 months) to a
@@ -393,18 +415,29 @@ pub fn prune_company_backups(
     dir: &Path,
     now: Timestamp,
 ) -> Vec<PathBuf> {
-    prune_kind(rec, dir, now, BackupKind::Backup, KEEP_LAST, KEEP_MONTHS)
+    prune_kind(
+        rec,
+        dir,
+        now,
+        BackupKind::Backup,
+        KEEP_LAST,
+        KEEP_MONTHS,
+        &BTreeSet::new(),
+    )
 }
 
 /// Retention for the automatic backups taken before an import posts
 /// (Q-P30h): the newest [`KEEP_BEFORE_IMPORT`] before-import files of this
 /// company recorded under `dir`; no monthly copies. Regular, before-delete
-/// and portable files are never candidates.
+/// and portable files are never candidates, nor is any file named in
+/// `protected` (an import batch still points at it), which also takes no
+/// place among the newest kept.
 #[must_use]
 pub fn prune_before_import(
     rec: &mut cl_settings::CompanyRecord,
     dir: &Path,
     now: Timestamp,
+    protected: &BTreeSet<String>,
 ) -> Vec<PathBuf> {
     prune_kind(
         rec,
@@ -413,6 +446,7 @@ pub fn prune_before_import(
         BackupKind::BeforeImport,
         KEEP_BEFORE_IMPORT,
         0,
+        protected,
     )
 }
 
@@ -423,11 +457,16 @@ fn prune_kind(
     kind: BackupKind,
     keep_last: usize,
     keep_months: u32,
+    protected: &BTreeSet<String>,
 ) -> Vec<PathBuf> {
+    let is_protected = |p: &Path| {
+        p.file_name()
+            .is_some_and(|n| protected.contains(n.to_string_lossy().as_ref()))
+    };
     let candidates: Vec<(PathBuf, Timestamp)> = rec
         .backups
         .iter()
-        .filter(|b| b.kind == kind && b.path.parent() == Some(dir))
+        .filter(|b| b.kind == kind && b.path.parent() == Some(dir) && !is_protected(&b.path))
         .map(|b| (b.path.clone(), b.created_at))
         .collect();
     let delete = prune_plan(&candidates, now, keep_last, keep_months);
@@ -573,7 +612,7 @@ mod tests {
             prune_company_backups(&mut rec, dir.path(), now).is_empty(),
             "regular retention never touches before-import files (one regular file)"
         );
-        let pruned = prune_before_import(&mut rec, dir.path(), now);
+        let pruned = prune_before_import(&mut rec, dir.path(), now, &BTreeSet::new());
         assert_eq!(pruned.len(), 4, "{pruned:?}");
         assert!(
             pruned
@@ -601,6 +640,80 @@ mod tests {
             cl_settings::CompanyPrefs::default(),
         );
         assert_eq!(h.kind, "before-import");
+    }
+
+    /// P31: the backup a committed import batch's restore points at is
+    /// never pruned, however many newer before-import backups (payroll
+    /// posts count too) there are; an unprotected old one still goes.
+    #[test]
+    fn a_backup_an_import_still_needs_is_never_pruned() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let now = Timestamp::parse_wire("2026-11-18T08:00:00.000Z").expect("ts");
+        let mut rec = cl_settings::CompanyRecord::new(
+            cl_core::ids::TenantId::parse("1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
+            "Ozark",
+            cl_settings::ACCENT_PALETTE[0],
+        );
+        let mut names = Vec::new();
+        // 12 before-import files, the oldest first (2026-01-01 .. 01-12).
+        for d in 1..=12u32 {
+            let at = Timestamp::parse_wire(&format!("2026-01-{d:02}T08:00:00.000Z")).expect("ts");
+            let name = backup_file_name("Ozark", at, BackupKind::BeforeImport);
+            let path = dir.path().join(&name);
+            std::fs::write(&path, b"x").expect("write");
+            rec.backups.push(BackupRecord {
+                path,
+                sha256: "0".repeat(64),
+                archive_id: at.to_wire(),
+                created_at: at,
+                kind: BackupKind::BeforeImport,
+            });
+            names.push(name);
+        }
+        // The oldest is the one a committed QBD conversion points at.
+        let keep: BTreeSet<String> = [names[0].clone()].into();
+        let pruned = prune_before_import(&mut rec, dir.path(), now, &keep);
+        assert_eq!(pruned.len(), 1, "{pruned:?}");
+        assert!(
+            pruned[0].ends_with(&names[1]),
+            "the oldest unprotected one goes: {pruned:?}"
+        );
+        assert!(
+            dir.path().join(&names[0]).is_file(),
+            "the protected file stays"
+        );
+        assert!(rec.backups.iter().any(|b| b.path.ends_with(&names[0])));
+        // Ten newer ones besides it are still kept.
+        assert_eq!(rec.backups.len(), KEEP_BEFORE_IMPORT + 1);
+        // Two more: with the import list unknown nothing is pruned at all.
+        for d in 13..=14u32 {
+            let at = Timestamp::parse_wire(&format!("2026-01-{d:02}T08:00:00.000Z")).expect("ts");
+            let path = dir
+                .path()
+                .join(backup_file_name("Ozark", at, BackupKind::BeforeImport));
+            std::fs::write(&path, b"x").expect("write");
+            rec.backups.push(BackupRecord {
+                path,
+                sha256: "0".repeat(64),
+                archive_id: at.to_wire(),
+                created_at: at,
+                kind: BackupKind::BeforeImport,
+            });
+        }
+        let mut req = BackupRequest {
+            tenant_id: rec.tenant_id,
+            kind: BackupKind::BeforeImport,
+            dest_dir: dir.path().to_path_buf(),
+            apply_retention: true,
+            protected: None,
+        };
+        assert!(
+            retain(&mut rec, &req, dir.path(), now).is_empty(),
+            "unknown: keep all"
+        );
+        req.protected = Some(keep);
+        assert_eq!(retain(&mut rec, &req, dir.path(), now).len(), 2);
+        assert!(dir.path().join(&names[0]).is_file());
     }
 
     #[test]

@@ -179,6 +179,7 @@ impl BackupScreen {
                         kind: BackupKind::Backup,
                         dest_dir,
                         apply_retention: true,
+                        protected: None,
                     },
                     &sink,
                 )

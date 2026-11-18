@@ -46,6 +46,9 @@ steps:
   - key: Alt+N
   - assert_state: {key: screen.step, equals: files}
   - command: dev.imports_demo_file_all
+  # 5 of the 6: the reference trial balance is only compared, never posted,
+  # so the engine never refuses it as imported before (imports.service.ts,
+  # U-263: role "reference" skips the check). Correct, not a gap.
   - assert_state: {key: screen.files_refused, equals: 5, within_ms: 6000}
   - assert_exists: {label_contains: "imported before", index: 0}
   - assert_state: {key: screen.can_next, equals: false}

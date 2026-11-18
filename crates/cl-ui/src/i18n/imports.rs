@@ -30,6 +30,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("imports.step.done", "Done"),
     ("imports.step.source", "Choose the program"),
     ("imports.step.current", "Current step: {step}"),
+    ("imports.step.done", "Done: {step}"),
     ("imports.not_brought_over", "Not brought over: memorized transactions and QuickBooks users. You'll set those up fresh."),
     // Sources.
     ("imports.source.pick", "Where your books are now"),
@@ -393,6 +394,10 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("imports.status.failed", "Stopped, nothing posted"),
     ("imports.status.undoing", "Undoing"),
     ("imports.status.undone", "Undone"),
+    ("imports.history.nothing.undone", "Nothing from it is in your books. To bring these files in, start a new import."),
+    ("imports.history.nothing.draft", "Never imported. Start a new import to bring these files in."),
+    ("imports.history.nothing.failed", "Only the company's Admin can try it again."),
+    ("imports.history.nothing.other", "Nothing to do here."),
     // Close prompt.
     ("imports.close.running", "Quitting cancels the import; nothing from it will be posted."),
     ("imports.close.undo_running", "Quitting cancels the undo; the import stays as it was."),

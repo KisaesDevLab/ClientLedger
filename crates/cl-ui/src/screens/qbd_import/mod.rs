@@ -89,6 +89,34 @@ pub(crate) fn backup_kind() -> cl_settings::BackupKind {
 /// before-import kind's own newest-10 rule (see [`backup_kind`]).
 pub(crate) const BACKUP_RETENTION: bool = true;
 
+/// The before-import backups an import batch still needs (History's
+/// `protected_backups`: committed, running and failed batches), read just
+/// before every before-import backup (imports, undo, spreadsheet imports,
+/// payroll posts) so its retention never deletes the one a batch's
+/// "Restore the backup taken before the import" points at.
+///
+/// `None` when the list can't be read in full (offline, no right, more than
+/// the pages History reads): the backup then prunes nothing. Empty when
+/// the engine has no import batches at all.
+pub(crate) async fn protected_backups(
+    session: &cl_api::Session,
+) -> Option<std::collections::BTreeSet<String>> {
+    match session.imports().batches_all().await {
+        Ok(list)
+            if list.len()
+                < cl_api::imports::HISTORY_MAX_PAGES
+                    * usize::from(cl_api::imports::HISTORY_PAGE) =>
+        {
+            let entries: Vec<_> = list.iter().map(draw::entry_of).collect();
+            Some(cl_model::imports::history::protected_backups(&entries))
+        }
+        Err(ApiError::Local(cl_api::LocalValidation::Unsupported)) => {
+            Some(std::collections::BTreeSet::new())
+        }
+        _ => None,
+    }
+}
+
 /// A request in flight or already answered (the demo answers at once).
 pub(crate) enum Job<T> {
     Running(Task<T>),
@@ -918,7 +946,12 @@ impl ImportScreen {
         self.confirm_closed_next = false;
         self.undone = false;
         self.tie = None;
+        self.point_at = None;
+        self.pdf_message = None;
         self.spot = spot_check::SpotList::default();
+        // D6: Start over (and the demo reset) goes back to the wizard, even
+        // from History.
+        self.view = View::Import;
     }
 
     /// Discards the uploaded files no batch holds (closing, Start over,
@@ -1133,7 +1166,7 @@ impl Screen for ImportScreen {
             "tieout_tabs": self.tie.as_ref().map(|x| x.tabs().iter().map(|t| t.key()).collect::<Vec<_>>()),
             "tieout_differences_only": self.tie.as_ref().map(|x| x.view.differences_only),
             "tieout_rows_shown": self.tie.as_ref().map(|x| x.rows(x.tab).len() + x.checks(x.tab).len()),
-            "tieout_differences": self.tie.as_ref().map(|x| x.all_differences()),
+            "tieout_differences": self.tie.as_ref().map(tieout::TieState::all_differences),
             "tieout_marked": self.tie.as_ref().and_then(|x| x.focus).and_then(|i| self.tie.as_ref().map(|x| x.view.rows[i].input.label.clone())),
             "spot_samples": self.spot.items.iter().filter(|i| i.key.starts_with("sample:")).count(),
             "pdfs_saved": self.pdfs_saved,

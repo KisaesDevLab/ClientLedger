@@ -207,18 +207,33 @@ impl ImportScreen {
         for (i, s) in steps.iter().enumerate() {
             let done = at.is_none_or(|a| i < a) || self.wizard.step == Step::Done;
             let current = Some(i) == at;
-            let mark = if done && !current {
-                "✓".to_string()
+            let name = step_name(self.wizard.source, *s);
+            // A finished step: a drawn circled check (the bundled fonts have
+            // no check glyph, D6); the others their number.
+            let text = if done && !current {
+                name.clone()
             } else {
-                (i + 1).to_string()
+                format!("{}  {name}", i + 1)
             };
-            let text = format!("{mark}  {}", step_name(self.wizard.source, *s));
             let rich = if current {
                 RichText::new(text).strong().color(tokens.accent)
             } else {
                 RichText::new(text).color(tokens.text_secondary)
             };
-            let r = ui.add(egui::Label::new(rich));
+            let r = ui
+                .horizontal(|ui| {
+                    if done && !current {
+                        crate::widgets::circled_check(
+                            ui,
+                            14.0,
+                            tokens.accent,
+                            tokens.surface_window,
+                            &t_with("imports.step.done", &[("step", &name)]),
+                        );
+                    }
+                    ui.add(egui::Label::new(rich))
+                })
+                .inner;
             if current {
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(
@@ -764,6 +779,17 @@ impl ImportScreen {
                             && ui.button(t("imports.restore.button")).clicked()
                         {
                             self.restore_backup(name);
+                        }
+                        // D6: a row with nothing to do says why, in plain
+                        // words, rather than an empty cell.
+                        if !(a.tieout || a.retry || a.undo || a.check_status || a.restore) {
+                            let key = format!("imports.history.nothing.{}", e.status.key());
+                            let text = if crate::i18n::has(&key) {
+                                t(&key)
+                            } else {
+                                t("imports.history.nothing.other")
+                            };
+                            ui.label(RichText::new(text).color(tokens.text_secondary));
                         }
                     });
                     ui.end_row();

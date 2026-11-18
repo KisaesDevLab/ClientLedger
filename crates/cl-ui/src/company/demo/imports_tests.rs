@@ -456,10 +456,22 @@ fn undo_runs_over_polls_and_leaves_nothing_behind() {
         d.company_empty,
         "a conversion undone leaves the company empty"
     );
-    // The tie-out needs a committed batch.
-    assert!(d.tieout(b.id).is_err());
+    // The tie-out, verify and spot-check need a committed batch: an undone
+    // one says so with its own code (E3).
+    for e in [
+        d.tieout(b.id).expect_err("undone"),
+        d.verify(b.id).expect_err("undone"),
+        d.save_spot_check(b.id, &[]).expect_err("undone"),
+    ] {
+        assert_eq!(refusal(&e), ImportRefusal::BatchUndone);
+    }
+    assert_eq!(d.transactions(b.id), Vec::new());
     // The files are free again: a new batch takes them and commits.
     let again = batch_of(&mut d, files).expect("again");
+    assert_eq!(
+        refusal(&d.save_spot_check(again.id, &[]).expect_err("draft")),
+        ImportRefusal::BatchNotCommitted
+    );
     commit(&mut d, again.id).expect("commit again");
     finish(&mut d, again.id);
     assert_eq!(d.batches().batches.len(), 2);
