@@ -1296,7 +1296,12 @@ fn fixture_words(dir: &str) -> Vec<String> {
                 if amount {
                     out.push(c.to_string());
                     out.push(c.replace([',', '$', '(', ')'], ""));
-                } else if c.chars().count() >= 5 && c.chars().any(char::is_alphabetic) {
+                } else if c.chars().count() >= 5
+                    && c.chars().any(char::is_alphabetic)
+                    // Names and memos ("Brightwater HOA"); a lone word such as
+                    // a column value ("Account", "Invoice") is not owner data.
+                    && (c.contains(' ') || c.contains('@'))
+                {
                     out.push(c.to_string());
                 }
             }
@@ -1323,6 +1328,7 @@ fn imports_logs_have_no_names_or_amounts() {
     let subscriber = tracing_subscriber::fmt()
         .with_max_level(tracing::Level::TRACE)
         .with_ansi(false)
+        .without_time()
         .with_writer(capture.clone())
         .finish();
     tracing::subscriber::with_default(subscriber, || {

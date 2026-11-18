@@ -153,19 +153,34 @@ pub fn shown_number(n: Option<&str>) -> Option<&str> {
 /// An open item's words: "1005 · Brightwater HOA"; with no number of its
 /// own, its kind ("Credit memo · Riverside Café").
 fn item_label(i: &TieOutItem) -> String {
+    // A made-up key `<kind>:<name>` gives its kind and name in words.
+    let made_up = i
+        .number
+        .as_deref()
+        .and_then(|n| n.split_once(':'))
+        .map(|(k, n)| (k.trim().to_ascii_lowercase(), n.trim()));
+    let kind_word = |kind: &str| {
+        [
+            format!("imports.spot.type.{kind}"),
+            format!("imports.spot.type.customer_{kind}"),
+        ]
+        .into_iter()
+        .find(|k| crate::i18n::has(k))
+        .map(|k| t(&k))
+    };
     let lead = shown_number(i.number.as_deref())
         .map(str::to_string)
-        .or_else(|| {
-            i.doc_type
-                .as_deref()
-                .map(|d| format!("imports.spot.type.{d}"))
-                .filter(|k| crate::i18n::has(k))
-                .map(|k| t(&k))
-        });
+        .or_else(|| i.doc_type.as_deref().and_then(kind_word))
+        .or_else(|| made_up.as_ref().and_then(|(k, _)| kind_word(k)));
+    let name = if i.name.is_empty() {
+        made_up.as_ref().map_or("", |(_, n)| *n)
+    } else {
+        i.name.as_str()
+    };
     match lead {
-        Some(n) if !i.name.is_empty() => format!("{n} · {}", i.name),
+        Some(n) if !name.is_empty() => format!("{n} · {name}"),
         Some(n) => n,
-        None => i.name.clone(),
+        None => name.to_string(),
     }
 }
 
@@ -569,6 +584,12 @@ pub fn tieout_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
         .wrap(),
     );
     ui.add_space(10.0);
+    // An undone import has nothing to check (UI review: no ticks, no
+    // verify).
+    if s.undone {
+        ui.label(RichText::new(t("imports.tieout.undone")).color(tokens.warn_text));
+        return;
+    }
     let (Some(tie), Some(st)) = (s.tieout.as_ref(), s.tie.as_ref()) else {
         ui.label(t("imports.tieout.loading"));
         return;
@@ -605,13 +626,23 @@ pub fn tieout_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
                 t("imports.tieout.only_differences"),
             );
         }
-        ui.add_space(12.0);
-        save = ui
-            .add_enabled(
+        // F4: Save PDF at the right end of the tab row (when it fits).
+        let pdf = |ui: &mut Ui| {
+            ui.add_enabled(
                 s.pdf.is_none(),
                 egui::Button::new(t("imports.tieout.save_pdf")),
             )
-            .clicked();
+            .clicked()
+        };
+        if ui.available_width() > 140.0 {
+            save = ui
+                .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    pdf(ui)
+                })
+                .inner;
+        } else {
+            save = pdf(ui);
+        }
     });
     if save {
         s.start_save_pdf(ui.ctx());
@@ -1151,6 +1182,24 @@ mod tests {
             all_zero,
             verified_at: None,
         }
+    }
+
+    /// UI review: a made-up key is never shown; its kind and name are.
+    #[test]
+    fn a_made_up_key_reads_as_its_kind_and_name() {
+        let i = TieOutItem {
+            source_row: Some(4),
+            session: None,
+            transaction: None,
+            name: String::new(),
+            number: Some("payment:Riverside Cafe".into()),
+            doc_type: None,
+            date: None,
+            source: money("-300.00"),
+            books: money("-300.00"),
+            diff: money("0.00"),
+        };
+        assert_eq!(item_label(&i), "Payment · Riverside Cafe");
     }
 
     #[test]

@@ -17,7 +17,22 @@ steps:
   - key: Alt+N
   - key: Alt+N
   - key: Alt+N
+  # Review B2: mid-import the close and quit prompts tell the truth.
+  - command: dev.imports_demo_job_hold
   - key: Alt+N
+  - assert_state: {key: screen.running, equals: commit, within_ms: 4000}
+  - command: file.close_window
+  - assert_state: {key: prompt_open, equals: true}
+  - assert_exists: {role: label, label_contains: keeps running after you close this window}
+  - screenshot: close-prompt-running
+  - click: {role: button, label: Keep importing}
+  - assert_state: {key: prompt_open, equals: false}
+  - command: file.quit
+  - assert_state: {key: prompt_open, equals: true}
+  - assert_exists: {role: label, label_contains: Quitting may stop the import}
+  - click: {role: button, label: Keep importing}
+  - assert_state: {key: quit_approved, equals: false}
+  - command: dev.imports_demo_job_release
   - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
   - assert_state: {key: screen.tieout_all_zero, equals: true, within_ms: 4000}
   # Keep it: nothing happens.

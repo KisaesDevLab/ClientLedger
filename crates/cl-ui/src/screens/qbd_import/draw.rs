@@ -244,12 +244,14 @@ impl ImportScreen {
             .collect();
         let at = steps.iter().position(|s| *s == self.wizard.step);
         for (i, s) in steps.iter().enumerate() {
-            let done = at.is_none_or(|a| i < a) || self.wizard.step == Step::Done;
+            // After an undo no step reads as finished.
+            let done = !self.undone && (at.is_none_or(|a| i < a) || self.wizard.step == Step::Done);
             let current = Some(i) == at;
             let name = step_name(self.wizard.source, *s);
             // A finished step: a drawn circled check (the bundled fonts have
             // no check glyph, D6); the others their number.
-            let text = if done && !current {
+            // F3: the current step's number sits in an accent badge.
+            let text = if done || current {
                 name.clone()
             } else {
                 format!("{}  {name}", i + 1)
@@ -261,6 +263,19 @@ impl ImportScreen {
             };
             let r = ui
                 .horizontal(|ui| {
+                    if current {
+                        egui::Frame::new()
+                            .fill(tokens.accent)
+                            .corner_radius(9)
+                            .inner_margin(Margin::symmetric(6, 0))
+                            .show(ui, |ui| {
+                                ui.label(
+                                    RichText::new((i + 1).to_string())
+                                        .strong()
+                                        .color(tokens.on_accent),
+                                );
+                            });
+                    }
                     if done && !current {
                         crate::widgets::circled_check(
                             ui,

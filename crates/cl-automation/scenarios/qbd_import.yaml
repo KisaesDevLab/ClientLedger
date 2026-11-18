@@ -51,6 +51,18 @@ steps:
   - assert_state: {key: screen.tieout_all_zero, equals: true, within_ms: 4000}
   - assert_state: {key: screen.tieout_differences, equals: 0}
   - screenshot: tieout
+  # UI review Blocking 4: small windows and 200% zoom keep the toggle and
+  # the step reachable (the step list moves under the step).
+  - resize: {width: 960, height: 640}
+  - assert_exists: {role: button, label: History}
+  - screenshot: min-tieout
+  - set_zoom: {percent: 200}
+  - assert_exists: {role: button, label: History}
+  - screenshot: min-tieout-200
+  - resize: {width: 1280, height: 800}
+  - screenshot: tieout-1280-200
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}
   - command: dev.imports_demo_tab_receivables
   - assert_state: {key: screen.tieout_tab, equals: receivables}
   - screenshot: tieout-receivables

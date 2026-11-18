@@ -913,7 +913,12 @@ async fn tieout_reads_exact_differences_and_hides_owner_data() {
     assert_eq!(t.accounts[0].diff, m("10.00"));
     assert_eq!(t.accounts[0].source_rows, vec![6, 7]);
     assert_eq!(t.accounts[0].number.as_deref(), Some("1100"));
-    assert_eq!(t.accounts[0].label(), "1200", "the source's own key first");
+    // The source's own key first, then the account's name (P31 UI review).
+    let label = t.accounts[0].label();
+    assert!(
+        label.starts_with("1200 · ") && label.len() > "1200 · ".len(),
+        "{label}"
+    );
     assert_eq!(
         t.accounts[1].diff,
         m("0.0040"),
