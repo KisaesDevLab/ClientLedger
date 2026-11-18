@@ -977,7 +977,8 @@ pub fn need(id: CommandId) -> Option<Need> {
         | "file.sign_out" | "file.lock" | "file.restore" | "file.print" | "file.print_forms"
         | "file.printer_setup" | "file.close_window" | "file.quit" => Always,
         "file.backup" | "file.export_all" => Read(R::CompanySettings),
-        "file.full_backup" | "file.delete_company" => AdminOnly,
+        // P31 D5: commit and undo need the engine's Admin right (U-263).
+        "file.full_backup" | "file.delete_company" | "file.import_transactions" => AdminOnly,
         // Edit (Preferences hold personal settings too; company tabs check
         // their own rights)
         "edit.preferences" => Always,
