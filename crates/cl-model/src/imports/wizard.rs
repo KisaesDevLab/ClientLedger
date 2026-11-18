@@ -341,7 +341,7 @@ static QBD_GL_SLOTS: [FileSlot; 6] = [
         "qbd_tb_opening",
         "trial_balance",
         Role::Post,
-        Need::TwoYearsOnly,
+        Need::Optional,
         DateRule::Opening,
     ),
     journal("qbd_journal", Need::Required),
@@ -362,7 +362,7 @@ static AP_SLOTS: [FileSlot; 6] = [
         "ap_tb_opening",
         "trial_balance",
         Role::Post,
-        Need::TwoYearsOnly,
+        Need::Optional,
         DateRule::Opening,
     ),
     journal("ap_gl", Need::Required),
@@ -383,7 +383,7 @@ static QBO_SLOTS: [FileSlot; 6] = [
         "qbo_tb_opening",
         "trial_balance",
         Role::Post,
-        Need::TwoYearsOnly,
+        Need::Optional,
         DateRule::Opening,
     ),
     journal("qbo_journal", Need::Required),
@@ -410,7 +410,7 @@ static GENERIC_SLOTS: [FileSlot; 5] = [
         "generic_tb_opening",
         "trial_balance",
         Role::Post,
-        Need::TwoYearsOnly,
+        Need::Optional,
         DateRule::Opening,
     ),
     journal("generic_gl", Need::Required),
@@ -478,6 +478,8 @@ pub enum DateProblem {
     ConversionInFuture,
     /// The dates leave the calendar's range.
     OutOfRange,
+    /// The opening balances are not dated before the conversion date.
+    OpeningNotBefore,
 }
 
 impl DateProblem {
@@ -488,6 +490,7 @@ impl DateProblem {
             DateProblem::BadFiscalMonth => "bad_fiscal_month",
             DateProblem::ConversionInFuture => "future",
             DateProblem::OutOfRange => "out_of_range",
+            DateProblem::OpeningNotBefore => "opening_not_before",
         }
     }
 }
@@ -605,6 +608,9 @@ pub enum Blocker {
     NotVerified,
     /// The company already has transactions (QBD, Q-P31h).
     CompanyNotEmpty,
+    /// An opening trial balance was added but its date was not given
+    /// (sources other than a QBD conversion).
+    NoOpeningDate,
 }
 
 impl Blocker {
@@ -623,6 +629,7 @@ impl Blocker {
             Blocker::NotImported => "not_imported",
             Blocker::NotVerified => "not_verified",
             Blocker::CompanyNotEmpty => "company_not_empty",
+            Blocker::NoOpeningDate => "no_opening_date",
         }
     }
 }
@@ -640,8 +647,11 @@ pub struct Wizard {
     pub conversion_date: Option<CalendarDate>,
     /// The fiscal year's first month (1-12).
     pub fy_start_month: u32,
-    /// History depth.
+    /// History depth (a QBD conversion).
     pub depth: HistoryDepth,
+    /// The opening balances' date, as the owner gives it (every source but
+    /// a QBD conversion, whose date follows the depth; phase step 7).
+    pub opening_date: Option<CalendarDate>,
     /// Files per slot key.
     pub files: BTreeMap<&'static str, Vec<DroppedFile>>,
     /// The reference trial balance shows an inventory balance (the
@@ -667,6 +677,7 @@ impl Wizard {
             conversion_date: None,
             fy_start_month,
             depth: HistoryDepth::default(),
+            opening_date: None,
             files: BTreeMap::new(),
             has_inventory: false,
             company_has_activity: false,
@@ -676,12 +687,22 @@ impl Wizard {
         }
     }
 
-    /// The history dates for the chosen date and depth.
+    /// The history dates: from the depth for a QBD conversion; for other
+    /// sources no history start and the owner's opening balance date.
     ///
     /// # Errors
     /// `NoConversionDate`, or the date problem.
     pub fn dates(&self) -> Result<HistoryDates, Blocker> {
         let c = self.conversion_date.ok_or(Blocker::NoConversionDate)?;
+        if !self.source.is_conversion() {
+            if self.opening_date.is_some_and(|o| o >= c) {
+                return Err(Blocker::Dates(DateProblem::OpeningNotBefore));
+            }
+            return Ok(HistoryDates {
+                history_from: None,
+                opening_tb: self.opening_date,
+            });
+        }
         history_dates(c, self.fy_start_month, self.depth).map_err(Blocker::Dates)
     }
 
@@ -768,6 +789,9 @@ impl Wizard {
                     out.push(Blocker::MissingFile { slot: slot.key });
                 }
                 continue;
+            }
+            if slot.date == DateRule::Opening && self.expected_date(slot).is_none() {
+                out.push(Blocker::NoOpeningDate);
             }
             if !slot.multiple && files.len() > 1 {
                 out.push(Blocker::OneFileOnly { slot: slot.key });
@@ -866,6 +890,65 @@ mod tests {
         assert_eq!(all.history_from, None);
         assert_eq!(all.opening_tb, None);
         assert_eq!(HistoryDepth::default(), HistoryDepth::TwoYears, "Q-P31b");
+    }
+
+    /// Phase step 7: other sources' opening balances are as of the date the
+    /// owner gives (the Bluebonnet fixtures: 2025-12-31 for a 2026-06-30
+    /// conversion), never the QBD two-year rule.
+    #[test]
+    fn other_sources_use_the_owners_opening_date() {
+        let today = day(TODAY);
+        for source in [
+            Source::Qbo,
+            Source::Generic,
+            Source::AccountingPower,
+            Source::QbdGl,
+        ] {
+            let mut w = Wizard::new(source, 1);
+            w.conversion_date = Some(day("2026-06-30"));
+            let opening = *source
+                .slots()
+                .iter()
+                .find(|s| s.date == DateRule::Opening)
+                .expect("opening slot");
+            assert!(!w.is_required(&opening), "{source:?}: optional");
+            w.step = Step::Files;
+            w.drop_file(opening.key, file(Some("2025-12-31")));
+            assert!(
+                w.blockers(today).contains(&Blocker::NoOpeningDate),
+                "{source:?}"
+            );
+            w.opening_date = Some(day("2025-12-31"));
+            assert_eq!(w.expected_date(&opening), Some(day("2025-12-31")));
+            assert_eq!(
+                w.dates().expect("dates"),
+                HistoryDates {
+                    history_from: None,
+                    opening_tb: Some(day("2025-12-31"))
+                }
+            );
+            assert!(
+                !w.blockers(today)
+                    .iter()
+                    .any(|b| matches!(b, Blocker::WrongDate { .. } | Blocker::NoOpeningDate)),
+                "{source:?}: {:?}",
+                w.blockers(today)
+            );
+            w.opening_date = Some(day("2026-06-30"));
+            w.step = Step::Dates;
+            assert!(
+                w.blockers(today)
+                    .contains(&Blocker::Dates(DateProblem::OpeningNotBefore))
+            );
+        }
+        // QBD keeps the depth rule.
+        let mut q = Wizard::new(Source::Qbd, 1);
+        q.conversion_date = Some(day("2026-10-27"));
+        q.opening_date = Some(day("2025-12-31"));
+        assert_eq!(
+            q.dates().expect("dates").opening_tb,
+            Some(day("2023-12-31"))
+        );
     }
 
     #[test]
@@ -1147,6 +1230,7 @@ mod tests {
         w.conversion_date = Some(day("2026-06-30"));
         w.company_has_activity = true;
         assert!(w.can_continue(today), "Q-P31h: a warning, not a block");
+        w.opening_date = Some(day("2025-12-31"));
         w.step = Step::Files;
         for key in [
             "generic_coa",
