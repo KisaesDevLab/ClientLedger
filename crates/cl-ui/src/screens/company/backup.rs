@@ -124,6 +124,9 @@ impl BackupScreen {
                 return;
             }
             self.passphrase_needed = false;
+            self.link
+                .bus()
+                .publish(crate::data_bus::Change::BackupPassphrase);
         }
         let dest_dir = PathBuf::from(self.dest_dir.trim());
         if self.link.is_demo() {

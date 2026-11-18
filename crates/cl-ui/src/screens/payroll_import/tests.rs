@@ -522,7 +522,7 @@ fn a_backup_is_made_before_the_post_is_sent_once() {
     assert_eq!(s.state()["backing_up"], false);
 
     // Closed books: Post backs up, the engine asks for the password, and
-    // Continue backs up again before its send.
+    // Continue sends the same attempt on that backup: one backup per post.
     let f = fixture();
     cmd(&mut screen(&f), "dev.payroll_demo_close_books");
     let mut s = screen(&f);
@@ -534,11 +534,85 @@ fn a_backup_is_made_before_the_post_is_sent_once() {
     assert_eq!(backups_taken(&f), 1);
     s.password_text = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
     s.give_password();
-    assert!(s.backing_up() || s.post_job.is_some() || s.step == Step::Done);
+    assert!(!s.backing_up(), "Continue doesn't back up again");
     s.poll();
     assert_eq!(s.step, Step::Done, "{}", s.state());
-    assert_eq!(backups_taken(&f), 2, "one backup per send");
+    assert_eq!(backups_taken(&f), 1, "one backup per post attempt");
+    assert_eq!(s.posts_sent, 2);
     assert_eq!(posts_received(&f), 2);
+}
+
+/// Q-P30h: a wrong password, then the right one, is still the same
+/// attempt (one backup); cancelling the prompt ends the attempt, so the
+/// next Post backs up again.
+#[test]
+fn a_new_attempt_backs_up_again_a_continued_one_does_not() {
+    let f = fixture();
+    cmd(&mut screen(&f), "dev.payroll_demo_close_books");
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    s.next();
+    s.poll();
+    assert_eq!(s.state()["password_open"], true);
+    s.password_text = "wrong".into();
+    s.give_password();
+    s.poll();
+    assert_eq!(s.state()["trouble"], "password_wrong");
+    assert_eq!(backups_taken(&f), 1, "a wrong password: same attempt");
+    // Cancel the prompt and press Post again: a new attempt, a new backup.
+    s.asking_password = None;
+    s.next();
+    s.poll();
+    assert_eq!(backups_taken(&f), 2, "a new Post backs up again");
+    assert_eq!(s.state()["password_open"], true);
+    s.password_text = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
+    s.give_password();
+    s.poll();
+    assert_eq!(s.step, Step::Done, "{}", s.state());
+    assert_eq!(backups_taken(&f), 2);
+    // A failed backup is never reused: Try again backs up again.
+    let f = fixture();
+    cmd(&mut screen(&f), "dev.payroll_demo_close_books");
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    cmd(&mut s, "dev.payroll_demo_backup_fail");
+    s.next();
+    s.poll();
+    assert_eq!(s.state()["backup_failed"], true);
+    s.password_text = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
+    s.give_password();
+    s.poll();
+    assert_eq!(posts_received(&f), 1, "only after a verified backup");
+    assert_eq!(backups_taken(&f), 1);
+}
+
+/// Q-P30h: setting a backup passphrase on Back Up clears Import
+/// Payroll's "no passphrase" message without posting anything.
+#[test]
+fn setting_a_passphrase_clears_the_stale_message() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    s.backup_failed = Some(cl_company::CompanyError::NoPassphrase);
+    s.poll();
+    assert_eq!(s.state()["backup_failed"], true, "stays until it's set");
+    f.link
+        .bus()
+        .publish(crate::data_bus::Change::BackupPassphrase);
+    s.poll();
+    assert_eq!(s.state()["backup_failed"], false);
+    assert_eq!(posts_received(&f), 0, "nothing posts on its own");
+    assert_eq!(s.step, Step::Preview);
+    // Another failure isn't cleared by it.
+    s.backup_failed = Some(cl_company::CompanyError::JobFailed { code: "X".into() });
+    f.link
+        .bus()
+        .publish(crate::data_bus::Change::BackupPassphrase);
+    s.poll();
+    assert_eq!(s.state()["backup_failed"], true);
 }
 
 /// Q-P30h: a failed backup sends nothing, says so with Try again, and Try
@@ -644,6 +718,10 @@ fn stopping_during_the_backup_posts_nothing() {
         assert!(f.link.drain().is_empty(), "{how}: the window stays open");
         assert!(!s.backing_up(), "{how}");
         assert_eq!(s.state()["backup_stopped"], true);
+        assert_eq!(
+            crate::i18n::t("payroll.backup.stopped"),
+            "Posting stopped. Nothing was posted. The backup that was made is kept."
+        );
         assert!(s.upload.is_some(), "{how}: the import is kept");
         for _ in 0..3 {
             s.poll();

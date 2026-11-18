@@ -19,8 +19,9 @@
 //! Post: one key per body (a changed body — confirmation, password, tags —
 //! gets a new key); never sent again on its own. A lost answer offers
 //! "Check status" and "Try again" (same key). Overlaps ask first; a closed
-//! period asks for the closing-date password. Every send waits for a
-//! verified backup first (Q-P30h); a failed backup posts nothing.
+//! period asks for the closing-date password. Every post attempt waits for
+//! one verified backup first (Q-P30h; continuing it with the password or
+//! Post anyway reuses that backup); a failed backup posts nothing.
 //!
 //! Control-channel state: steps, counts, flags and the provider key only;
 //! never amounts, names, departments, file names or cell text.
@@ -247,6 +248,18 @@ struct BodyPrint {
 
 type LineTagPrint = (usize, usize, Option<TagId>);
 
+/// What a verified backup before posting covers (Q-P30h): the draft and
+/// its entries as posted, without the post's authorization (Post anyway,
+/// the closing-date password). Continuing the same post after the
+/// engine's question reuses the backup; a changed draft does not.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct DraftPrint {
+    id: PayrollSessionId,
+    tags: Vec<LineTagPrint>,
+    departments: Vec<(String, Option<TagId>)>,
+    token: Option<String>,
+}
+
 /// A post made by Post and held while the backup before it is made
 /// (Q-P30h). Sent exactly as made: the backup never changes the body or
 /// its key.
@@ -258,6 +271,8 @@ struct HeldPost {
     force: bool,
     password: Option<Secret>,
     key: IdempotencyKey,
+    /// The draft this post is for (what its backup covers).
+    draft: DraftPrint,
 }
 
 /// A reverse body's identity for its key (S2): the import, the reason and
@@ -370,6 +385,11 @@ pub struct PayrollImportScreen {
     /// The post waiting for that backup: exactly the body and key Post
     /// made, sent as is once the backup is made.
     held_post: Option<HeldPost>,
+    /// The draft the last verified backup was made for, kept only while
+    /// the engine's answer to that post is a question (the closing-date
+    /// password, the overlap check): continuing it sends without a second
+    /// backup. Any other answer, a stop or a failure clears it.
+    backed_up: Option<DraftPrint>,
     /// The backup failed: nothing was posted (no "post without backup").
     pub(crate) backup_failed: Option<cl_company::CompanyError>,
     /// The owner stopped the post while the backup was being made.
@@ -594,6 +614,7 @@ impl PayrollImportScreen {
             overlaps: None,
             post_job: None,
             backup_job: None,
+            backed_up: None,
             held_post: None,
             backup_failed: None,
             backup_stopped: false,
@@ -750,12 +771,23 @@ impl PayrollImportScreen {
         // QA-14: Preferences › Tags or the Tags list changed while this
         // window is open: the tag list and the rule are read again, and an
         // open Review applies a new default tag at once.
-        if self.link.bus().take(&mut self.bus).tags {
+        let changes = self.link.bus().take(&mut self.bus);
+        if changes.tags {
             self.tags_job = Some(self.read(
                 |d| Ok(d.tags.clone().unwrap_or_default()),
                 |s| async move { s.tags().list_all(&cl_api::TagFilter::default()).await },
             ));
             self.refresh_tag_rules();
+        }
+        // Q-P30h: a backup passphrase was set (Back Up): "no passphrase"
+        // no longer applies. Nothing is posted until Post is pressed.
+        if changes.backup_passphrase
+            && matches!(
+                self.backup_failed,
+                Some(cl_company::CompanyError::NoPassphrase)
+            )
+        {
+            self.backup_failed = None;
         }
         if let Some(Ok(v)) = poll(&mut self.templates_job) {
             self.templates = v;
@@ -1044,6 +1076,7 @@ impl PayrollImportScreen {
         self.force = false;
         self.password = None;
         self.overlaps = None;
+        self.backed_up = None;
         // A refusal of the whole screen stays on show.
         if self.allowed() && self.supported() {
             self.trouble = None;
@@ -1698,8 +1731,14 @@ impl PayrollImportScreen {
     /// Sends `/post` once: the gate first, then a key for this exact body,
     /// then a verified backup (Q-P30h), then the post. Every way in (Post,
     /// Post anyway, the closing-date password, Try again) comes here, so
-    /// every send has a backup just before it.
+    /// every attempt has a verified backup: one per attempt. Continuing
+    /// the same draft after the engine's question (`continuing`) reuses
+    /// the backup made for it; anything else makes a new one.
     pub(crate) fn post(&mut self) {
+        self.post_with(false);
+    }
+
+    fn post_with(&mut self, continuing: bool) {
         let Some(id) = self.upload.as_ref().map(|u| u.session) else {
             return;
         };
@@ -1737,6 +1776,12 @@ impl PayrollImportScreen {
             departments: departments.iter().map(|(k, v)| (k.clone(), *v)).collect(),
             token: token.clone(),
         };
+        let draft = DraftPrint {
+            id,
+            tags: print.tags.clone(),
+            departments: print.departments.clone(),
+            token: token.clone(),
+        };
         let key = match &self.key {
             Some((p, k)) if *p == print => k.clone(),
             _ => {
@@ -1745,7 +1790,8 @@ impl PayrollImportScreen {
                 k
             }
         };
-        self.held_post = Some(HeldPost {
+        let reuse = continuing && self.backed_up.as_ref() == Some(&draft);
+        let held = HeldPost {
             id,
             line_tags,
             departments,
@@ -1753,7 +1799,17 @@ impl PayrollImportScreen {
             force: self.force,
             password: self.password.clone(),
             key,
-        });
+            draft,
+        };
+        if reuse {
+            // The same attempt, continued: its verified backup stands.
+            self.status_answer = None;
+            self.clear_trouble();
+            self.send_post(held);
+            return;
+        }
+        self.backed_up = None;
+        self.held_post = Some(held);
         self.start_backup();
     }
 
@@ -1818,6 +1874,7 @@ impl PayrollImportScreen {
 
     fn backup_failed_now(&mut self, e: cl_company::CompanyError) {
         self.held_post = None;
+        self.backed_up = None;
         self.backup_failed = Some(e);
     }
 
@@ -1825,6 +1882,7 @@ impl PayrollImportScreen {
         match (r, self.held_post.take()) {
             (Ok(()), Some(held)) => {
                 tracing::info!(target: "payroll", "backup made before posting");
+                self.backed_up = Some(held.draft.clone());
                 self.send_post(held);
             }
             // Stopped meanwhile: the backup is kept, nothing is sent.
@@ -1844,6 +1902,7 @@ impl PayrollImportScreen {
         }
         self.backup_job = None;
         self.held_post = None;
+        self.backed_up = None;
         self.backup_stopped = true;
         true
     }
@@ -1862,6 +1921,7 @@ impl PayrollImportScreen {
             force,
             password,
             key,
+            draft: _,
         } = held;
         let auth = password.clone();
         let req = PostRequest {
@@ -1969,6 +2029,19 @@ impl PayrollImportScreen {
         if let Some(id) = self.upload.as_ref().map(|u| u.session) {
             self.set_unsettled(id, self.post_unsettled);
         }
+        // Q-P30h: the backup covers this attempt only while the engine's
+        // answer is a question the owner may continue (the closing-date
+        // password, the overlap check); any other answer ends the attempt.
+        let question = matches!(
+            r,
+            Ok(PostOutcome::NeedsConfirmation { .. })
+                | Err(ApiError::ClosedPeriod(_)
+                    | ApiError::ClosingPasswordRejected
+                    | ApiError::ClosingPasswordRateLimited { .. })
+        );
+        if !question {
+            self.backed_up = None;
+        }
         match r {
             Ok(PostOutcome::Posted { entries, .. }) => self.finish(entries),
             Ok(PostOutcome::NeedsConfirmation { overlaps }) => self.overlaps = Some(overlaps),
@@ -2049,6 +2122,7 @@ impl PayrollImportScreen {
     fn clear_backup_notice(&mut self) {
         self.backup_failed = None;
         self.backup_stopped = false;
+        self.backed_up = None;
     }
 
     fn refused(&mut self, e: &ApiError) {
@@ -2108,11 +2182,12 @@ impl PayrollImportScreen {
         self.trouble = Some(trouble);
     }
 
-    /// "Post anyway" after the overlap question: a new body, a new key.
+    /// "Post anyway" after the overlap question: a new body, a new key,
+    /// the same attempt (its backup stands, Q-P30h).
     pub(crate) fn post_anyway(&mut self) {
         self.overlaps = None;
         self.force = true;
-        self.post();
+        self.post_with(true);
     }
 
     /// The closing-date password was entered.
@@ -2124,7 +2199,8 @@ impl PayrollImportScreen {
         self.asking_password = None;
         match (self.view, self.reversing.clone()) {
             (View::History, Some((id, reason))) => self.reverse(id, &reason),
-            (View::Import, _) => self.post(),
+            // The same attempt, continued: its backup stands (Q-P30h).
+            (View::Import, _) => self.post_with(true),
             (View::History, None) => {}
         }
     }
