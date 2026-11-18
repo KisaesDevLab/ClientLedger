@@ -2037,10 +2037,18 @@ impl PayrollImportScreen {
             self.set_unsettled(id, false);
         }
         self.post_unsettled = false;
+        self.clear_backup_notice();
         self.upload = None;
         self.forget_upload();
         self.go(Step::Choose);
         self.trouble = Some(Trouble::Discarded);
+    }
+
+    /// The backup's failure or "stopped" line belongs to the Post it was
+    /// for: gone once the import is posted, gone, or the owner steps back.
+    fn clear_backup_notice(&mut self) {
+        self.backup_failed = None;
+        self.backup_stopped = false;
     }
 
     fn refused(&mut self, e: &ApiError) {
@@ -2125,6 +2133,7 @@ impl PayrollImportScreen {
         tracing::info!(target: "payroll", provider = self.provider.key(), entries = entries.len(), "payroll posted");
         self.posted = Some(entries);
         self.post_unsettled = false;
+        self.clear_backup_notice();
         if let Some(id) = self.upload.as_ref().map(|u| u.session) {
             self.set_unsettled(id, false);
         }
@@ -2334,6 +2343,7 @@ impl PayrollImportScreen {
         self.untagged = None;
         self.key = None;
         self.force = false;
+        self.clear_backup_notice();
         self.go(Step::Map);
     }
 
@@ -2355,6 +2365,7 @@ impl PayrollImportScreen {
             }
             self.step = s;
             self.clear_trouble();
+            self.clear_backup_notice();
             self.untagged = None;
         }
     }

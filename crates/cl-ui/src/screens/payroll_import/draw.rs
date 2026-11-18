@@ -1131,6 +1131,12 @@ impl PayrollImportScreen {
     /// way to stop, or why it failed with Try again. There is no way to
     /// post without it.
     fn backup_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        if self.step != Step::Preview {
+            return;
+        }
+        // After a lost answer the earlier post may have landed: never say
+        // "nothing was posted" then (Check status says which).
+        let unsettled = self.post_unsettled;
         if self.backing_up() {
             ui.add_space(6.0);
             ui.horizontal_wrapped(|ui| {
@@ -1148,14 +1154,30 @@ impl PayrollImportScreen {
         }
         if self.backup_stopped {
             ui.add_space(6.0);
-            note(ui, tokens, &t("payroll.backup.stopped"));
+            note(
+                ui,
+                tokens,
+                &t(if unsettled {
+                    "payroll.backup.stopped_unsettled"
+                } else {
+                    "payroll.backup.stopped"
+                }),
+            );
         }
         let Some(e) = &self.backup_failed else {
             return;
         };
         let no_passphrase = matches!(e, cl_company::CompanyError::NoPassphrase);
         ui.add_space(6.0);
-        warn(ui, tokens, &t("payroll.backup.failed"));
+        warn(
+            ui,
+            tokens,
+            &t(if unsettled {
+                "payroll.backup.failed_unsettled"
+            } else {
+                "payroll.backup.failed"
+            }),
+        );
         crate::screens::company::form::inline_error(ui, tokens, e);
         ui.horizontal(|ui| {
             if ui.button(t("payroll.try_again")).clicked() {

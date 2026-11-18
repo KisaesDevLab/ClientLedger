@@ -580,6 +580,36 @@ fn a_failed_backup_posts_nothing_and_try_again_posts_once() {
     assert_eq!(key_now(&s), Some(key), "the backup never changes the key");
 }
 
+/// Q-P30h: after a lost answer, Try again backs up first; a failed backup
+/// sends nothing again, keeps the outcome-unknown state (Check status, the
+/// close prompt's warning), and the notice leaves once Check status
+/// settles it.
+#[test]
+fn a_failed_backup_after_a_lost_answer_keeps_it_unsettled() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    post_now(&mut s);
+    let _ = s.post_job.take();
+    s.after_post(Err(lost()));
+    assert_eq!(posts_received(&f), 1);
+    cmd(&mut s, "dev.payroll_demo_backup_fail");
+    s.try_again();
+    s.poll();
+    assert_eq!(s.state()["backup_failed"], true);
+    assert_eq!(posts_received(&f), 1, "nothing sent again");
+    assert_eq!(s.state()["trouble"], "unknown", "Check status stays");
+    assert!(s.post_unsettled);
+    assert!(s.save_unconfirmed(), "the close prompt still warns");
+    assert!(crate::i18n::has("payroll.backup.failed_unsettled"));
+    s.check_status();
+    s.poll();
+    assert_eq!(s.step, Step::Done);
+    assert_eq!(s.state()["backup_failed"], false, "the notice leaves");
+    assert_eq!(posts_received(&f), 1);
+}
+
 /// Q-P30h: stopping while the backup is made (the button, Cancel or Esc)
 /// sends no post, even when the backup finishes afterwards; the window
 /// stays on Review and Post works again.
