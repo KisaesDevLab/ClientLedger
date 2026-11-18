@@ -1202,6 +1202,10 @@ fn main() -> std::process::ExitCode {
         ),
         ("import_transactions::undo", contract_import_transactions::undo),
         (
+            "import_transactions::owner_amount_text_reads_exactly",
+            contract_import_transactions::owner_amount_text_reads_exactly,
+        ),
+        (
             "import_transactions::unknown_refs",
             contract_import_transactions::unknown_refs,
         ),

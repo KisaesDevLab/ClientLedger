@@ -347,3 +347,54 @@ pub fn recommit(h: &Harness) {
     let (_, again) = import(h, &s, &csv);
     assert_eq!(again.status, BatchStatus::Committed);
 }
+
+/// Review B1: the desktop sends the owner's own amount text (the engine's
+/// parser decides): `$1,234.50`, `(25.50)` on an invoice line, NBSP
+/// thousands, U+2212 and a trailing `CR` in a signed journal `line_amount`,
+/// and a debit next to a `-` (the accounting zero). All read with no row
+/// problem, and the entry balances; `12,34` is a row problem, never 1234.
+pub fn owner_amount_text_reads_exactly(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = fresh_company(h, "Txn Import Text");
+    let n = names(h, &s);
+    let it = s.import_transactions();
+    let head = "group_id,type,date,number,name,due_date,memo,line_account,line_item,line_description,line_amount,line_debit,line_credit,line_tag";
+    let good = format!(
+        "{head}\r\n\
+         A,invoice,2026-03-02,1001,{c},2026-04-01,,{sales},,Design,\"$1,234.50\",,,\r\n\
+         A,invoice,2026-03-02,1001,{c},2026-04-01,,{sales},,Credit,(25.50),,,\r\n\
+         C,journal_entry,2026-03-31,,,,,{rent},,,1\u{a0}000.00,,,\r\n\
+         C,journal_entry,2026-03-31,,,,,{cash},,,\u{2212}600.00,,,\r\n\
+         C,journal_entry,2026-03-31,,,,,{cash},,,400.00CR,,,\r\n\
+         D,journal_entry,2026-03-31,,,,,{rent},,,,5.00,-,\r\n\
+         D,journal_entry,2026-03-31,,,,,{cash},,,,,5.00,\r\n",
+        c = n.customer,
+        sales = n.sales,
+        rent = n.rent,
+        cash = n.cash,
+    );
+    let up = h
+        .run(it.upload(good.as_bytes()))
+        .unwrap_or_else(|e| panic!("upload: {e}"));
+    assert!(up.problems.is_empty(), "{:?}", up.problems);
+    assert_eq!(up.documents, Some(3));
+    let _ = h.run(it.discard(up.session));
+    let bad = format!(
+        "{head}\r\nA,invoice,2026-03-02,1002,{c},2026-04-01,,{sales},,Design,\"12,34\",,,\r\n",
+        c = n.customer,
+        sales = n.sales,
+    );
+    let up = h
+        .run(it.upload(bad.as_bytes()))
+        .unwrap_or_else(|e| panic!("upload: {e}"));
+    assert!(
+        up.problems
+            .iter()
+            .any(|p| p.code == "IMPORT_AMOUNT_INVALID"),
+        "{:?}",
+        up.problems
+    );
+    let _ = h.run(it.discard(up.session));
+}
