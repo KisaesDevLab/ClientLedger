@@ -1,0 +1,37 @@
+"Bluebonnet Bakery",,,,,,,,,,
+"Journal",,,,,,,,,,
+"January 1 through June 30, 2026",,,,,,,,,,
+,"Trans #","Type","Date","Num","Name","Memo","Account","Class","Debit","Credit"
+,"1","Invoice","01/05/2026","1001","Hilltop Grocers","Wholesale order","1100 · Accounts Receivable","","2,250.00",""
+,"","","","","Hilltop Grocers","Wholesale order","4010 · Bakery Sales","","","2,250.00"
+,"","","","","","","","","2,250.00","2,250.00"
+,,,,,,,,,,
+,"2","Payment","01/20/2026","","Hilltop Grocers","","1010 · Operating Cash","","1,800.00",""
+,"","","","","Hilltop Grocers","","1100 · Accounts Receivable","","","1,800.00"
+,"","","","","","","","","1,800.00","1,800.00"
+,,,,,,,,,,
+,"3","Check","02/02/2026","501","Flour Mill Co","Flour","1010 · Operating Cash","","","1,125.75"
+,"","","","","Flour Mill Co","Flour","5010 · Ingredients","","1,125.75",""
+,"","","","","","","","","1,125.75","1,125.75"
+,,,,,,,,,,
+,"4","Credit Card Charge","02/15/2026","CC88","","Office supplies","2300 · Credit Card","","","125.50"
+,"","","","","","Office supplies","6020 · Supplies","","125.50",""
+,"","","","","","","","","125.50","125.50"
+,,,,,,,,,,
+,"5","Check","03/01/2026","502","","City Utilities","1010 · Operating Cash","","","310.20"
+,"","","","","","City Utilities","6010 · Utilities","","310.20",""
+,"","","","","","","","","310.20","310.20"
+,,,,,,,,,,
+,"6","Bill Pmt -Check","04/10/2026","503","Sugar Supply Inc","","1010 · Operating Cash","","","950.00"
+,"","","","","Sugar Supply Inc","","2010 · Accounts Payable","","950.00",""
+,"","","","","","","","","950.00","950.00"
+,,,,,,,,,,
+,"7","Deposit","05/22/2026","","","Cash sales","1010 · Operating Cash","","3,402.33",""
+,"","","","","","Cash sales","4010 · Bakery Sales","","","3,402.33"
+,"","","","","","","","","3,402.33","3,402.33"
+,,,,,,,,,,
+,"8","Bill","06/15/2026","BILL77","Sugar Supply Inc","","2010 · Accounts Payable","","","640.00"
+,"","","","","Sugar Supply Inc","Sugar","5010 · Ingredients","","640.00",""
+,"","","","","","","","","640.00","640.00"
+,,,,,,,,,,
+,"TOTAL","","","","","","","","10,603.78","10,603.78"

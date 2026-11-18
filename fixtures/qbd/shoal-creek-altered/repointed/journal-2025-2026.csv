@@ -1,0 +1,85 @@
+"Shoal Creek Landscaping",,,,,,,,,,
+"Journal",,,,,,,,,,
+"January 1, 2025 through October 27, 2026",,,,,,,,,,
+,"Trans #","Type","Date","Num","Name","Memo","Account","Class","Debit","Credit"
+,"201","Invoice","02/03/2025","1003","Brightwater HOA","Winter cleanup","1200 · Accounts Receivable","Enterprise:Commercial","5,000.00",""
+,"","","","","Brightwater HOA","Winter cleanup","4000 · Landscaping Income","Enterprise:Commercial","","5,000.00"
+,"","","","","","","","","5,000.00","5,000.00"
+,,,,,,,,,,
+,"202","Payment","02/28/2025","","Brightwater HOA","","1000 · Checking","","5,000.00",""
+,"","","","","Brightwater HOA","","1200 · Accounts Receivable","","","5,000.00"
+,"","","","","","","","","5,000.00","5,000.00"
+,,,,,,,,,,
+,"203","Check","03/03/2025","2006","Lakeside Properties LLC","March yard lease","1000 · Checking","","","1,750.00"
+,"","","","","Lakeside Properties LLC","March yard lease","6400 · Rent","","1,750.00",""
+,"","","","","","","","","1,750.00","1,750.00"
+,,,,,,,,,,
+,"204","Bill","04/14/2025","F-88","Hill Country Fuel","","2000 · Accounts Payable","","","455.18"
+,"","","","","Hill Country Fuel","Diesel","6100 · Fuel","","455.18",""
+,"","","","","","","","","455.18","455.18"
+,,,,,,,,,,
+,"205","Bill Pmt -Check","05/01/2025","2007","Hill Country Fuel","","1000 · Checking","","","455.18"
+,"","","","","Hill Country Fuel","","2000 · Accounts Payable","","455.18",""
+,"","","","","","","","","455.18","455.18"
+,,,,,,,,,,
+,"206","Bill","06/10/2025","NP-310","Native Plant Supply","","2000 · Accounts Payable","","","1,200.00"
+,"","","","","Native Plant Supply","Shrubs for stock","1300 · Inventory Asset","","1,200.00",""
+,"","","","","","","","","1,200.00","1,200.00"
+,,,,,,,,,,
+,"207","Bill Pmt -Check","07/10/2025","2008","Native Plant Supply","","1000 · Checking","","","1,200.00"
+,"","","","","Native Plant Supply","","2000 · Accounts Payable","","1,200.00",""
+,"","","","","","","","","1,200.00","1,200.00"
+,,,,,,,,,,
+,"208","Invoice","10/01/2025","1004","Mesa Verde Ranch","Fall install","1200 · Accounts Receivable","Enterprise:Residential","2,345.67",""
+,"","","","","Mesa Verde Ranch","Fall install","4000 · Landscaping Income","Enterprise:Residential","","2,345.67"
+,"","","","","","","","","2,345.67","2,345.67"
+,,,,,,,,,,
+,"209","Invoice","03/15/2026","1005","Brightwater HOA","Irrigation upgrade","1200 · Accounts Receivable","Enterprise:Commercial","6,000.00",""
+,"","","","","Brightwater HOA","Irrigation upgrade","4000 · Landscaping Income","Enterprise:Commercial","","6,000.00"
+,"","","","","","","","","6,000.00","6,000.00"
+,,,,,,,,,,
+,"210","Payment","04/15/2026","","Brightwater HOA","Partial payment on 1005","1000 · Checking","","2,500.00",""
+,"","","","","Brightwater HOA","Partial payment on 1005","1200 · Accounts Receivable","","","2,500.00"
+,"","","","","","","","","2,500.00","2,500.00"
+,,,,,,,,,,
+,"211","Credit Memo","05/01/2026","CM-7","Pecan Grove Estates:Phase 2","Plant warranty credit","1200 · Accounts Receivable","Enterprise:Residential","","1,234.00"
+,"","","","","Pecan Grove Estates:Phase 2","Plant warranty credit","4000 · Landscaping Income","Enterprise:Residential","1,234.00",""
+,"","","","","","","","","1,234.00","1,234.00"
+,,,,,,,,,,
+,"212","Payment","06/01/2026","","Riverside Café","Deposit on patio design","1000 · Checking","","300.00",""
+,"","","","","Riverside Café","Deposit on patio design","1200 · Accounts Receivable","","","300.00"
+,"","","","","","","","","300.00","300.00"
+,,,,,,,,,,
+,"213","Sales Receipt","07/04/2026","3002","Cash Customer","","1000 · Checking","","541.25",""
+,"","","","","Cash Customer","Live oak","4100 · Product Sales","Enterprise:Residential","","500.00"
+,"","","","","Cash Customer","Live oak","1300 · Inventory Asset","","","200.00"
+,"","","","","Cash Customer","Live oak","5000 · Cost of Goods Sold","","200.00",""
+,"","","","","Texas Comptroller","Sales tax","2200 · Sales Tax Payable","","","41.25"
+,"","","","","","","","","741.25","741.25"
+,,,,,,,,,,
+,"214","Paycheck","08/15/2026","2009","Avery Testworker","Avery Testworker pay 08/01-08/15","1000 · Checking","","","1,939.35"
+,"","","","","Avery Testworker","Avery Testworker gross pay","6300 · Payroll Expenses","","2,100.00",""
+,"","","","","Avery Testworker","Withholding","2100 · Payroll Liabilities","","","160.65"
+,"","","","","","","","","2,100.00","2,100.00"
+,,,,,,,,,,
+,"215","Bill","09/20/2026","F-131","Hill Country Fuel","","2000 · Accounts Payable","","","389.44"
+,"","","","","Hill Country Fuel","Diesel","6200 · Repairs","","389.44",""
+,"","","","","","","","","389.44","389.44"
+,,,,,,,,,,
+,"216","Bill","10/05/2026","NP-552","Native Plant Supply","","2000 · Accounts Payable","","","800.00"
+,"","","","","Native Plant Supply","Live oaks for stock","1300 · Inventory Asset","","800.00",""
+,"","","","","","","","","800.00","800.00"
+,,,,,,,,,,
+,"217","Bill","10/10/2026","OCT26","Lakeside Properties LLC","","2000 · Accounts Payable","","","1,750.00"
+,"","","","","Lakeside Properties LLC","October yard lease","6400 · Rent","","1,750.00",""
+,"","","","","","","","","1,750.00","1,750.00"
+,,,,,,,,,,
+,"218","Bill Pmt -Check","10/20/2026","2010","Lakeside Properties LLC","Partial payment on OCT26","1000 · Checking","","","1,000.00"
+,"","","","","Lakeside Properties LLC","Partial payment on OCT26","2000 · Accounts Payable","","1,000.00",""
+,"","","","","","","","","1,000.00","1,000.00"
+,,,,,,,,,,
+,"219","Credit","10/22/2026","VC-9","Hill Country Fuel","Fuel overcharge","2000 · Accounts Payable","","50.00",""
+,"","","","","Hill Country Fuel","Fuel overcharge","6100 · Fuel","","","50.00"
+,"","","","","","","","","50.00","50.00"
+,,,,,,,,,,
+,"TOTAL","","","","","","","","34,270.72","34,270.72"

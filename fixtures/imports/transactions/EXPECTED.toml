@@ -1,0 +1,15 @@
+# Spreadsheet transactions (P31 step 6, engine E4). Worked out by hand.
+
+[good]
+documents = "3"
+"invoice:2001" = "1545.50"
+"bill:SS-90" = "450.00"
+"journal_entry:JE-12" = "75.00"
+
+# Each bad group and the engine code it must be refused with. The whole file
+# posts nothing.
+[bad]
+B1 = "IMPORT_UNBALANCED"
+B2 = "IMPORT_UNKNOWN_REF"
+B3 = "IMPORT_MIXED_GROUP"
+B4 = "IMPORT_AMOUNT_INVALID"

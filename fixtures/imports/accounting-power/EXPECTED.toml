@@ -1,0 +1,39 @@
+# Bluebonnet Bakery: a synthetic Accounting Power export set (P31 step 7). Every
+# value was worked out by hand from these files, never read from the engine.
+# tests/imports_fixtures.rs re-sums the files in rust_decimal and checks them.
+
+[company]
+name = "Bluebonnet Bakery"
+source = "accounting_power"
+conversion_date = "2026-06-30"
+opening_tb_date = "2025-12-31"
+
+[files]
+coa = "coa"
+customers = "contacts:customer"
+vendors = "contacts:vendor"
+tb-opening = "trial_balance:post"
+gl = "gl_transactions"
+tb-reference = "trial_balance:reference"
+[totals]
+opening_tb_debits = "14300.00"
+reference_tb_debits = "19767.83"
+gl_debits = "10603.78"
+
+# The reference trial balance as of the conversion date (signed, debit
+# positive). The opening balances hold balance-sheet accounts only, so the
+# January-June activity is the whole year to date.
+[reference_tb]
+"1010" = "15316.38"
+"1100" = "2250.00"
+"2010" = "-640.00"
+"2300" = "-551.00"
+"3010" = "-10000.00"
+"3200" = "-2924.50"
+"4010" = "-5652.33"
+"5010" = "1765.75"
+"6010" = "310.20"
+"6020" = "125.50"
+
+[features]
+both_lists = "Hilltop Grocers"

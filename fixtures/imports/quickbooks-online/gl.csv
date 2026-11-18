@@ -1,0 +1,21 @@
+Bluebonnet Bakery,,,,,,,
+Journal,,,,,,,
+"January - June, 2026",,,,,,,
+Date,Transaction Type,Num,Name,Memo/Description,Account,Debit,Credit
+01/05/2026,Invoice,1001,Hilltop Grocers,Wholesale order,Accounts Receivable,"2,250.00",
+01/05/2026,Invoice,1001,Hilltop Grocers,Wholesale order,Bakery Sales,,"2,250.00"
+01/20/2026,Payment,DEP1,Hilltop Grocers,Customer payment,Operating Cash,"1,800.00",
+01/20/2026,Payment,DEP1,Hilltop Grocers,Customer payment,Accounts Receivable,,"1,800.00"
+02/02/2026,Check,CHK501,Flour Mill Co,Flour,Ingredients,"1,125.75",
+02/02/2026,Check,CHK501,Flour Mill Co,Flour,Operating Cash,,"1,125.75"
+02/15/2026,Expense,CC88,,Office supplies,Supplies,125.50,
+02/15/2026,Expense,CC88,,Office supplies,Credit Card,,125.50
+03/01/2026,Check,CHK502,,City Utilities,Utilities,310.20,
+03/01/2026,Check,CHK502,,City Utilities,Operating Cash,,310.20
+04/10/2026,Bill Payment,CHK503,Sugar Supply Inc,Pay supplier,Accounts Payable,950.00,
+04/10/2026,Bill Payment,CHK503,Sugar Supply Inc,Pay supplier,Operating Cash,,950.00
+05/22/2026,Deposit,DEP2,,Cash sales,Operating Cash,"3,402.33",
+05/22/2026,Deposit,DEP2,,Cash sales,Bakery Sales,,"3,402.33"
+06/15/2026,Bill,BILL77,Sugar Supply Inc,Sugar,Ingredients,640.00,
+06/15/2026,Bill,BILL77,Sugar Supply Inc,Sugar,Accounts Payable,,640.00
+TOTAL,,,,,,"$10,603.78","$10,603.78"

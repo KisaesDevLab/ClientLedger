@@ -1,0 +1,7 @@
+group_id,type,date,number,name,due_date,memo,line_account,line_item,line_description,line_amount,line_debit,line_credit,line_tag
+G1,invoice,2026-07-01,2001,Hilltop Grocers,2026-07-31,July order,4010,,Bread,1200.00,,,Wholesale
+G1,invoice,2026-07-01,2001,Hilltop Grocers,2026-07-31,July order,4010,,Pastries,345.50,,,Wholesale
+G2,bill,2026-07-03,SS-90,Sugar Supply Inc,2026-08-02,Sugar,5010,,Cane sugar,410.25,,,
+G2,bill,2026-07-03,SS-90,Sugar Supply Inc,2026-08-02,Sugar,6020,,Bags,39.75,,,
+G3,journal_entry,2026-07-05,JE-12,,,Reclass supplies,6020,,Reclass,,75.00,,
+G3,journal_entry,2026-07-05,JE-12,,,Reclass supplies,6010,,Reclass,,,75.00,

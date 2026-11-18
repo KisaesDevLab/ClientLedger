@@ -1,0 +1,9 @@
+"Shoal Creek Landscaping",,,,,,,
+"Open Invoices",,,,,,,
+"As of October 27, 2026",,,,,,,
+,"Type","Date","Num","Name","Terms","Due Date","Open Balance"
+,"Invoice","03/15/2026","1005","Brightwater HOA","Net 30","04/14/2026","3,500.00"
+,"Invoice","10/01/2025","1004","Mesa Verde Ranch","Net 30","10/31/2025","2,345.67"
+,"Credit Memo","05/01/2026","CM-7","Pecan Grove Estates:Phase 2","","","(1,234.00)"
+,"Payment","06/01/2026","","Riverside Café","","","-300.00"
+,"TOTAL","","","","","","4,311.67"

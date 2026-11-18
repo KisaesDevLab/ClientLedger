@@ -1,0 +1,20 @@
+"Shoal Creek Landscaping",,
+"Trial Balance",,
+"As of October 27, 2026",,
+,"Debit","Credit"
+"1000 · Checking","26,684.35",
+"1200 · Accounts Receivable","4,311.67",
+"1300 · Inventory Asset","3,400.00",
+"1500 · Equipment","15,000.00",
+"2000 · Accounts Payable",,"1,889.44"
+"2100 · Payroll Liabilities",,"160.65"
+"2200 · Sales Tax Payable",,"41.25"
+"3000 · Opening Balance Equity",,"30,000.00"
+"3900 · Retained Earnings",,"16,428.12"
+"4000 · Landscaping Income",,"4,766.00"
+"4100 · Product Sales",,"500.00"
+"5000 · Cost of Goods Sold","200.00",
+"6100 · Fuel","339.44",
+"6300 · Payroll Expenses","2,100.00",
+"6400 · Rent","1,750.00",
+"TOTAL","53,785.46","53,785.46"

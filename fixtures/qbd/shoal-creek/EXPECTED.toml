@@ -1,0 +1,90 @@
+# Shoal Creek Landscaping: a synthetic QuickBooks Desktop export set (P31).
+# Every value below was worked out by hand from the files in this folder,
+# never read from the engine. Amounts are exact decimal strings; account
+# balances are signed, debit positive. tests/imports_fixtures.rs re-sums the
+# files in rust_decimal and checks them against these values.
+
+[company]
+name = "Shoal Creek Landscaping"
+conversion_date = "2026-10-27"
+fiscal_year_start_month = "1"
+# Q-142 "two years plus opening balances": the first day of the fiscal year
+# two years before the conversion's fiscal year, and the day before it.
+history_from_two_years = "2024-01-01"
+opening_tb_date = "2023-12-31"
+
+[files]
+account-list = "coa"
+customer-list = "contacts:customer"
+vendor-list = "contacts:vendor"
+other-names = "contacts:other"
+item-list = "items"
+inventory-valuation = "inventory_valuation"
+tb-opening-2023-12-31 = "trial_balance:post"
+tb-2026-10-27 = "trial_balance:reference"
+journal-2024 = "gl_transactions"
+journal-2025-2026 = "gl_transactions"
+open-invoices = "open_invoices"
+unpaid-bills = "unpaid_bills"
+
+[totals]
+opening_tb_debits = "73500.00"
+reference_tb_debits = "53785.46"
+journal-2024_debits = "23692.74"
+journal-2025-2026_debits = "34270.72"
+open_invoices = "4311.67"
+unpaid_bills = "1889.44"
+inventory_valuation = "3400.00"
+# Net income by year (credits minus debits on income and expense accounts).
+net_income_2023 = "5000.00"
+net_income_2024 = "3587.63"
+net_income_2025 = "5140.49"
+
+# The reference trial balance as of the conversion date.
+[reference_tb]
+"1000" = "26684.35"
+"1200" = "4311.67"
+"1300" = "3400.00"
+"1500" = "15000.00"
+"2000" = "-1889.44"
+"2100" = "-160.65"
+"2200" = "-41.25"
+"3000" = "-30000.00"
+"3900" = "-16428.12"
+"4000" = "-4766.00"
+"4100" = "-500.00"
+"5000" = "200.00"
+"6100" = "339.44"
+"6300" = "2100.00"
+"6400" = "1750.00"
+
+[open_invoices]
+"1005" = "3500.00"
+"1004" = "2345.67"
+"CM-7" = "-1234.00"
+"payment:Riverside Café" = "-300.00"
+
+[unpaid_bills]
+"F-131" = "389.44"
+"VC-9" = "-50.00"
+"OCT26" = "750.00"
+"NP-552" = "800.00"
+
+[inventory_valuation]
+"Live Oak 15gal" = "1125.00"
+"Mulch (bag)" = "325.00"
+"Native Shrub 3gal" = "1950.00"
+
+# What the set covers (plan §3); the test finds each in the files.
+[features]
+latin1_name = "Riverside Café"
+both_lists = "Native Plant Supply"
+class = "Enterprise:Commercial"
+customer_job = "Pecan Grove Estates:Phase 2"
+partial_invoice = "1005"
+credit_memo = "CM-7"
+unapplied_payment = "Riverside Café"
+parenthesized_amount = "(1,234.00)"
+dollar_amount = "$1,125.00"
+inactive_with_open_item = "Mesa Verde Ranch"
+paycheck_employee = "Avery Testworker"

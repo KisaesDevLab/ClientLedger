@@ -1,0 +1,11 @@
+Account Number,Account Name,Account Type,Detail Type,Description,Parent Account Number
+1010,Operating Cash,Bank,Checking,,
+1100,Accounts Receivable,Accounts Receivable,,,
+2010,Accounts Payable,Accounts Payable,,,
+2300,Credit Card,Credit Card,,,
+3010,Owner's Equity,Equity,,,
+3200,Retained Earnings,Equity,,,
+4010,Bakery Sales,Income,,,
+5010,Ingredients,Cost of Goods Sold,,,
+6010,Utilities,Expense,,,
+6020,Supplies,Expense,,,

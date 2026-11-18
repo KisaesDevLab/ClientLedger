@@ -1,0 +1,16 @@
+"Shoal Creek Landscaping",,
+"Trial Balance",,
+"As of December 31, 2023",,
+,"Debit","Credit"
+"1000 · Checking","20,000.00",
+"1200 · Accounts Receivable","1,500.00",
+"1300 · Inventory Asset","2,000.00",
+"1500 · Equipment","15,000.00",
+"2000 · Accounts Payable",,"800.00"
+"3000 · Opening Balance Equity",,"30,000.00"
+"3900 · Retained Earnings",,"2,700.00"
+"4000 · Landscaping Income",,"40,000.00"
+"6100 · Fuel","3,000.00",
+"6300 · Payroll Expenses","25,000.00",
+"6400 · Rent","7,000.00",
+"TOTAL","73,500.00","73,500.00"

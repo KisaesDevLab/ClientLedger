@@ -1,0 +1,6 @@
+,"Item","Description","Type","Account","Asset Account","COGS Account","Price","Cost","Active Status"
+,"Holiday Lighting","Seasonal lighting install","Service","4000 · Landscaping Income","","","150.00","0.00","Inactive"
+,"Lawn Maintenance","Weekly lawn service","Service","4000 · Landscaping Income","","","85.00","0.00","Active"
+,"Live Oak 15gal","15 gallon live oak","Inventory Part","4100 · Product Sales","1300 · Inventory Asset","5000 · Cost of Goods Sold","249.00","125.00","Active"
+,"Mulch (bag)","Hardwood mulch, 2 cu ft","Inventory Part","4100 · Product Sales","1300 · Inventory Asset","5000 · Cost of Goods Sold","5.49","2.50","Active"
+,"Native Shrub 3gal","3 gallon native shrub","Inventory Part","4100 · Product Sales","1300 · Inventory Asset","5000 · Cost of Goods Sold","29.95","16.25","Active"
