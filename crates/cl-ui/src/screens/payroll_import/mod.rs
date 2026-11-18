@@ -91,6 +91,19 @@ pub fn open_history_unposted() {
         .unwrap_or_else(std::sync::PoisonError::into_inner) = true;
 }
 
+/// Drafts whose post's answer was lost (QA-15, B1): kept across windows so
+/// History offers "Check status" and never Discard for them until a read
+/// shows them posted or gone. Ids only, per company link (the link's
+/// address: one open company, and tests' demo links never meet).
+static UNSETTLED: std::sync::Mutex<BTreeSet<(usize, PayrollSessionId)>> =
+    std::sync::Mutex::new(BTreeSet::new());
+
+fn unsettled() -> std::sync::MutexGuard<'static, BTreeSet<(usize, PayrollSessionId)>> {
+    UNSETTLED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn take_history_unposted() -> bool {
     std::mem::take(
         &mut *HISTORY_UNPOSTED
@@ -157,6 +170,14 @@ pub(crate) enum Trouble {
     Restricted,
     Unsupported,
     EngineDown,
+    /// The books stopped before the post was sent (QA-15): nothing was
+    /// posted; Post may be pressed again once they run.
+    NotSent,
+    /// The books are running again after `EngineDown` or `NotSent`
+    /// (`post`: it was the post that wasn't sent).
+    EngineBack {
+        post: bool,
+    },
     FileUnreadable,
     /// 404 on post or Check status: the import was discarded (another
     /// window, History or Home); nothing was posted.
@@ -203,6 +224,9 @@ impl Trouble {
             Trouble::Restricted => "restricted",
             Trouble::Unsupported => "unsupported",
             Trouble::EngineDown => "engine_down",
+            Trouble::NotSent => "not_sent",
+            Trouble::EngineBack { post: true } => "engine_back_post",
+            Trouble::EngineBack { post: false } => "engine_back",
             Trouble::FileUnreadable => "file_unreadable",
             Trouble::Discarded => "discarded",
             Trouble::Other => "other",
@@ -262,6 +286,11 @@ pub struct PayrollImportScreen {
     pub(crate) period_problem: Option<PeriodProblem>,
     upload_job: Option<Job<UploadOutcome>>,
     pub(crate) upload: Option<UploadOutcome>,
+    /// The posted imports, read when the engine says this payroll may be
+    /// one of them, to name the earlier post's date (QA-12). A failed read
+    /// only leaves the warning undated.
+    prior_job: Option<Job<SessionPage>>,
+    pub(crate) prior: Vec<cl_api::payroll::SessionSummary>,
     // Map.
     templates_job: Option<Job<Vec<PayrollTemplate>>>,
     templates: Vec<PayrollTemplate>,
@@ -302,6 +331,11 @@ pub struct PayrollImportScreen {
     pub(crate) preview: Option<Preview>,
     pub(crate) plan: TagPlan,
     pub(crate) untagged: Option<UntaggedLine>,
+    /// The company's tag rule and default tag as last read (QA-14): on
+    /// the Check and Review steps, on Post and when Preferences change.
+    pub(crate) rules: cl_model::lists::tags::TagRules,
+    /// Change notices: a tag or tag-option change re-reads the rules.
+    bus: crate::data_bus::Subscription,
     // Post.
     key: Option<(BodyPrint, IdempotencyKey)>,
     pub(crate) force: bool,
@@ -477,7 +511,10 @@ impl PayrollImportScreen {
     #[must_use]
     pub fn new(link: Arc<CompanyLink>, today: CalendarDate) -> PayrollImportScreen {
         let group = link.group().and_then(Result::ok);
+        let bus = link.bus().subscribe();
         let mut s = PayrollImportScreen {
+            rules: cl_model::lists::tags::TagRules::default(),
+            bus,
             link,
             group,
             today,
@@ -493,6 +530,8 @@ impl PayrollImportScreen {
             period_problem: None,
             upload_job: None,
             upload: None,
+            prior_job: None,
+            prior: Vec::new(),
             templates_job: None,
             templates: Vec::new(),
             template_job: None,
@@ -660,6 +699,7 @@ impl PayrollImportScreen {
     /// Takes every answer that arrived.
     #[allow(clippy::too_many_lines)]
     pub(crate) fn poll(&mut self) {
+        self.engine_back();
         if let Some(paths) = crate::widgets::file_picker::poll(&mut self.pick_rx)
             && let Some(p) = paths.into_iter().next()
         {
@@ -679,6 +719,16 @@ impl PayrollImportScreen {
         }
         if let Some(Ok(v)) = poll(&mut self.tags_job) {
             self.tags = v;
+        }
+        // QA-14: Preferences › Tags or the Tags list changed while this
+        // window is open: the tag list and the rule are read again, and an
+        // open Review applies a new default tag at once.
+        if self.link.bus().take(&mut self.bus).tags {
+            self.tags_job = Some(self.read(
+                |d| Ok(d.tags.clone().unwrap_or_default()),
+                |s| async move { s.tags().list_all(&cl_api::TagFilter::default()).await },
+            ));
+            self.refresh_tag_rules();
         }
         if let Some(Ok(v)) = poll(&mut self.templates_job) {
             self.templates = v;
@@ -705,6 +755,9 @@ impl PayrollImportScreen {
                 self.line_accounts.entry(k).or_insert(a);
             }
             self.chart_rows = rows;
+        }
+        if let Some(r) = poll(&mut self.prior_job) {
+            self.prior = r.map(|p| p.sessions).unwrap_or_default();
         }
         if let Some(r) = poll(&mut self.upload_job) {
             match r {
@@ -784,6 +837,22 @@ impl PayrollImportScreen {
                         self.password = None;
                         self.trouble = None;
                     }
+                    // QA-15: a draft whose post's answer was lost is
+                    // settled once History shows it posted, reversed or
+                    // gone (a list filtered to drafts says nothing of the
+                    // others). This window's own draft settles through its
+                    // own Check status.
+                    if !self.unposted_only {
+                        let own = self.upload.as_ref().map(|u| u.session);
+                        let me = self.link_key();
+                        unsettled().retain(|(link, id)| {
+                            *link != me
+                                || Some(*id) == own
+                                || p.sessions
+                                    .iter()
+                                    .any(|s| s.id == *id && s.status.is_unposted_draft())
+                        });
+                    }
                     self.history = Some(p);
                 }
                 Err(e) => self.trouble = Some(Trouble::of(&e)),
@@ -837,6 +906,26 @@ impl PayrollImportScreen {
         self.step = step;
         self.visited.insert(step);
         self.clear_trouble();
+        if matches!(step, Step::Check | Step::Preview) {
+            self.refresh_tag_rules();
+        }
+    }
+
+    /// Reads the company's tag rule and default tag again (QA-14). Lines
+    /// the owner tagged by hand keep their tag; the others take the new
+    /// default. A shown "add a tag" refusal is worked out again.
+    pub(crate) fn refresh_tag_rules(&mut self) {
+        self.rules = self.link.tag_rules();
+        self.plan.default_tag = self.rules.default_tag;
+        if self.untagged.is_some() {
+            self.untagged = self.plan.gate(self.rules.every_line).err();
+        }
+    }
+
+    /// The tag rule is on and no default tag fills the lines: the Check
+    /// step says tags are still needed (QA-14).
+    pub(crate) fn tags_still_needed(&self) -> bool {
+        self.rules.every_line && self.rules.default_tag.is_none()
     }
 
     /// Clears the shown problem, except a post whose answer was lost: its
@@ -910,6 +999,7 @@ impl PayrollImportScreen {
         self.release_upload();
         self.post_unsettled = false;
         self.status_answer = None;
+        self.prior.clear();
         self.file_departments = None;
         self.departments_truncated = false;
         self.preview = None;
@@ -944,6 +1034,70 @@ impl PayrollImportScreen {
                 ))
             )
     }
+
+    /// Reads the posted imports to find the earlier post of this payroll
+    /// (QA-12). Not part of `busy`; a failure leaves the text undated.
+    fn look_up_prior(&mut self) {
+        if self.prior_job.is_some() {
+            return;
+        }
+        self.prior_job = Some(self.read(
+            |d| Ok(d.payroll.sessions(Some(SessionStatus::Posted))),
+            |s| async move { s.payroll().sessions_all(Some(SessionStatus::Posted)).await },
+        ));
+    }
+
+    /// When the earlier post of this payroll was made (engine text), if it
+    /// is known (QA-12): the refusal's own date; else its earlier import by
+    /// id; else the one posted import with this upload's run (provider and
+    /// run key, the engine's rule) or, for the same file, its file hash.
+    /// Several or none: `None` (the undated text; never a guess).
+    pub(crate) fn prior_posted_at(&self) -> Option<String> {
+        if let Some(Trouble::Refused(
+            PayrollRefusal::DuplicateFile { prior, posted_at }
+            | PayrollRefusal::DuplicateRun { prior, posted_at },
+        )) = &self.trouble
+        {
+            if posted_at.is_some() {
+                return posted_at.clone();
+            }
+            if let Some(id) = prior {
+                return self
+                    .prior
+                    .iter()
+                    .find(|s| s.id == *id)
+                    .and_then(|s| s.posted_at.clone());
+            }
+        }
+        let u = self.upload.as_ref()?;
+        let posted = |s: &&cl_api::payroll::SessionSummary| {
+            s.status == SessionStatus::Posted && s.id != u.session
+        };
+        let one = |v: Vec<&cl_api::payroll::SessionSummary>| match v.as_slice() {
+            [s] => s.posted_at.clone(),
+            _ => None,
+        };
+        if u.is_duplicate_by_key && u.run_key.is_some() && u.detected_provider.is_some() {
+            return one(
+                self.prior
+                    .iter()
+                    .filter(posted)
+                    .filter(|s| s.run_key == u.run_key && s.provider == u.detected_provider)
+                    .collect(),
+            );
+        }
+        if u.is_duplicate && u.file_hash.is_some() {
+            return one(
+                self.prior
+                    .iter()
+                    .filter(posted)
+                    .filter(|s| s.file_hash == u.file_hash)
+                    .collect(),
+            );
+        }
+        None
+    }
+
     /// The chosen file doesn't look like the chosen service's (QA-11): the
     /// engine read it as another service's, or the built-in layout's
     /// columns aren't in it. Generic files never warn.
@@ -1017,7 +1171,11 @@ impl PayrollImportScreen {
     fn after_upload(&mut self, u: UploadOutcome) {
         tracing::info!(target: "payroll", provider = self.provider.key(), rows = u.row_count, "payroll file read");
         let headers = u.headers.clone();
+        let duplicate = u.is_duplicate || u.is_duplicate_by_key;
         self.upload = Some(u);
+        if duplicate {
+            self.look_up_prior();
+        }
         if self.provider.mode() == FileMode::Prebuilt {
             self.layout_choice = Some(LayoutChoice::NotNeeded);
             self.load_descriptions();
@@ -1489,7 +1647,8 @@ impl PayrollImportScreen {
                 })
             })
             .collect();
-        self.plan = TagPlan::new(lines, self.link.tag_rules().default_tag);
+        self.rules = self.link.tag_rules();
+        self.plan = TagPlan::new(lines, self.rules.default_tag);
         self.untagged = None;
         self.preview = Some(p);
         // A refusal that made us read the entries again stays on show.
@@ -1511,8 +1670,10 @@ impl PayrollImportScreen {
         if self.post_job.is_some() {
             return;
         }
-        let require = self.link.tag_rules().every_line;
-        let tags = match self.plan.gate(require) {
+        // QA-14: the rule and default as they are now (Preferences may
+        // have changed since Review opened).
+        self.refresh_tag_rules();
+        let tags = match self.plan.gate(self.rules.every_line) {
             Ok(t) => t,
             Err(u) => {
                 self.untagged = Some(u);
@@ -1620,6 +1781,20 @@ impl PayrollImportScreen {
             self.load_history();
             return;
         }
+        self.check_post_status();
+    }
+
+    /// History's "Check status" on a draft whose post's answer was lost
+    /// (QA-15): this window's own draft asks the engine about it (as the
+    /// wizard does); another's reads History again, which settles it.
+    pub(crate) fn check_draft_status(&mut self, id: PayrollSessionId) {
+        if self.upload.as_ref().is_some_and(|u| u.session == id) && self.post_unsettled {
+            self.check_post_status();
+        }
+        self.load_history();
+    }
+
+    fn check_post_status(&mut self) {
         let Some(id) = self.upload.as_ref().map(|u| u.session) else {
             return;
         };
@@ -1640,13 +1815,66 @@ impl PayrollImportScreen {
         // Only a lost answer leaves the post unsettled; any other answer
         // (posted, a question, a refusal) is the engine's definite word.
         self.post_unsettled = matches!(r, Err(ApiError::OutcomeUnknown { .. }));
+        if let Some(id) = self.upload.as_ref().map(|u| u.session) {
+            self.set_unsettled(id, self.post_unsettled);
+        }
         match r {
             Ok(PostOutcome::Posted { entries, .. }) => self.finish(entries),
             Ok(PostOutcome::NeedsConfirmation { overlaps }) => self.overlaps = Some(overlaps),
             // payroll-import-review-v1: a discard that won the race with
             // this post answers the waiting post 404; nothing was posted.
             Err(ApiError::NotFound { .. }) => self.import_gone(),
+            // QA-15: the books were down before the post went out (cl-api
+            // answers OutcomeUnknown once an attempt may have reached
+            // them): nothing was posted, Post may be pressed again.
+            Err(ApiError::EngineUnavailable { .. }) => {
+                self.trouble = Some(Trouble::NotSent);
+            }
             Err(e) => self.refused(&e),
+        }
+    }
+
+    fn link_key(&self) -> usize {
+        Arc::as_ptr(&self.link) as usize
+    }
+
+    /// Marks (or clears) draft `id` as having a post whose answer was lost.
+    fn set_unsettled(&self, id: PayrollSessionId, on: bool) {
+        let k = (self.link_key(), id);
+        if on {
+            unsettled().insert(k);
+        } else {
+            unsettled().remove(&k);
+        }
+    }
+
+    /// A post's answer for draft `id` was lost (this window or another).
+    pub(crate) fn is_unsettled(&self, id: PayrollSessionId) -> bool {
+        unsettled().contains(&(self.link_key(), id))
+    }
+
+    /// The books are running (the status bar's signal; the demo always
+    /// is). Without a supervisor to ask, the next successful call clears
+    /// the message instead.
+    pub(crate) fn engine_running(&self) -> bool {
+        if self.link.is_demo() {
+            return true;
+        }
+        self.link
+            .supervisor()
+            .is_some_and(|s| matches!(s.status().state, cl_host::HostState::Running))
+    }
+
+    /// QA-15: "the books aren't running" is replaced once they are, by a
+    /// line saying what to do (whatever step it showed on).
+    fn engine_back(&mut self) {
+        let post = match self.trouble {
+            Some(Trouble::NotSent) => true,
+            Some(Trouble::EngineDown) => false,
+            _ => return,
+        };
+        if self.engine_running() {
+            self.trouble = Some(Trouble::EngineBack { post });
         }
     }
 
@@ -1654,6 +1882,9 @@ impl PayrollImportScreen {
     /// posted. This window lets go of it without a DELETE and starts over
     /// at the file step.
     fn import_gone(&mut self) {
+        if let Some(id) = self.upload.as_ref().map(|u| u.session) {
+            self.set_unsettled(id, false);
+        }
         self.post_unsettled = false;
         self.upload = None;
         self.forget_upload();
@@ -1700,6 +1931,21 @@ impl PayrollImportScreen {
             self.key = None;
             self.start_preview();
         }
+        // QA-12: a refusal without its date names the earlier import: read
+        // the posted imports to find when it was posted.
+        if let Trouble::Refused(
+            PayrollRefusal::DuplicateFile {
+                prior: Some(_),
+                posted_at: None,
+            }
+            | PayrollRefusal::DuplicateRun {
+                prior: Some(_),
+                posted_at: None,
+            },
+        ) = &trouble
+        {
+            self.look_up_prior();
+        }
         self.trouble = Some(trouble);
     }
 
@@ -1728,6 +1974,9 @@ impl PayrollImportScreen {
         tracing::info!(target: "payroll", provider = self.provider.key(), entries = entries.len(), "payroll posted");
         self.posted = Some(entries);
         self.post_unsettled = false;
+        if let Some(id) = self.upload.as_ref().map(|u| u.session) {
+            self.set_unsettled(id, false);
+        }
         self.upload_done();
         self.password = None;
         self.trouble = None;
@@ -1864,7 +2113,11 @@ impl PayrollImportScreen {
     /// History may discard `id`: not this window's own draft while its post
     /// is out or its answer was lost (B1).
     pub(crate) fn may_discard_session(&self, id: PayrollSessionId) -> bool {
-        self.upload.as_ref().is_none_or(|u| u.session != id) || self.may_discard()
+        if self.upload.as_ref().is_some_and(|u| u.session == id) {
+            return self.may_discard();
+        }
+        // QA-15: another window's post to it was lost; it may still post.
+        !self.is_unsettled(id)
     }
 
     /// Discards an unposted draft (Cancel, History, Home).
@@ -1936,7 +2189,8 @@ impl PayrollImportScreen {
     }
 
     pub(crate) fn back(&mut self) {
-        if self.busy() || self.in_flight() {
+        // QA-15: after a lost answer Back waits too, until Check status.
+        if self.busy() || self.in_flight() || self.post_unsettled {
             return;
         }
         if let Some(s) = self.step.back(self.skip_map()) {
@@ -1954,7 +2208,9 @@ impl PayrollImportScreen {
     /// after a post's answer was lost: that draft is kept for History's
     /// "Check status" (B1).
     pub(crate) fn cancel(&mut self) {
-        if self.in_flight() {
+        // QA-15: Cancel is off while a post is out or its answer was lost
+        // (Check status settles it; closing the tab keeps the import).
+        if self.in_flight() || self.post_unsettled {
             return;
         }
         // QA-8: a chosen file or an import under way asks first, as the
@@ -2066,12 +2322,25 @@ impl Screen for PayrollImportScreen {
         false
     }
 
+    /// QA-13: the payroll wizard's own question (not the bank import's).
+    fn close_words(&self) -> Option<crate::windows::CloseWords> {
+        Some(crate::windows::CloseWords {
+            message: t("payroll.close_prompt"),
+            close: t("payroll.close_prompt.discard"),
+            keep: t("payroll.close_prompt.keep"),
+        })
+    }
+
     fn ui(&mut self, ui: &mut eframe::egui::Ui) {
         self.take_history_request();
         self.poll();
-        if self.busy() {
+        if self.busy() || self.prior_job.is_some() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
+        } else if matches!(self.trouble, Some(Trouble::EngineDown | Trouble::NotSent)) {
+            // QA-15: notice the books coming back without any input.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(500));
         }
         self.draw(ui);
     }
@@ -2260,6 +2529,14 @@ impl Screen for PayrollImportScreen {
         // QA-6, QA-11 (flags only).
         s["posted_duplicate"] = json!(self.posted_duplicate());
         s["service_mismatch"] = json!(self.service_mismatch());
+        // QA-12, QA-14, QA-15 (flags and counts only).
+        s["prior_posted_known"] = json!(self.prior_posted_at().is_some());
+        s["tags_still_needed"] = json!(self.tags_still_needed());
+        s["unconfirmed_drafts"] = json!(
+            self.history
+                .as_ref()
+                .map_or(0, |h| h.sessions.iter().filter(|x| self.is_unsettled(x.id)).count())
+        );
         s
     }
 }

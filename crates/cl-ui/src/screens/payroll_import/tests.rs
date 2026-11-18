@@ -236,11 +236,10 @@ fn the_tag_gate_refuses_when_required_and_posts_when_off_or_defaulted() {
         .link
         .demo_state()
         .expect("demo")
-        .tags
-        .clone()
-        .unwrap_or_default()
+        .tags_mut()
         .first()
         .map(|t| t.id);
+    assert!(first_tag.is_some(), "the demo has tags");
     {
         let mut d = f.link.demo_state().expect("demo");
         d.require_tag_every_line = true;
@@ -254,9 +253,10 @@ fn the_tag_gate_refuses_when_required_and_posts_when_off_or_defaulted() {
     assert_eq!(s.step, Step::Preview, "refused before /post");
     assert!(s.untagged.is_some(), "names the line");
     assert_eq!(s.posts_sent, 0);
-    // Gate on with a default tag: it fills the lines and posts.
+    // Gate on with a default tag: it fills the lines and posts (Post
+    // reads the company's default again, QA-14).
     if let Some(tag) = first_tag {
-        s.plan.default_tag = Some(tag);
+        f.link.demo_state().expect("demo").default_tag = Some(tag);
         s.next();
         s.poll();
         assert_eq!(s.step, Step::Done);
@@ -571,8 +571,8 @@ fn a_post_in_flight_is_never_discarded() {
     assert_eq!(f.link.demo_state().expect("demo").payroll.unposted(), 1);
 }
 
-/// B1: after a lost answer, Cancel, Back to the file step and closing keep
-/// the draft (History's Check status settles it).
+/// B1, QA-15: after a lost answer Cancel and Back do nothing (Check status
+/// first), and closing keeps the draft (History's Check status settles it).
 #[test]
 fn a_lost_answer_keeps_the_draft_on_cancel_back_and_close() {
     for how in ["cancel", "back", "close", "check_then_close"] {
@@ -586,13 +586,18 @@ fn a_lost_answer_keeps_the_draft_on_cancel_back_and_close() {
         assert!(!s.in_flight());
         assert!(s.save_unconfirmed(), "{how}: the close prompt warns");
         match how {
-            "cancel" => s.cancel(),
+            "cancel" => {
+                let _ = f.link.drain();
+                s.cancel();
+                assert!(f.link.drain().is_empty(), "{how}: Cancel is off");
+                assert!(s.upload.is_some(), "{how}");
+            }
             "back" => {
                 for _ in 0..4 {
                     s.back();
                 }
-                assert_eq!(s.step, Step::Choose, "{how}");
-                assert!(s.upload.is_none(), "{how}: this window lets go");
+                assert_eq!(s.step, Step::Preview, "{how}: Back is off");
+                assert!(s.upload.is_some(), "{how}: still this window's");
             }
             "check_then_close" => {
                 s.check_status();
@@ -1129,4 +1134,189 @@ fn cancel_asks_and_a_posted_run_keeps_post_off() {
     }
     assert!(s.posted_duplicate());
     assert!(!s.can_next(), "Post stays off for a posted run");
+}
+
+/// QA-12: when the upload says this payroll was posted before, the
+/// warnings and a refusal without its own date name the earlier post's
+/// local date, found in the posted imports; History shows it too.
+#[test]
+fn a_posted_duplicate_says_when_it_was_posted() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_onpay_gl_summary");
+    next_to(&mut s, Step::Done);
+    let first = f.link.demo_state().expect("demo").payroll.sessions(None).sessions[0].clone();
+    let day = super::draw::posted_day(first.posted_at.as_deref().expect("posted at"))
+        .map(show_date)
+        .expect("a date");
+    cmd(&mut s, "dev.payroll_start_over");
+    cmd(&mut s, "dev.payroll_demo_file_onpay_gl_summary");
+    next_to(&mut s, Step::Accounts);
+    s.poll(); // the posted imports' read (the next frame)
+    // The same file: the earlier post is found by its file hash.
+    let text = s.duplicate_text().expect("warned");
+    assert!(text.contains(&day), "{text}");
+    // The same run (the engine's run key): Post stays off and says when.
+    if let Some(u) = &mut s.upload {
+        u.is_duplicate_by_key = true;
+    }
+    let text = s.duplicate_text().expect("warned");
+    assert!(text.contains(&day) && text.contains("already posted on"), "{text}");
+    // Two posted imports of the run: no guess, the undated text.
+    let mut twin = first.clone();
+    twin.id = PayrollSessionId::parse("00000000-0000-4000-8000-0000000000aa").expect("id");
+    s.prior.push(twin);
+    assert_eq!(s.duplicate_text(), Some(t("payroll.duplicate_posted")));
+    s.prior.retain(|p| p.id == first.id);
+    // A refusal naming the earlier import but no date: its date is looked up.
+    s.trouble = Some(Trouble::Refused(PayrollRefusal::DuplicateRun {
+        prior: Some(first.id),
+        posted_at: None,
+    }));
+    assert_eq!(s.prior_posted_at(), first.posted_at);
+    // History: "Posted <date>" on the posted row (the demo's posted time).
+    assert!(
+        crate::i18n::t_with("payroll.status.posted_on", &[("date", &day)])
+            .starts_with("Posted ")
+    );
+}
+
+/// QA-14: with "Require a tag on every line" on and no default tag, the
+/// Check step says tags are still needed and Post is refused; a default
+/// tag set in Preferences while Review is open fills the lines at once
+/// (no Back/Next), and a tag the owner picked by hand stays.
+#[test]
+fn a_default_tag_set_while_review_is_open_applies_at_once() {
+    let f = fixture();
+    let tags = f.link.demo_state().expect("demo").tags_mut().clone();
+    let (Some(default), Some(picked)) = (tags.first().map(|t| t.id), tags.get(1).map(|t| t.id))
+    else {
+        panic!("the demo has two tags");
+    };
+    {
+        let mut d = f.link.demo_state().expect("demo");
+        d.require_tag_every_line = true;
+        d.default_tag = None;
+    }
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Check);
+    assert!(s.tags_still_needed(), "the Check step says tags are needed");
+    next_to(&mut s, Step::Preview);
+    s.next();
+    s.poll();
+    assert!(s.untagged.is_some(), "refused: lines without a tag");
+    assert_eq!(s.posts_sent, 0);
+    // The owner tags one line by hand.
+    s.plan.set(0, 0, Some(picked));
+    // Preferences › Tags saves a default tag (it publishes Tags).
+    f.link.demo_state().expect("demo").default_tag = Some(default);
+    f.link.bus().publish(crate::data_bus::Change::Tags);
+    s.poll();
+    assert_eq!(s.step, Step::Preview, "still on Review");
+    assert_eq!(s.plan.default_tag, Some(default), "applied without Back/Next");
+    assert!(s.untagged.is_none(), "the refusal is worked out again");
+    let first = s.plan.lines[0].clone();
+    assert_eq!(s.plan.final_tag(&first), Some(picked), "the hand-picked tag stays");
+    let other = s.plan.lines[1].clone();
+    assert_eq!(s.plan.final_tag(&other), Some(default));
+    assert!(!s.tags_still_needed());
+    s.next();
+    s.poll();
+    assert_eq!(s.step, Step::Done, "posts with every line tagged");
+}
+
+/// QA-15, order 1: the books stop BEFORE the post is sent (cl-api answers
+/// EngineUnavailable): nothing was posted, the window says so, and once
+/// the books run again the message is replaced and Post posts once.
+#[test]
+fn engine_down_before_the_post_is_sent_lets_post_again() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    s.posts_sent += 1;
+    s.after_post(Err(ApiError::EngineUnavailable { permanent: false }));
+    assert_eq!(s.state()["trouble"], "not_sent");
+    assert!(!s.post_unsettled, "nothing was sent");
+    let id = s.upload.as_ref().map(|u| u.session).expect("upload");
+    assert!(!s.is_unsettled(id));
+    // The books are running again (the demo always is): the stale line
+    // goes, replaced by what to do.
+    s.poll();
+    assert_eq!(s.state()["trouble"], "engine_back_post");
+    assert!(s.can_next(), "Post may be pressed again");
+    assert_eq!(f.link.demo_state().expect("demo").payroll.posts_received, 0);
+    s.next();
+    s.poll();
+    assert_eq!(s.step, Step::Done);
+    assert_eq!(f.link.demo_state().expect("demo").payroll.posts_received, 1);
+    // Down on another step: the same, without the post wording.
+    let mut s = screen(&f);
+    s.trouble = Some(Trouble::EngineDown);
+    s.poll();
+    assert_eq!(s.state()["trouble"], "engine_back");
+}
+
+/// QA-15, order 2: the books stop AFTER the post was sent (its answer is
+/// lost): the outcome-unknown state (Cancel and Back off, Check status),
+/// History marks the draft "Not confirmed" with Check status and no
+/// Discard, in this window and another; Check status settles it.
+#[test]
+fn engine_down_after_the_post_is_sent_is_outcome_unknown() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    // The engine got it and posted; the answer was lost.
+    s.post();
+    let _ = s.post_job.take();
+    s.after_post(Err(lost()));
+    assert_eq!(s.state()["trouble"], "unknown");
+    s.poll();
+    assert_eq!(s.state()["trouble"], "unknown", "not replaced by 'running again'");
+    let id = s.upload.as_ref().map(|u| u.session).expect("upload");
+    assert!(s.is_unsettled(id));
+    s.back();
+    assert_eq!(s.step, Step::Preview, "Back is off");
+    // Another Import Payroll window: History offers no Discard for it.
+    let other = screen(&f);
+    assert!(other.is_unsettled(id));
+    assert!(!other.may_discard_session(id));
+    // History's Check status settles it (the post had landed).
+    s.show_history();
+    s.poll();
+    s.check_draft_status(id);
+    s.poll();
+    s.poll();
+    assert_eq!(s.status_answer, Some(true));
+    assert!(!s.post_unsettled && !s.is_unsettled(id));
+    assert_eq!(f.link.demo_state().expect("demo").payroll.posts_received, 1);
+    let entries = f.link.demo_state().expect("demo").payroll.sessions(None).sessions;
+    assert_eq!(entries.len(), 1, "posted once");
+}
+
+/// QA-13: Cancel and the tab's close button ask in payroll words (not the
+/// bank import's); a post whose answer was lost keeps its own warning.
+#[test]
+fn the_close_prompt_speaks_of_payroll() {
+    let f = fixture();
+    let mut windows = crate::windows::Windows::new();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    let id = windows.open_new(CommandId::new(KIND), Box::new(s));
+    let (msg, close, keep) = crate::windows::close_prompt_text(windows.get(id), "Import Payroll");
+    assert_eq!(msg, "This payroll import hasn't been posted. Discard it?");
+    assert_eq!((close.as_str(), keep.as_str()), ("Discard", "Keep working"));
+    assert!(!msg.contains("Bank Feed"));
+    // A lost post: closing keeps the import, and the prompt says so.
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    post_in_flight(&mut s);
+    let _ = s.post_job.take();
+    s.after_post(Err(lost()));
+    let id = windows.open_new(CommandId::new(KIND), Box::new(s));
+    let (msg, _, _) = crate::windows::close_prompt_text(windows.get(id), "Import Payroll");
+    assert!(msg.contains("History") && !msg.contains("Discard it"), "{msg}");
 }

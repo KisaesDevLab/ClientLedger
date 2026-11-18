@@ -223,9 +223,9 @@ impl PayrollImportScreen {
         }
         let text = match &tr {
             Trouble::Refused(r) => match r {
-                PayrollRefusal::DuplicateFile { posted_at, .. }
-                | PayrollRefusal::DuplicateRun { posted_at, .. } => {
-                    match posted_at.as_deref().and_then(posted_day) {
+                PayrollRefusal::DuplicateFile { .. } | PayrollRefusal::DuplicateRun { .. } => {
+                    // QA-12: the refusal's date, else the earlier import's.
+                    match self.prior_posted_at().as_deref().and_then(posted_day) {
                         Some(d) => t_with("payroll.refused.duplicate", &[("date", &show_date(d))]),
                         None => t("payroll.refused.duplicate_undated"),
                     }
@@ -272,6 +272,9 @@ impl PayrollImportScreen {
             Trouble::Restricted => t("payroll.restricted"),
             Trouble::Unsupported => t("payroll.unsupported"),
             Trouble::EngineDown => t("payroll.engine_down"),
+            Trouble::NotSent => t("payroll.engine_down_not_sent"),
+            Trouble::EngineBack { post: true } => t("payroll.engine_back_post"),
+            Trouble::EngineBack { post: false } => t("payroll.engine_back"),
             Trouble::FileUnreadable => t("payroll.file.unreadable"),
             Trouble::Discarded => t("payroll.refused.discarded"),
             Trouble::Other => t("payroll.refused.other"),
@@ -396,13 +399,8 @@ impl PayrollImportScreen {
     /// The early duplicate warning (QA-6): a run the engine knows was
     /// posted, or the same file chosen before (posted or not).
     fn duplicate_ui(&self, ui: &mut Ui, tokens: &Tokens) {
-        let Some(u) = &self.upload else {
-            return;
-        };
-        if u.is_duplicate_by_key {
-            warn(ui, tokens, &t("payroll.duplicate_posted"));
-        } else if u.is_duplicate {
-            warn(ui, tokens, &t("payroll.duplicate_warning"));
+        if let Some(text) = self.duplicate_text() {
+            warn(ui, tokens, &text);
         }
         // QA-11: the file reads as another service's.
         if self.service_mismatch() {
@@ -414,6 +412,24 @@ impl PayrollImportScreen {
             );
         }
     }
+    /// The early duplicate warning's text, with the earlier post's local
+    /// date when it is known (QA-12).
+    pub(crate) fn duplicate_text(&self) -> Option<String> {
+        let u = self.upload.as_ref()?;
+        let date = self
+            .prior_posted_at()
+            .as_deref()
+            .and_then(posted_day)
+            .map(show_date);
+        Some(match (u.is_duplicate_by_key, u.is_duplicate, date) {
+            (true, _, Some(d)) => t_with("payroll.duplicate_posted_on", &[("date", &d)]),
+            (true, _, None) => t("payroll.duplicate_posted"),
+            (false, true, Some(d)) => t_with("payroll.duplicate_file_posted", &[("date", &d)]),
+            (false, true, None) => t("payroll.duplicate_warning"),
+            (false, false, _) => return None,
+        })
+    }
+
     fn upload_job_running(&self) -> bool {
         self.upload.is_none()
             && self.step == Step::Choose
@@ -673,16 +689,19 @@ impl PayrollImportScreen {
         let errors: Vec<_> = v.messages.iter().filter(|m| m.is_error).collect();
         let notes = note_groups(&v.messages);
         if errors.is_empty() {
-            let key = if notes.is_empty() {
-                "payroll.check.ok"
+            let rows = usize::try_from(v.total_rows).unwrap_or(usize::MAX);
+            if self.tags_still_needed() {
+                // QA-14: never "nothing stops posting" while every line
+                // still needs a tag; say where to add them.
+                warn(ui, tokens, &t_count("payroll.check.ok_tags", rows));
             } else {
-                "payroll.check.ok_notes"
-            };
-            note(
-                ui,
-                tokens,
-                &t_count(key, usize::try_from(v.total_rows).unwrap_or(usize::MAX)),
-            );
+                let key = if notes.is_empty() {
+                    "payroll.check.ok"
+                } else {
+                    "payroll.check.ok_notes"
+                };
+                note(ui, tokens, &t_count(key, rows));
+            }
         } else {
             warn(ui, tokens, &t("payroll.check.errors"));
             for m in errors.iter().take(50) {
@@ -932,9 +951,23 @@ impl PayrollImportScreen {
                             _ => "payroll.status.cancelled",
                         },
                     };
-                    ui.label(t(status));
+                    // QA-12: a posted import says when (the local date).
+                    let posted_on = (s.status == SessionStatus::Posted)
+                        .then(|| s.posted_at.as_deref().and_then(posted_day))
+                        .flatten();
+                    // QA-15: a draft whose post's answer was lost may be
+                    // in the books: it says so and offers Check status.
+                    let unconfirmed = s.status.is_unposted_draft() && self.is_unsettled(s.id);
+                    ui.label(match posted_on {
+                        Some(d) => t_with("payroll.status.posted_on", &[("date", &show_date(d))]),
+                        None if unconfirmed => t("payroll.status.unconfirmed"),
+                        None => t(status),
+                    });
                     ui.label(s.entries.len().to_string());
                     ui.horizontal(|ui| {
+                        if unconfirmed && ui.button(t("payroll.check_status")).clicked() {
+                            self.check_draft_status(s.id);
+                        }
                         // S2: no new reverse while one is outstanding.
                         if s.status == SessionStatus::Posted
                             && ui
@@ -1114,8 +1147,9 @@ impl PayrollImportScreen {
                 self.next();
             }
             // B1: nothing discards or leaves the import while a post or
-            // reverse is out.
-            let settled = !self.in_flight();
+            // reverse is out, or a post's answer was lost (QA-15: Check
+            // status settles it first).
+            let settled = !self.in_flight() && !self.post_unsettled;
             if ui
                 .add_enabled(settled, egui::Button::new(t("payroll.cancel")))
                 .clicked()
