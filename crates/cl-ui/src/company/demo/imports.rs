@@ -33,8 +33,8 @@ use cl_api::imports::{
     AccountMatch, BalanceKey, BalanceRow, BatchFailure, BatchPage, BatchState, BatchStatus,
     CommitRequest, FilePreview, FileRole, ImportBatch, ImportBatchId, ImportKind, ImportSession,
     ImportSessionId, JobAccepted, MatchStatus, NewBatch, Progress, RowProblem, SessionStatus,
-    SourceSystem, SpotCheckItem, TieOut, TieOutAccount, TieOutTotals, UndoBlocker, UploadOutcome,
-    UploadRequest,
+    SourceSystem, SpotCheckItem, TieOut, TieOutAccount, TieOutItem, TieOutTotals, UndoBlocker,
+    UploadOutcome, UploadRequest,
 };
 use cl_api::{
     ApiError, ConflictDetails, ConflictReason, ErrorCode, IdempotencyKey, UserText, ValidationError,
@@ -350,6 +350,15 @@ pub struct DemoImports {
     pub backup_mode: DemoBackup,
     /// The before-import backups the demo "made" (no files).
     pub backups_taken: u32,
+    /// The next commit job fails with this batch error code (once), as an
+    /// engine restart mid-job would (`IMPORT_INTERRUPTED`).
+    pub fail_next_commit: Option<&'static str>,
+    /// The company has a closing-date password. Without one, a batch in
+    /// the closed period needs the owner's explicit confirmation
+    /// (`confirmClosedPeriod`, plan §2a E1).
+    pub closing_password_set: bool,
+    /// Commits sent with `confirmClosedPeriod` (control channel).
+    pub confirmed_closed: u32,
 }
 
 /// How the demo answers the next backup before an import or an undo
@@ -377,6 +386,9 @@ impl Default for DemoImports {
             unmatched: Vec::new(),
             backup_mode: DemoBackup::Succeed,
             backups_taken: 0,
+            fail_next_commit: None,
+            closing_password_set: true,
+            confirmed_closed: 0,
         }
     }
 }
@@ -849,8 +861,23 @@ impl DemoImports {
         b: &DemoBatch,
         closing: Option<CalendarDate>,
         password: Option<&Secret>,
+        confirm: bool,
     ) -> Result<(), ApiError> {
         let dates: Vec<CalendarDate> = self.earliest(b).into_iter().collect();
+        if !self.closing_password_set {
+            // No closing-date password: the engine's staff confirmation
+            // (`ledger.service.ts` 470-483) lets a confirmed commit in.
+            let locked = dates.iter().any(|d| closing.is_some_and(|c| *d <= c));
+            if locked && !confirm {
+                return Err(ApiError::ClosedPeriod(cl_api::ClosedPeriod {
+                    lock_date: closing,
+                    can_override: true,
+                    password_required: Some(false),
+                    message: cl_api::UserText::default(),
+                }));
+            }
+            return Ok(());
+        }
         let pw = password.map(|p| {
             if p.expose() == PRACTICE_PASSWORD {
                 Secret::new(DEMO_CLOSING_PASSWORD)
@@ -916,7 +943,10 @@ impl DemoImports {
         if b.require_empty && !self.company_empty {
             return Err(conflict("IMPORT_COMPANY_NOT_EMPTY", json!({})));
         }
-        self.closing_check(&b, closing, password)?;
+        self.closing_check(&b, closing, password, req.confirm_closed_period)?;
+        if req.confirm_closed_period {
+            self.confirmed_closed += 1;
+        }
         let me = &mut self.batches[i];
         me.batch.status = BatchStatus::Committing;
         me.batch.backup_ref = Some(req.backup_ref.trim().to_string());
@@ -959,7 +989,7 @@ impl DemoImports {
         }
         if b.batch.status != BatchStatus::Committed {
             return Err(conflict(
-                "IMPORT_NOT_COMMITTED",
+                "IMPORT_BATCH_NOT_COMMITTED",
                 json!({"status": b.batch.status.as_wire()}),
             ));
         }
@@ -971,7 +1001,7 @@ impl DemoImports {
                 .collect();
             return Err(conflict("IMPORT_UNDO_BLOCKED", json!({"blockers": list})));
         }
-        self.closing_check(&b, closing, password)?;
+        self.closing_check(&b, closing, password, false)?;
         let me = &mut self.batches[i];
         me.batch.status = BatchStatus::Undoing;
         me.job = Some((Job::Undo, 0));
@@ -1016,6 +1046,15 @@ impl DemoImports {
         let me = &mut self.batches[i];
         me.job = None;
         match job {
+            Job::Commit if self.fail_next_commit.is_some() => {
+                // The job stopped: nothing posted, the batch can be retried.
+                me.batch.status = BatchStatus::Failed;
+                me.error = self.fail_next_commit.take().map(|code| BatchFailure {
+                    code: code.to_string(),
+                    row_number: None,
+                    session: None,
+                });
+            }
             Job::Commit => {
                 me.batch.status = BatchStatus::Committed;
                 me.batch.committed_at = Some(COMMITTED_AT.to_string());
@@ -1060,7 +1099,7 @@ impl DemoImports {
             Ok(b)
         } else {
             Err(conflict(
-                "IMPORT_NOT_COMMITTED",
+                "IMPORT_BATCH_NOT_COMMITTED",
                 json!({"status": b.batch.status.as_wire()}),
             ))
         }
@@ -1069,7 +1108,7 @@ impl DemoImports {
     /// The batch's tie-out against the reference files.
     ///
     /// # Errors
-    /// `NotFound`; 409 `IMPORT_NOT_COMMITTED`.
+    /// `NotFound`; 409 `IMPORT_BATCH_NOT_COMMITTED`.
     pub fn tieout(&self, id: ImportBatchId) -> Result<TieOut, ApiError> {
         let b = self.committed(id)?;
         tieout_of(&SETS[b.set], b.batch.conversion_date)
@@ -1078,7 +1117,7 @@ impl DemoImports {
     /// Marks the batch verified when every difference is zero.
     ///
     /// # Errors
-    /// `NotFound`; 409 `IMPORT_NOT_COMMITTED`, `TIEOUT_NOT_ZERO`.
+    /// `NotFound`; 409 `IMPORT_BATCH_NOT_COMMITTED`, `TIEOUT_NOT_ZERO`.
     pub fn verify(&mut self, id: ImportBatchId) -> Result<ImportBatch, ApiError> {
         let t = self.tieout(id)?;
         if !t.all_zero {
@@ -1186,12 +1225,41 @@ fn tieout_of(set: &Set, conversion: Option<CalendarDate>) -> Result<TieOut, ApiE
     let as_of = conversion
         .or_else(|| day(section(set.base, "company").get("conversion_date")?))
         .ok_or_else(decode)?;
+    let item_diffs = set.altered.map(|t| section(t, "items")).unwrap_or_default();
+    let items = |name: &str, numbered: bool| -> Result<Vec<TieOutItem>, ApiError> {
+        if !set.qbd {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::new();
+        // The file's rows in the EXPECTED order (row 1 is the header).
+        for (row, (key, value)) in (2_u64..).zip(section(set.base, name)) {
+            let source = money(Some(&value)).ok_or_else(decode)?;
+            let diff = money(item_diffs.get(&key)).unwrap_or(zero);
+            out.push(TieOutItem {
+                source_row: row,
+                name: if numbered { String::new() } else { key.clone() },
+                number: numbered.then_some(key),
+                source,
+                books: source.checked_add(diff).map_err(|_| decode())?,
+                diff,
+            });
+        }
+        Ok(out)
+    };
+    let (ar_items, ap_items) = (items("open_invoices", true)?, items("unpaid_bills", true)?);
+    let inventory_items = items("inventory_valuation", false)?;
+    let all_zero = all_zero
+        && ar_items
+            .iter()
+            .chain(&ap_items)
+            .chain(&inventory_items)
+            .all(|i| i.diff.is_zero());
     Ok(TieOut {
         as_of,
         accounts,
-        ar_items: Vec::new(),
-        ap_items: Vec::new(),
-        inventory_items: Vec::new(),
+        ar_items,
+        ap_items,
+        inventory_items,
         balance_rows,
         totals,
         all_zero,

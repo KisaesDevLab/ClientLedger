@@ -220,6 +220,7 @@ impl ImportScreen {
             return;
         }
         self.trouble = None;
+        self.failure = None;
         self.status_answer = None;
         match self.batch {
             Some(id) => self.start_backup(Running::Commit, id),
@@ -586,6 +587,7 @@ impl ImportScreen {
                 tracing::info!(target: "imports", code = self.state.as_ref().and_then(|s| s.error.as_ref()).map_or("none", |e| e.code.as_str()), "import job failed");
                 self.running = None;
                 self.held = None;
+                self.failure = self.failure_refusal();
                 self.trouble = Some(Trouble::Failed);
             }
             (Running::Undo, BatchStatus::Committed) if self.running.is_some() || self.unsettled => {
@@ -599,19 +601,26 @@ impl ImportScreen {
                     // offered the same way.
                     self.unsettled = false;
                     self.held = None;
-                    let refusal = self
-                        .state
-                        .as_ref()
-                        .and_then(|s| s.error.as_ref())
-                        .and_then(cl_api::imports::BatchFailure::refusal);
+                    let refusal = self.failure_refusal();
                     self.trouble = Some(match refusal {
                         Some(r @ ImportRefusal::UndoBlocked { .. }) => Trouble::Refused(r),
-                        _ => Trouble::Failed,
+                        other => {
+                            self.failure = other;
+                            Trouble::Failed
+                        }
                     });
                 }
             }
             _ => self.running = None,
         }
+    }
+
+    /// The last batch read's failure, when the screen explains its code.
+    fn failure_refusal(&self) -> Option<ImportRefusal> {
+        self.state
+            .as_ref()
+            .and_then(|s| s.error.as_ref())
+            .and_then(cl_api::imports::BatchFailure::refusal)
     }
 
     fn committed(&mut self) {

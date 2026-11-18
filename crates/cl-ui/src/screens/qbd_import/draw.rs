@@ -522,7 +522,10 @@ impl ImportScreen {
         let Some(tr) = self.trouble.clone() else {
             return;
         };
-        let text = trouble_text(&tr);
+        let text = match (&tr, &self.failure) {
+            (Trouble::Failed, Some(r)) => refusal_text(r),
+            _ => trouble_text(&tr),
+        };
         egui::Frame::new()
             .fill(tokens.warn_tint)
             .corner_radius(4)

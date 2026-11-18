@@ -186,6 +186,11 @@ pub(crate) fn refusal_code(r: &ImportRefusal) -> &'static str {
         ImportRefusal::Unbalanced => "unbalanced",
         ImportRefusal::UnknownRef { .. } => "unknown_ref",
         ImportRefusal::MixedGroup => "mixed_group",
+        ImportRefusal::Interrupted => "interrupted",
+        ImportRefusal::BatchUndone => "batch_undone",
+        ImportRefusal::BatchNotCommitted => "batch_not_committed",
+        ImportRefusal::BatchEmpty => "batch_empty",
+        ImportRefusal::SourceMismatch => "source_mismatch",
     }
 }
 
@@ -339,6 +344,9 @@ pub struct ImportScreen {
     password: Option<Secret>,
     pub(crate) status_answer: Option<bool>,
     pub(crate) trouble: Option<Trouble>,
+    /// Why the last job failed, when its code has owner words (shown in
+    /// place of the plain "stopped partway"; Retry is still offered).
+    pub(crate) failure: Option<ImportRefusal>,
     // Tie-out (D4 draws it in full).
     tieout_job: Option<Job<TieOut>>,
     pub(crate) tieout: Option<TieOut>,
@@ -405,6 +413,7 @@ impl ImportScreen {
             password: None,
             status_answer: None,
             trouble: None,
+            failure: None,
             tieout_job: None,
             tieout: None,
             verify_job: None,

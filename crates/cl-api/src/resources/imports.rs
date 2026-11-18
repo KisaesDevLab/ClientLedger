@@ -1074,6 +1074,20 @@ pub enum ImportRefusal {
     },
     /// `IMPORT_MIXED_GROUP`: one spreadsheet group mixes document types.
     MixedGroup,
+    /// `IMPORT_INTERRUPTED` (a batch error): the engine stopped while the
+    /// job ran (a restart settled it); nothing was posted.
+    Interrupted,
+    /// 409 `IMPORT_BATCH_UNDONE`: the batch was undone; its files go in a
+    /// new import.
+    BatchUndone,
+    /// 409 `IMPORT_BATCH_NOT_COMMITTED`: tie-out, verify or undo of a batch
+    /// that was never imported.
+    BatchNotCommitted,
+    /// 409/422 `IMPORT_BATCH_EMPTY`: the batch holds no files.
+    BatchEmpty,
+    /// 409/422 `IMPORT_SOURCE_MISMATCH`: a file was read for another
+    /// program than the batch's.
+    SourceMismatch,
 }
 
 fn details_id<T: std::str::FromStr>(d: Option<&crate::ConflictDetails>, key: &str) -> Option<T> {
@@ -1140,6 +1154,11 @@ fn refusal_from(code: &str, details: Option<&crate::ConflictDetails>) -> Option<
             field: text("field"),
         },
         "IMPORT_MIXED_GROUP" => ImportRefusal::MixedGroup,
+        "IMPORT_INTERRUPTED" => ImportRefusal::Interrupted,
+        "IMPORT_BATCH_UNDONE" => ImportRefusal::BatchUndone,
+        "IMPORT_BATCH_NOT_COMMITTED" => ImportRefusal::BatchNotCommitted,
+        "IMPORT_BATCH_EMPTY" => ImportRefusal::BatchEmpty,
+        "IMPORT_SOURCE_MISMATCH" => ImportRefusal::SourceMismatch,
         _ => return None,
     })
 }

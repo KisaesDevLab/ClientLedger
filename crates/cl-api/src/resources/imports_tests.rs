@@ -535,6 +535,29 @@ async fn refusals_keep_codes_and_ids_never_messages() {
         Some(ImportRefusal::AmountInvalid { rows: vec![3, 9] })
     );
     assert_eq!(import_refusal(&refusal(409, "SOMETHING", "{}").await), None);
+    // E1 as built: the batch codes, at 409 and 422 alike.
+    for (status, code, want) in [
+        (409, "IMPORT_BATCH_UNDONE", ImportRefusal::BatchUndone),
+        (
+            409,
+            "IMPORT_BATCH_NOT_COMMITTED",
+            ImportRefusal::BatchNotCommitted,
+        ),
+        (422, "IMPORT_BATCH_EMPTY", ImportRefusal::BatchEmpty),
+        (409, "IMPORT_BATCH_EMPTY", ImportRefusal::BatchEmpty),
+        (422, "IMPORT_SOURCE_MISMATCH", ImportRefusal::SourceMismatch),
+        (409, "IMPORT_INTERRUPTED", ImportRefusal::Interrupted),
+    ] {
+        let e = refusal(status, code, "{}").await;
+        assert_eq!(import_refusal(&e), Some(want), "{code}");
+    }
+    // A batch's failure code reads the same way (Check status).
+    let f = BatchFailure {
+        code: "IMPORT_INTERRUPTED".into(),
+        row_number: None,
+        session: None,
+    };
+    assert_eq!(f.refusal(), Some(ImportRefusal::Interrupted));
 }
 
 #[tokio::test]
