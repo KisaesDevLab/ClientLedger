@@ -78,18 +78,16 @@ pub fn make(
 
 /// The backup kind taken before every import or undo: the QBD and
 /// other-program wizards and the spreadsheet import (D5) all use this one.
-/// The shared `BackupKind::BeforeImport` (its own newest-10 retention,
-/// Q-P30h) arrives with payroll PR #99; until then the regular kind is used
-/// with retention off ([`BACKUP_RETENTION`]): regular retention could prune
-/// a backup a batch still needs (plan §1), or the owner's own backups.
-// P31: switch to BeforeImport after #99 (this kind, and BACKUP_RETENTION to true).
+/// It is the shared `BackupKind::BeforeImport` (Q-P30h, as payroll posts
+/// use), so its own retention (the newest 10 per company and folder) never
+/// prunes the owner's regular backups.
 pub(crate) fn backup_kind() -> cl_settings::BackupKind {
-    cl_settings::BackupKind::Backup
+    cl_settings::BackupKind::BeforeImport
 }
 
-/// Whether the backup before an import or undo applies retention (see
-/// [`backup_kind`]).
-pub(crate) const BACKUP_RETENTION: bool = false;
+/// Whether the backup before an import or undo applies retention: on, the
+/// before-import kind's own newest-10 rule (see [`backup_kind`]).
+pub(crate) const BACKUP_RETENTION: bool = true;
 
 /// A request in flight or already answered (the demo answers at once).
 pub(crate) enum Job<T> {
