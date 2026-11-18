@@ -26,8 +26,7 @@ use cl_api::payroll::{
     SessionPage, SessionStatus, SessionSummary, UploadOutcome, UploadRequest, ValidationSummary,
 };
 use cl_api::{
-    Account, AccountType, ApiError, ConflictDetails, ConflictReason, ErrorCode, IdempotencyKey,
-    UserText, ValidationError,
+    ApiError, ConflictDetails, ConflictReason, ErrorCode, IdempotencyKey, UserText, ValidationError,
 };
 use cl_core::ids::{AccountId, TagId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
@@ -317,6 +316,7 @@ impl DemoPayroll {
                     side: Some(if l.debit { "debit" } else { "credit" }.into()),
                     account: saved.map(|s| s.0),
                     tag: saved.and_then(|s| s.1),
+                    suggested: false,
                 });
             }
         }
@@ -698,46 +698,6 @@ impl DemoPayroll {
     pub fn save_account_mappings(&mut self, map: &BTreeMap<String, AccountId>) {
         self.accounts
             .extend(map.iter().map(|(k, v)| (k.clone(), *v)));
-    }
-
-    /// Suggested accounts by name, as the engine's auto-map does.
-    #[must_use]
-    pub fn suggest(chart: &[Account]) -> BTreeMap<String, AccountId> {
-        // The first word that names an account wins (so "payroll" beats
-        // "tax"); sales tax is never a payroll account.
-        let find = |kind: AccountType, words: &[&str]| {
-            words
-                .iter()
-                .find_map(|w| {
-                    chart.iter().find(|a| {
-                        let n = a.fields.name.to_lowercase();
-                        a.is_active
-                            && a.fields.account_type == kind
-                            && !n.contains("sales")
-                            && n.contains(w)
-                    })
-                })
-                .or_else(|| {
-                    chart
-                        .iter()
-                        .find(|a| a.is_active && a.fields.account_type == kind)
-                })
-                .map(|a| a.id)
-        };
-        let mut out = BTreeMap::new();
-        for (line_type, debit) in cl_model::payroll_import::LINE_TYPES {
-            let id = if line_type == cl_model::payroll_import::NET_PAY_LINE {
-                find(AccountType::Asset, &["checking", "bank", "operating"])
-            } else if debit {
-                find(AccountType::Expense, &["payroll", "wages", "salar"])
-            } else {
-                find(AccountType::Liability, &["payroll", "tax", "withh"])
-            };
-            if let Some(id) = id {
-                out.insert(line_type.to_string(), id);
-            }
-        }
-        out
     }
 }
 

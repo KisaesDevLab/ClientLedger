@@ -822,6 +822,10 @@ pub struct DescriptionMapping {
     pub account: Option<AccountId>,
     /// The mapped tag.
     pub tag: Option<TagId>,
+    /// The account is the engine's own guess by name or number (status
+    /// `suggested`), not one the company saved: the desktop checks it
+    /// before pre-selecting it (P30 QA-1). Never sent.
+    pub suggested: bool,
 }
 
 /// What a reverse did.
@@ -1348,6 +1352,7 @@ impl Payroll<'_> {
                     side: m["debitOrCredit"].as_str().map(str::to_string),
                     account: opt_id(&m["accountId"]),
                     tag: opt_id(&m["tagId"]),
+                    suggested: m["status"].as_str() == Some("suggested"),
                 })
             })
             .collect())

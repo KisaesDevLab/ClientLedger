@@ -405,3 +405,181 @@ fn the_default_tag_fills_untagged_lines_and_only_differences_are_sent() {
     assert_eq!(sent.len(), 1);
     assert_eq!(sent[0].tag, Some(tag(2)));
 }
+
+// ---- Accounts step defaults (P30 QA-1) ------------------------------------
+
+/// The seeded QA company's chart shape: the engine's default chart (10100
+/// Cash, 6000/6200/6400 numbered for other things) plus the sample's own.
+fn seeded_chart() -> Vec<ChartRow<u32>> {
+    use ChartKind::{Bank, Expense, Liability, Other};
+    [
+        (10100, "Cash", Bank, false),
+        (1010, "Operating Checking", Bank, true),
+        (1020, "Savings", Bank, false),
+        (1200, "Accounts Receivable", Other, false),
+        (2000, "Accounts Payable", Liability, false),
+        (2050, "Business Credit Card", Liability, false),
+        (2200, "Vehicle and Equipment Loans", Liability, false),
+        (2500, "Payroll Liabilities", Liability, false),
+        (20900, "Sales Tax Payable", Liability, false),
+        (4000, "Service Income", Other, false),
+        (6000, "Advertising and Marketing", Expense, false),
+        (6150, "Insurance", Expense, false),
+        (6200, "Legal and Professional Fees", Expense, false),
+        (6400, "Telephone and Internet", Expense, false),
+        (6550, "Wages", Expense, false),
+        (6560, "Payroll Taxes", Expense, false),
+        (6700, "Vehicle Expenses", Expense, false),
+    ]
+    .into_iter()
+    .map(|(id, name, kind, checking)| ChartRow {
+        id,
+        name: name.into(),
+        kind,
+        checking,
+    })
+    .collect()
+}
+
+const GUSTO_LINES: [&str; 11] = [
+    "gross_wages_expense",
+    "employer_tax_expense",
+    "reimbursement_expense",
+    "fit_payable",
+    "sit_payable",
+    "ss_payable",
+    "medicare_payable",
+    "futa_payable",
+    "suta_payable",
+    "health_ins_payable",
+    "retirement_payable",
+];
+
+#[test]
+fn seeded_chart_defaults_are_payroll_accounts_or_empty() {
+    let chart = seeded_chart();
+    // The engine's number matcher on this chart (QA-1).
+    let engine: BTreeMap<String, u32> = [
+        ("gross_wages_expense", 6000),
+        ("employer_tax_expense", 6200),
+        ("reimbursement_expense", 6400),
+        ("retirement_payable", 2200),
+        ("payroll_clearing", 10100),
+        ("other_tax_payable", 2500),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v))
+    .collect();
+    let mut lines = GUSTO_LINES.to_vec();
+    lines.push(NET_PAY_LINE);
+    let d = default_accounts(&lines, &chart, &engine, &BTreeMap::new());
+    assert_eq!(d.get("gross_wages_expense"), Some(&6550));
+    assert_eq!(d.get("employer_tax_expense"), Some(&6560));
+    assert_eq!(
+        d.get("reimbursement_expense"),
+        None,
+        "no reimbursement account"
+    );
+    for p in [
+        "fit_payable",
+        "sit_payable",
+        "ss_payable",
+        "medicare_payable",
+        "futa_payable",
+        "suta_payable",
+        "health_ins_payable",
+        "retirement_payable",
+    ] {
+        assert_eq!(d.get(p), Some(&2500), "{p}");
+    }
+    // The only checking account, never the first bank account ("Cash").
+    assert_eq!(d.get(NET_PAY_LINE), Some(&1010));
+    for wrong in [6000, 6200, 6400, 2200, 10100] {
+        assert!(!d.values().any(|v| *v == wrong), "{wrong}: {d:?}");
+    }
+}
+
+#[test]
+fn nothing_matching_leaves_the_line_empty() {
+    use ChartKind::{Bank, Expense, Liability};
+    let chart: Vec<ChartRow<u32>> = [
+        (1, "Cash", Bank, false),
+        (2, "Petty Cash", Bank, false),
+        (3, "Advertising", Expense, false),
+        (4, "Real Estate Loan", Liability, false),
+        (5, "Employee Benefits Program", Expense, false),
+    ]
+    .into_iter()
+    .map(|(id, name, kind, checking)| ChartRow {
+        id,
+        name: name.into(),
+        kind,
+        checking,
+    })
+    .collect();
+    let mut lines = GUSTO_LINES.to_vec();
+    lines.push(NET_PAY_LINE);
+    let engine: BTreeMap<String, u32> = [("gross_wages_expense".to_string(), 3)].into();
+    let d = default_accounts(&lines, &chart, &engine, &BTreeMap::new());
+    assert!(d.is_empty(), "{d:?}");
+    // "state" never matches "Real Estate"; "fit" never matches "Benefits".
+    assert_eq!(confident_account("sit_payable", &chart), None);
+    assert_eq!(confident_account("fit_payable", &chart), None);
+    assert_eq!(
+        confident_account("employer_benefits_expense", &chart),
+        Some(5)
+    );
+}
+
+#[test]
+fn ready_made_descriptions_read_as_line_types() {
+    for (desc, debit, lt) in [
+        ("Wages and Salary", true, "gross_wages_expense"),
+        ("Social Security Expense", true, "employer_tax_expense"),
+        ("Employer 401(k) Match", true, "employer_benefits_expense"),
+        ("Net Pay", false, NET_PAY_LINE),
+        ("Federal Withholding", false, "fit_payable"),
+        ("FUTA Liability", false, "futa_payable"),
+        ("State Unemployment Payable", false, "suta_payable"),
+        ("Real Estate Garnishment", false, "other_deduction_payable"),
+    ] {
+        assert_eq!(line_for_description(desc, debit), lt, "{desc}");
+    }
+}
+
+#[test]
+fn a_remembered_account_wins_and_two_equal_matches_pick_none() {
+    let mut chart = seeded_chart();
+    chart.push(ChartRow {
+        id: 6551,
+        name: "Salaries".into(),
+        kind: ChartKind::Expense,
+        checking: false,
+    });
+    chart.push(ChartRow {
+        id: 1030,
+        name: "Payroll Checking".into(),
+        kind: ChartKind::Bank,
+        checking: true,
+    });
+    // Wages and Salaries tie: the owner picks.
+    assert_eq!(confident_account("gross_wages_expense", &chart), None);
+    // A bank account named for payroll beats two checking accounts.
+    assert_eq!(confident_account(NET_PAY_LINE, &chart), Some(1030));
+    let remembered: BTreeMap<String, u32> = [
+        ("gross_wages_expense".to_string(), 6551),
+        (NET_PAY_LINE.to_string(), 10100),
+        // An account no longer in the chart is not pre-selected.
+        ("fit_payable".to_string(), 9999),
+    ]
+    .into();
+    let d = default_accounts(
+        &["gross_wages_expense", NET_PAY_LINE, "fit_payable"],
+        &chart,
+        &BTreeMap::new(),
+        &remembered,
+    );
+    assert_eq!(d.get("gross_wages_expense"), Some(&6551));
+    assert_eq!(d.get(NET_PAY_LINE), Some(&10100));
+    assert_eq!(d.get("fit_payable"), Some(&2500));
+}

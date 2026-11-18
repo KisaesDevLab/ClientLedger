@@ -655,6 +655,18 @@ pub fn chart() -> Vec<cl_api::Account> {
         system: false,
         tag: None,
     });
+    // P30 QA-1: where imported payroll's withholdings wait (the sample has
+    // Wages and Payroll Taxes but no liability for them).
+    rows.push(DemoRow {
+        number: "2100".into(),
+        name: "Payroll Liabilities".into(),
+        kind: AccountType::Liability,
+        detail: Some("other_current_liability".into()),
+        parent: None,
+        active: true,
+        system: false,
+        tag: None,
+    });
     for (number, name, parent, active) in [
         ("6710", "Truck Repairs", 6700, true),
         ("6720", "Trailer Registration", 6700, true),

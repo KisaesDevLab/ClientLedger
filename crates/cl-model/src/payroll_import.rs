@@ -852,6 +852,262 @@ pub const LINE_TYPES: [(&str, bool); 19] = [
 /// The line type paid from the bank (net pay, Q-P30f).
 pub const NET_PAY_LINE: &str = "payroll_clearing";
 
+/// An account as the Accounts step's matcher sees it (cl-ui fills it from
+/// the chart; only active accounts are passed).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChartRow<T> {
+    /// The account's id.
+    pub id: T,
+    /// Its name (never its number: numbering differs between companies).
+    pub name: String,
+    /// What kind of account it is.
+    pub kind: ChartKind,
+    /// A bank account of the checking kind (detail type or name).
+    pub checking: bool,
+}
+
+/// The account kinds a payroll line may go to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChartKind {
+    /// Expense or cost of goods sold.
+    Expense,
+    /// A liability.
+    Liability,
+    /// A bank account.
+    Bank,
+    /// Anything else (never pre-selected).
+    Other,
+}
+
+/// One way a name can match: it holds one of `any` as a word start and
+/// none of `none`.
+type Tier = (&'static [&'static str], &'static [&'static str]);
+
+/// The generic payroll-liability names every payable falls back to.
+const LIABILITY_FALLBACK: Tier = (
+    &[
+        "payroll liabilit",
+        "payroll tax",
+        "payroll payable",
+        "payroll withh",
+    ],
+    &["sales"],
+);
+
+/// The kind a line's account must be and its name tiers, most specific
+/// first. Net pay has its own rule ([`confident_account`]).
+fn line_rule(line_type: &str) -> Option<(ChartKind, &'static [Tier])> {
+    use ChartKind::{Expense, Liability};
+    const NO: &[&str] = &[];
+    Some(match line_type {
+        "gross_wages_expense" => (
+            Expense,
+            &[
+                (&["wage", "salar"], &["officer", "tax", "benefit"]),
+                (
+                    &["payroll"],
+                    &["tax", "benefit", "fee", "service", "processing"],
+                ),
+            ],
+        ),
+        "officer_wages_expense" => (Expense, &[(&["officer"], &["tax"])]),
+        "employer_tax_expense" => (Expense, &[(&["payroll tax", "employer tax"], NO)]),
+        "employer_benefits_expense" => (
+            Expense,
+            &[
+                (&["employee benefit", "benefit"], NO),
+                (&["health ins"], NO),
+            ],
+        ),
+        "reimbursement_expense" => (Expense, &[(&["reimburs"], NO)]),
+        "contractor_expense" => (
+            Expense,
+            &[(&["contract labor", "contractor", "subcontract"], NO)],
+        ),
+        "fit_payable" => (
+            Liability,
+            &[(&["federal"], &["unemploy", "futa"]), LIABILITY_FALLBACK],
+        ),
+        "sit_payable" => (
+            Liability,
+            &[
+                (&["state"], &["unemploy", "suta", "sales"]),
+                LIABILITY_FALLBACK,
+            ],
+        ),
+        "local_tax_payable" => (Liability, &[(&["local"], &["sales"]), LIABILITY_FALLBACK]),
+        "ss_payable" => (
+            Liability,
+            &[(&["social security", "fica"], NO), LIABILITY_FALLBACK],
+        ),
+        "medicare_payable" => (Liability, &[(&["medicare"], NO), LIABILITY_FALLBACK]),
+        "futa_payable" => (
+            Liability,
+            &[(&["futa", "federal unemploy"], NO), LIABILITY_FALLBACK],
+        ),
+        "suta_payable" => (
+            Liability,
+            &[(&["suta", "state unemploy"], NO), LIABILITY_FALLBACK],
+        ),
+        "health_ins_payable" => (Liability, &[(&["health"], NO), LIABILITY_FALLBACK]),
+        "retirement_payable" => (
+            Liability,
+            &[(&["401", "retirement"], NO), LIABILITY_FALLBACK],
+        ),
+        "other_deduction_payable" => (Liability, &[(&["deduction"], NO), LIABILITY_FALLBACK]),
+        "other_tax_payable" => (Liability, &[LIABILITY_FALLBACK]),
+        _ => return None,
+    })
+}
+
+/// True when `term` starts a word of `name` (both lower case): "state"
+/// does not match "Real Estate", "fit" never matches "Benefits".
+fn has_word_start(name: &str, term: &str) -> bool {
+    name.match_indices(term).any(|(i, _)| {
+        name[..i]
+            .chars()
+            .next_back()
+            .is_none_or(|c| !c.is_alphanumeric())
+    })
+}
+
+fn tier_matches(name: &str, (any, none): Tier) -> bool {
+    let n = name.to_lowercase();
+    any.iter().any(|t| has_word_start(&n, t)) && !none.iter().any(|t| has_word_start(&n, t))
+}
+
+/// True when `row` is a sensible account for `line_type` by its kind and
+/// name: how an engine suggestion is checked before it is pre-selected
+/// (the engine's own matcher goes by account number and loose words, so
+/// "6000" picks Advertising in a chart numbered differently; P30 QA-1).
+/// Net pay never fits by name alone (see [`confident_account`]).
+#[must_use]
+pub fn account_fits<T>(line_type: &str, row: &ChartRow<T>) -> bool {
+    line_rule(line_type).is_some_and(|(kind, tiers)| {
+        row.kind == kind && tiers.iter().any(|t| tier_matches(&row.name, *t))
+    })
+}
+
+/// The one account the name rules pick for `line_type`, or `None` when no
+/// account (or more than one equally good) matches: the owner then
+/// chooses. Tiers are tried most specific first; a tier with several
+/// matches is skipped for the next one.
+///
+/// Net pay: a bank account named for payroll, else the only checking
+/// account, else the only bank account; never the first of several.
+#[must_use]
+pub fn confident_account<T: Copy>(line_type: &str, rows: &[ChartRow<T>]) -> Option<T> {
+    let only = |it: &mut dyn Iterator<Item = &ChartRow<T>>| {
+        let first = it.next()?;
+        it.next().is_none().then_some(first.id)
+    };
+    if line_type == NET_PAY_LINE {
+        let banks = || rows.iter().filter(|r| r.kind == ChartKind::Bank);
+        return only(&mut banks().filter(|r| tier_matches(&r.name, (&["payroll"], &[]))))
+            .or_else(|| only(&mut banks().filter(|r| r.checking)))
+            .or_else(|| only(&mut banks()));
+    }
+    let (kind, tiers) = line_rule(line_type)?;
+    tiers.iter().find_map(|t| {
+        only(
+            &mut rows
+                .iter()
+                .filter(|r| r.kind == kind && tier_matches(&r.name, *t)),
+        )
+    })
+}
+
+/// The line type a ready-made file's description most likely is (for its
+/// starting account only; the owner sees and changes every one). `debit`:
+/// the file puts it on the debit side.
+#[must_use]
+pub fn line_for_description(description: &str, debit: bool) -> &'static str {
+    let d = description.to_lowercase();
+    let has = |terms: &[&str]| terms.iter().any(|t| has_word_start(&d, t));
+    if d.split(|c: char| !c.is_alphanumeric()).any(|w| w == "net") {
+        return NET_PAY_LINE;
+    }
+    if debit {
+        if has(&["reimburs"]) {
+            "reimbursement_expense"
+        } else if has(&[
+            "tax",
+            "social security",
+            "medicare",
+            "futa",
+            "suta",
+            "unemploy",
+            "fica",
+        ]) {
+            "employer_tax_expense"
+        } else if has(&["benefit", "health", "401", "retirement", "insurance"]) {
+            "employer_benefits_expense"
+        } else if has(&["officer"]) {
+            "officer_wages_expense"
+        } else {
+            "gross_wages_expense"
+        }
+    } else if has(&["futa", "federal unemploy"]) {
+        "futa_payable"
+    } else if has(&["suta", "state unemploy"]) {
+        "suta_payable"
+    } else if has(&["social security", "fica"]) {
+        "ss_payable"
+    } else if has(&["medicare"]) {
+        "medicare_payable"
+    } else if has(&["federal"]) {
+        "fit_payable"
+    } else if has(&["state"]) {
+        "sit_payable"
+    } else if has(&["local"]) {
+        "local_tax_payable"
+    } else if has(&["health"]) {
+        "health_ins_payable"
+    } else if has(&["401", "retirement"]) {
+        "retirement_payable"
+    } else if has(&["tax"]) {
+        "other_tax_payable"
+    } else {
+        "other_deduction_payable"
+    }
+}
+
+/// The Accounts step's starting choices for `lines`: the account the
+/// company used last time for the line (`remembered`, from an earlier
+/// import), else the engine's suggestion when it [fits](account_fits),
+/// else [`confident_account`]. Lines with none stay empty ("Choose an
+/// account") and keep Next disabled. Accounts not in `rows` (inactive or
+/// gone) are never pre-selected.
+#[must_use]
+pub fn default_accounts<T: Copy + Eq>(
+    lines: &[&str],
+    rows: &[ChartRow<T>],
+    engine: &BTreeMap<String, T>,
+    remembered: &BTreeMap<String, T>,
+) -> BTreeMap<String, T> {
+    let row = |id: T| rows.iter().find(|r| r.id == id);
+    lines
+        .iter()
+        .filter_map(|line| {
+            let pick = remembered
+                .get(*line)
+                .copied()
+                .filter(|id| row(*id).is_some())
+                // Net pay: never the engine's pick (it takes the first
+                // account named "Cash" or "Checking"), only the rule's.
+                .or_else(|| {
+                    engine
+                        .get(*line)
+                        .filter(|_| *line != NET_PAY_LINE)
+                        .copied()
+                        .filter(|id| row(*id).is_some_and(|r| account_fits(line, r)))
+                })
+                .or_else(|| confident_account(line, rows))?;
+            Some(((*line).to_string(), pick))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 #[path = "payroll_import_tests.rs"]
 mod tests;
