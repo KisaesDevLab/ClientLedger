@@ -1,0 +1,33 @@
+# Import Transactions from a Spreadsheet (P31): the synthetic
+# fixtures/import_transactions/bad-rows.csv has one problem per group (rows 2
+# to 9). The check names each problem row in plain words, Import is off, and
+# nothing is backed up or sent.
+name: csv_transactions_invalid
+description: A spreadsheet with bad rows - each problem row is named, Import is off, nothing is sent.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: file.import_transactions
+  - command: dev.txn_import_demo_reset
+  - command: dev.txn_import_demo_file_bad_rows
+  - assert_state: {key: screen.step, equals: map}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: preview}
+  - assert_state: {key: screen.can_import, equals: false}
+  - assert_state: {key: screen.problems, equals: 7}
+  - assert_exists: {label_contains: "Row 2"}
+  - assert_exists: {label_contains: "Row 3"}
+  - assert_exists: {label_contains: "Row 4"}
+  - assert_exists: {label_contains: "Row 5"}
+  - assert_exists: {label_contains: "Row 6"}
+  - assert_exists: {label_contains: "Row 8"}
+  - assert_exists: {label_contains: "Row 9"}
+  - assert_exists: {label_contains: "differ by 0.01"}
+  - screenshot: problems
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: preview}
+  - assert_state: {key: screen.backup_made, equals: false}
+  - assert_state: {key: screen.phase, equals: idle}
+  - command: dev.txn_import_demo_reset
+  - command: file.close_window
+  - wait: {ms: 300}

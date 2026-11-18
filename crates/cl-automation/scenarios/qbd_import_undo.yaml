@@ -1,0 +1,63 @@
+# Switch from QuickBooks Desktop (P31): Undo this import. Confirm, a backup,
+# then the books go back as they were: History says Undone and the same
+# files are accepted again (no "imported before" refusal). A second import
+# with something that depends on it (a payment on an imported invoice) can't
+# be undone: the window says what is in the way and offers to restore the
+# backup taken before the import (a new company; the button is not pressed).
+name: qbd_import_undo
+description: Undo after an import - Keep it, Undo, History says Undone, files accepted again; a blocked undo lists why and offers the restore.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: file.import_qbd
+  - command: dev.imports_demo_reset
+  - key: Alt+N
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
+  - assert_state: {key: screen.tieout_all_zero, equals: true, within_ms: 4000}
+  # Keep it: nothing happens.
+  - click: {role: link, label: Undo this import}
+  - assert_state: {key: screen.confirm_undo, equals: true}
+  - assert_exists: {role: label, label: Undo this import?}
+  - screenshot: confirm
+  - click: {role: button, label: Keep it}
+  - assert_state: {key: screen.confirm_undo, equals: false}
+  - assert_state: {key: screen.undone, equals: false}
+  # Undo.
+  - click: {role: link, label: Undo this import}
+  - click: {role: button, label: Undo import}
+  - assert_state: {key: screen.undone, equals: true, within_ms: 8000}
+  - screenshot: undone
+  - click: {role: button, label: History}
+  - assert_state: {key: screen.history.undone, equals: 1, within_ms: 4000}
+  - assert_state: {key: screen.history.committed, equals: 0}
+  - screenshot: history-undone
+  - click: {role: button, label: Import}
+  # The same files go in again: nothing says they were imported before.
+  - command: dev.imports_demo_reset
+  - key: Alt+N
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  - assert_state: {key: screen.files_refused, equals: 0}
+  - assert_state: {key: screen.can_next, equals: true}
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
+  # Something now depends on the import: Undo is refused with the reasons.
+  - command: dev.imports_demo_block_undo
+  - click: {role: link, label: Undo this import}
+  - click: {role: button, label: Undo import}
+  - assert_state: {key: screen.blocked_by, equals: 1, within_ms: 4000}
+  - assert_state: {key: screen.undone, equals: false}
+  - assert_exists: {role: button, label: Restore the backup taken before the import}
+  - screenshot: blocked
+  - command: dev.imports_demo_reset
+  - command: file.close_window
+  - wait: {ms: 300}

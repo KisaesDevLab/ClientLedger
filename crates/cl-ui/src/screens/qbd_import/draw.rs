@@ -105,6 +105,10 @@ impl ImportScreen {
                     if !self.allowed() || !self.supported() {
                         return;
                     }
+                    // D6: the questions sit above the step (below its
+                    // full-height divider they were off the screen).
+                    self.undo_question_ui(ui, &tokens);
+                    self.closed_question_ui(ui, &tokens);
                     match self.view {
                         View::History => self.history_ui(ui, &tokens),
                         View::Import => {
@@ -118,8 +122,6 @@ impl ImportScreen {
                             });
                         }
                     }
-                    self.undo_question_ui(ui, &tokens);
-                    self.closed_question_ui(ui, &tokens);
                 });
                 frame.bottom(|ui| {
                     ui.add_space(4.0);

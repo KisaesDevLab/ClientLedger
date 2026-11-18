@@ -1,0 +1,86 @@
+# Switch from QuickBooks Desktop (P31): three altered copies of Shoal Creek
+# (fixtures/qbd/shoal-creek-altered, synthetic) must NOT tie out, and say where.
+#  1. open-item: one open invoice is $10.00 higher than the books - the
+#     difference shows on 1200 (A/R) and on the receivables-before-conversion
+#     line, nowhere else; Mark verified stays off and the engine's refusal
+#     is shown in plain words.
+#  2. repointed: a journal line moved from 6100 to 6200 - exactly those two
+#     accounts differ (389.44 each way).
+#  3. journal-overlap: an extra journal file covers days another file
+#     already covers - refused when the import is made, nothing posted.
+# The state carries counts and flags only (no names or amounts).
+name: qbd_import_altered
+description: Altered sets - open invoice off by 10.00 (1200 + A/R line), a repointed line (6100, 6200), an overlapping journal refused.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: file.import_qbd
+  - command: dev.imports_demo_reset
+  # --- 1. An open invoice that differs --------------------------------------
+  - key: Alt+N
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/qbd/shoal-creek-altered/open-item/open-invoices.csv"]}
+  - click: {role: button, label: Add file for Open Invoices}
+  - assert_state: {key: screen.files, equals: 12, within_ms: 4000}
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
+  - assert_state: {key: screen.tieout_all_zero, equals: false, within_ms: 4000}
+  - assert_state: {key: screen.tieout_differences, equals: 2}
+  - screenshot: open-item
+  - command: dev.imports_demo_differences_only
+  - assert_state: {key: screen.tieout_rows_shown, equals: 2}
+  - assert_exists: {label_contains: "1200"}
+  - screenshot: open-item-differences
+  - command: dev.imports_demo_tab_receivables
+  - assert_state: {key: screen.tieout_rows_shown, equals: 1}
+  - assert_state: {key: screen.can_next, equals: false}
+  - screenshot: open-item-receivables
+  - command: dev.imports_demo_differences_only
+  # --- 2. A line moved to another account -----------------------------------
+  - command: dev.imports_demo_reset
+  - key: Alt+N
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  # The journal card takes several files: the 2025-2026 one is the 8th card's file.
+  - click: {role: button, label: Remove, index: 7}
+  - assert_state: {key: screen.files, equals: 11, within_ms: 4000}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/qbd/shoal-creek-altered/repointed/journal-2025-2026.csv"]}
+  - click: {role: button, label: Add file for Journal}
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
+  - assert_state: {key: screen.tieout_all_zero, equals: false, within_ms: 4000}
+  - assert_state: {key: screen.tieout_differences, equals: 2}
+  - command: dev.imports_demo_differences_only
+  - assert_state: {key: screen.tieout_rows_shown, equals: 2}
+  - assert_exists: {label_contains: "6100"}
+  - assert_exists: {label_contains: "6200"}
+  - screenshot: repointed
+  - command: dev.imports_demo_differences_only
+  - assert_state: {key: screen.can_next, equals: false}
+  # --- 3. A journal file that overlaps another ------------------------------
+  - command: dev.imports_demo_reset
+  - key: Alt+N
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/qbd/shoal-creek-altered/journal-overlap.csv"]}
+  - click: {role: button, label: Add file for Journal}
+  - assert_state: {key: screen.files, equals: 13, within_ms: 4000}
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.trouble, equals: period_overlap, within_ms: 6000}
+  - assert_state: {key: screen.imported, equals: false}
+  - screenshot: overlap
+  - command: dev.imports_demo_reset
+  - command: file.close_window
+  - wait: {ms: 300}

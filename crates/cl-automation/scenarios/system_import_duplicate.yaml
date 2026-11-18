@@ -1,0 +1,55 @@
+# Switch from another program (P31): Accounting Power's files imported, then
+# the same files added again in a fresh window: each is refused ("imported
+# before") and Continue stays off; nothing is sent.
+name: system_import_duplicate
+description: The same files twice - the second set is refused in plain words and can't go on.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: file.import_system
+  - command: dev.imports_demo_reset
+  - click: {role: radio_button, label: Where your books are now, index: 0}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: dates}
+  - click: {role: text_input, label: Switch date}
+  - key: Ctrl+A
+  - type: {text: "06/30/2026"}
+  - click: {role: text_input, label: Opening balance date}
+  - key: Ctrl+A
+  - type: {text: "12/31/2025"}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: files}
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_uploaded, equals: 6, within_ms: 6000}
+  - assert_state: {key: screen.files_refused, equals: 0}
+  - assert_state: {key: screen.can_next, equals: true}
+  - screenshot: files
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: mapping}
+  - assert_state: {key: screen.unmapped, equals: 0}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: import}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
+  - assert_state: {key: screen.tieout_all_zero, equals: true, within_ms: 4000}
+  - assert_state: {key: screen.tieout_differences, equals: 0}
+  - key: Alt+N
+  - assert_state: {key: screen.verified, equals: true, within_ms: 4000}
+  - command: file.close_window
+  - wait: {ms: 300}
+  - command: file.import_system
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: dates}
+  - click: {role: text_input, label: Switch date}
+  - key: Ctrl+A
+  - type: {text: "06/30/2026"}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: files}
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_refused, equals: 6, within_ms: 6000}
+  - assert_exists: {label_contains: "imported before"}
+  - assert_state: {key: screen.can_next, equals: false}
+  - screenshot: refused
+  - command: dev.imports_demo_reset
+  - command: file.close_window
+  - wait: {ms: 300}

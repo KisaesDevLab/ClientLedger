@@ -1,0 +1,31 @@
+# Switch from QuickBooks Desktop (P31): only the company's Admin brings books
+# over. A Bookkeeper sees none of the three import entries in the File menu
+# or the palette, and a forced command (its id) opens nothing and says why.
+# Back to Admin at the end so the dark run starts the same. Synthetic.
+name: qbd_import_restricted
+description: A Bookkeeper sees no import entries in File or the palette; a forced command is refused.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: dev.demo_rights_bookkeeper
+  - assert_state: {key: is_admin, equals: false}
+  - click: {role: button, label: File, index: 0}
+  - assert_not_exists: {role: button, label_contains: Import from QuickBooks Desktop}
+  - assert_not_exists: {role: button, label_contains: Import from Another Accounting Program}
+  - assert_not_exists: {role: button, label_contains: Import Transactions from a Spreadsheet}
+  - screenshot: menu-file
+  - click: {role: button, label: File, index: 0}
+  - key: Ctrl+K
+  - type: {text: quickbooks desktop}
+  - assert_not_exists: {role: button, label_contains: Import from QuickBooks Desktop}
+  - key: Escape
+  - command: file.import_qbd
+  - assert_state: {key: toast, equals: Not available for your role in this company.}
+  - assert_not_exists: {role: tab, label_contains: Switch from QuickBooks Desktop}
+  - screenshot: refused
+  - command: dev.demo_rights_all
+  - assert_state: {key: is_admin, equals: true}
+  - click: {role: button, label: File, index: 0}
+  - assert_exists: {role: button, label_contains: Import from QuickBooks Desktop}
+  - screenshot: menu-file-admin
+  - click: {role: button, label: File, index: 0}

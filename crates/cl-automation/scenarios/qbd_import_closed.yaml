@@ -1,0 +1,65 @@
+# Switch from QuickBooks Desktop (P31): the books are closed through
+# 09/30/2026 and the import has older transactions. The closing-date prompt
+# comes up; a wrong password keeps it and imports nothing; the right one
+# (demo-close) imports. Then, with no closing-date password set, the window
+# asks once to confirm importing into the closed period.
+name: qbd_import_closed
+description: Closed period - the password prompt (wrong, then right); with no password set, a confirmation.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: file.import_qbd
+  - command: dev.imports_demo_reset
+  - key: Alt+N
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: import}
+  - command: dev.imports_demo_close_books
+  - key: Alt+N
+  - assert_state: {key: screen.closing, equals: asking, within_ms: 4000}
+  - assert_state: {key: screen.imported, equals: false}
+  - assert_exists: {role: password_input, label: Closing-date password}
+  - screenshot: prompt
+  - click: {role: password_input, label: Closing-date password}
+  - type: {text: "nope"}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.closing_attempt, equals: 1, within_ms: 4000}
+  - assert_state: {key: screen.imported, equals: false}
+  - assert_exists: {role: label, label: That password isn't right.}
+  - screenshot: wrong-password
+  - click: {role: password_input, label: Closing-date password}
+  - key: Ctrl+A
+  - type: {text: "demo-close"}
+  - click: {role: button, label: Change}
+  - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
+  - assert_state: {key: screen.imported, equals: true}
+  - screenshot: imported
+  # --- No closing-date password set: confirm ----------------------------------
+  - command: dev.imports_demo_reset
+  - command: dev.imports_demo_no_closing_password
+  - key: Alt+N
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - command: dev.imports_demo_close_books
+  - key: Alt+N
+  - assert_state: {key: screen.ask_closed, equals: true, within_ms: 4000}
+  - assert_state: {key: screen.imported, equals: false}
+  - assert_exists: {role: label, label: Import into a closed period?}
+  - screenshot: confirm
+  - click: {role: button, label: Cancel}
+  - assert_state: {key: screen.ask_closed, equals: false}
+  - assert_state: {key: screen.imported, equals: false}
+  - key: Alt+N
+  - assert_state: {key: screen.ask_closed, equals: true, within_ms: 4000}
+  - click: {role: button, label: Import into the closed period}
+  - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
+  - assert_state: {key: screen.imported, equals: true}
+  - command: dev.imports_demo_reset
+  - command: file.close_window
+  - wait: {ms: 300}

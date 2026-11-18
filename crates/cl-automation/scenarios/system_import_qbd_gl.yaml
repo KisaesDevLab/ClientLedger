@@ -1,0 +1,46 @@
+# Switch from another program (P31) against `clientledger --demo`: QuickBooks Desktop (accounts and general ledger only) (synthetic fixtures/imports/qbd-gl). The
+# switch date and opening date are typed (the other programs have no prefill),
+# the files are read, imported and tied out to 0.00 on the trial balance
+# (the only tab for other programs), then verified. Counts and flags only.
+name: system_import_qbd_gl
+description: QuickBooks Desktop (accounts and general ledger only) - choose, dates, files, import, tie-out 0.00, verified.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: file.import_system
+  - command: dev.imports_demo_reset
+  - assert_state: {key: screen.screen, equals: file.import_system}
+  - click: {role: radio_button, label: Where your books are now, index: 2}
+  - assert_state: {key: screen.source, equals: qbd_gl}
+  - screenshot: source
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: dates}
+  - click: {role: text_input, label: Switch date}
+  - key: Ctrl+A
+  - type: {text: "06/30/2026"}
+  - click: {role: text_input, label: Opening balance date}
+  - key: Ctrl+A
+  - type: {text: "12/31/2025"}
+  - screenshot: dates
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: files}
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_uploaded, equals: 6, within_ms: 6000}
+  - assert_state: {key: screen.files_refused, equals: 0}
+  - assert_state: {key: screen.can_next, equals: true}
+  - screenshot: files
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: mapping}
+  - assert_state: {key: screen.unmapped, equals: 0}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: import}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
+  - assert_state: {key: screen.tieout_all_zero, equals: true, within_ms: 4000}
+  - assert_state: {key: screen.tieout_differences, equals: 0}
+  - screenshot: tieout
+  - key: Alt+N
+  - assert_state: {key: screen.verified, equals: true, within_ms: 4000}
+  - command: dev.imports_demo_reset
+  - command: file.close_window
+  - wait: {ms: 300}
