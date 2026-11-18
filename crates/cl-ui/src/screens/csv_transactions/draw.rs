@@ -226,10 +226,16 @@ impl CsvTransactionsScreen {
         ui.label(t_with(
             "txn_import.preview.counts",
             &[
-                ("invoices", &c.invoices.to_string()),
-                ("bills", &c.bills.to_string()),
-                ("entries", &c.journal_entries.to_string()),
-                ("rows", &plan.rows.to_string()),
+                (
+                    "invoices",
+                    &counted("txn_import.count.invoices", c.invoices),
+                ),
+                ("bills", &counted("txn_import.count.bills", c.bills)),
+                (
+                    "entries",
+                    &counted("txn_import.count.entries", c.journal_entries),
+                ),
+                ("rows", &counted("txn_import.count.rows", plan.rows)),
             ],
         ));
         // U-268: the import adds no names, products, tags or accounts.
@@ -274,9 +280,15 @@ impl CsvTransactionsScreen {
         ui.label(t_with(
             "txn_import.done",
             &[
-                ("invoices", &c.invoices.to_string()),
-                ("bills", &c.bills.to_string()),
-                ("entries", &c.journal_entries.to_string()),
+                (
+                    "invoices",
+                    &counted("txn_import.count.invoices", c.invoices),
+                ),
+                ("bills", &counted("txn_import.count.bills", c.bills)),
+                (
+                    "entries",
+                    &counted("txn_import.count.entries", c.journal_entries),
+                ),
             ],
         ));
         if let Some(b) = &self.backup_ref {
@@ -488,4 +500,9 @@ impl CsvTransactionsScreen {
             }
         });
     }
+}
+
+/// `n` things in words, singular for one ("1 invoice", "2 invoices").
+fn counted<N: TryInto<usize>>(key: &str, n: N) -> String {
+    crate::i18n::t_count(key, n.try_into().unwrap_or(usize::MAX), &[])
 }

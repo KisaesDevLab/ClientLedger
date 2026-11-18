@@ -1896,8 +1896,11 @@ impl Shell {
             .is_none_or(crate::windows::Window::can_save);
         // A save whose outcome is unknown may already be in the books; a
         // wizard may have its own words (P30 QA-13).
-        let (message, close_label, keep_label) =
-            crate::windows::close_prompt_text(self.windows.get(prompt.window), &title);
+        let (message, close_label, keep_label) = crate::windows::close_prompt_text(
+            self.windows.get(prompt.window),
+            &title,
+            prompt.quitting,
+        );
         let mut answer: Option<PromptAnswer> = None;
         egui::Window::new(t("window.prompt.title"))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])

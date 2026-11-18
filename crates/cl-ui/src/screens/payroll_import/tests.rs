@@ -1631,7 +1631,8 @@ fn the_close_prompt_speaks_of_payroll() {
     let mut s = screen(&f);
     cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
     let id = windows.open_new(CommandId::new(KIND), Box::new(s));
-    let (msg, close, keep) = crate::windows::close_prompt_text(windows.get(id), "Import Payroll");
+    let (msg, close, keep) =
+        crate::windows::close_prompt_text(windows.get(id), "Import Payroll", false);
     assert_eq!(msg, "This payroll import hasn't been posted. Discard it?");
     assert_eq!((close.as_str(), keep.as_str()), ("Discard", "Keep working"));
     assert!(!msg.contains("Bank Feed"));
@@ -1643,7 +1644,7 @@ fn the_close_prompt_speaks_of_payroll() {
     let _ = s.post_job.take();
     s.after_post(Err(lost()));
     let id = windows.open_new(CommandId::new(KIND), Box::new(s));
-    let (msg, _, _) = crate::windows::close_prompt_text(windows.get(id), "Import Payroll");
+    let (msg, _, _) = crate::windows::close_prompt_text(windows.get(id), "Import Payroll", false);
     assert!(
         msg.contains("History") && !msg.contains("Discard it"),
         "{msg}"

@@ -69,7 +69,7 @@ steps:
   - assert_state: {key: screen.step, equals: spot_check}
   # Five of the batch's own transactions (U-271), each with an Open link.
   - assert_state: {key: screen.spot_samples, equals: 5, within_ms: 4000}
-  - assert_exists: {label_contains: "Open Transaction", index: 0}
+  - assert_exists: {role: link, label_contains: "matches the one in QuickBooks Desktop", index: 0}
   - screenshot: spot-check
   - command: dev.imports_demo_spot_tick_all
   - assert_state: {key: screen.spot_complete, equals: true}

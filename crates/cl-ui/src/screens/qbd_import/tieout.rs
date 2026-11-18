@@ -141,10 +141,30 @@ pub struct TieState {
     totals_differ: Vec<Tab>,
 }
 
+/// A document number as the owner knows it: `None` for none, and for the
+/// key the import makes up for a row with no number (`payment:<name>`),
+/// which is never shown (UI review).
+#[must_use]
+pub fn shown_number(n: Option<&str>) -> Option<&str> {
+    n.map(str::trim)
+        .filter(|n| !n.is_empty() && !n.contains(':'))
+}
+
+/// An open item's words: "1005 · Brightwater HOA"; with no number of its
+/// own, its kind ("Credit memo · Riverside Café").
 fn item_label(i: &TieOutItem) -> String {
-    match i.number.as_deref().filter(|n| !n.is_empty()) {
+    let lead = shown_number(i.number.as_deref())
+        .map(str::to_string)
+        .or_else(|| {
+            i.doc_type
+                .as_deref()
+                .map(|d| format!("imports.spot.type.{d}"))
+                .filter(|k| crate::i18n::has(k))
+                .map(|k| t(&k))
+        });
+    match lead {
         Some(n) if !i.name.is_empty() => format!("{n} · {}", i.name),
-        Some(n) => n.to_string(),
+        Some(n) => n,
         None => i.name.clone(),
     }
 }
@@ -415,8 +435,25 @@ fn check_name(key: &str) -> String {
     t(&format!("imports.tieout.check.{key}"))
 }
 
+/// The source as a column heading (short: "Other program" for the
+/// spreadsheet layout).
 fn source_name(s: &ImportScreen) -> String {
-    t(&format!("imports.source.{}", s.wizard.source.key()))
+    let short = format!("imports.source_short.{}", s.wizard.source.key());
+    if crate::i18n::has(&short) {
+        t(&short)
+    } else {
+        t(&format!("imports.source.{}", s.wizard.source.key()))
+    }
+}
+
+/// The source inside a sentence ("…exported from another program").
+fn source_phrase(s: &ImportScreen) -> String {
+    let phrase = format!("imports.source_phrase.{}", s.wizard.source.key());
+    if crate::i18n::has(&phrase) {
+        t(&phrase)
+    } else {
+        t(&format!("imports.source.{}", s.wizard.source.key()))
+    }
 }
 
 /// The first column's heading for a tab.
@@ -464,12 +501,19 @@ fn amount(m: Money) -> String {
 fn total_rows(st: &TieState, tab: Tab, tie: &TieOut) -> Vec<[String; 4]> {
     match tab {
         Tab::TrialBalance => tie.totals.accounts.map_or_else(Vec::new, |x| {
+            // The mockup's "Total (all N accounts)" row, with the tab's
+            // difference figure (the tile's: 0.00 when no account differs,
+            // else how many do; never a sum the engine didn't send).
             vec![
                 [
-                    t("imports.tieout.total.debits"),
+                    t_count(
+                        "imports.tieout.total.debits_of",
+                        st.of(Section::Accounts).count(),
+                        &[],
+                    ),
                     amount(x.source_debit),
                     amount(x.books_debit),
-                    String::new(),
+                    st.tile(Tab::TrialBalance, tie).figure,
                 ],
                 [
                     t("imports.tieout.total.credits"),
@@ -505,7 +549,7 @@ fn visible_width(ui: &Ui) -> f32 {
         .max(MIN_WIDTH)
 }
 
-const MIN_WIDTH: f32 = 520.0;
+const MIN_WIDTH: f32 = 340.0;
 const TILE_GAP: f32 = 8.0;
 const TILE_MIN: f32 = 180.0;
 
@@ -516,8 +560,11 @@ pub fn tieout_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
     let source = source_name(s);
     ui.add(
         egui::Label::new(
-            RichText::new(t_with("imports.tieout.intro", &[("source", &source)]))
-                .color(tokens.text_secondary),
+            RichText::new(t_with(
+                "imports.tieout.intro",
+                &[("source", &source_phrase(s))],
+            ))
+            .color(tokens.text_secondary),
         )
         .wrap(),
     );
@@ -539,13 +586,12 @@ pub fn tieout_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
     ui.add_space(10.0);
     let mut save = false;
     ui.horizontal_wrapped(|ui| {
-        let group =
-            ui.label(RichText::new(t("imports.tieout.compare")).color(tokens.text_secondary));
+        // Each tab is named by its own words (UI review: all four read
+        // "Compare" when labelled by the group).
+        ui.label(RichText::new(t("imports.tieout.compare")).color(tokens.text_secondary));
         for tab in &tabs {
             let on = s.tie.as_ref().is_some_and(|x| x.tab == *tab);
-            let r = ui
-                .selectable_label(on, t(&format!("imports.tieout.tab.{}", tab.key())))
-                .labelled_by(group.id);
+            let r = ui.selectable_label(on, t(&format!("imports.tieout.tab.{}", tab.key())));
             if r.clicked()
                 && let Some(x) = s.tie.as_mut()
             {
@@ -621,8 +667,10 @@ fn tiles_ui(ui: &mut Ui, tokens: &Tokens, width: f32, tiles: &[Tile]) {
     let fits = |n: usize| (width - TILE_GAP * (n as f32 - 1.0)) / n as f32 >= TILE_MIN;
     let per_row = if fits(tiles.len()) {
         tiles.len()
-    } else {
+    } else if fits(2) {
         2.min(tiles.len())
+    } else {
+        1
     };
     let w = (width - TILE_GAP * (per_row as f32 - 1.0)) / per_row as f32;
     for chunk in tiles.chunks(per_row) {
@@ -686,7 +734,7 @@ fn tile_ui(ui: &mut Ui, tokens: &Tokens, width: f32, tile: &Tile) {
                             .size(12.0)
                             .color(tokens.text_secondary),
                     )
-                    .truncate(),
+                    .wrap(),
                 );
             });
         });
@@ -695,15 +743,30 @@ fn tile_ui(ui: &mut Ui, tokens: &Tokens, width: f32, tile: &Tile) {
 /// Column widths (pixels only; never an amount).
 #[allow(clippy::float_arithmetic, reason = "layout pixels")]
 fn widths(total: f32) -> [f32; 4] {
-    let amount = (total * 0.2).clamp(100.0, 200.0);
-    [(total - amount * 3.0).max(120.0), amount, amount, amount]
+    let amount = (total * 0.2).clamp(80.0, 200.0);
+    [(total - amount * 3.0).max(90.0), amount, amount, amount]
 }
 
 const ROW_H: f32 = 24.0;
 /// The table's height before it scrolls (14 rows).
 const TABLE_H: f32 = 336.0;
+/// Rows the table always shows, however small the window.
+const MIN_ROWS: f32 = 3.0;
+/// The lines under the table (all zero or the differences, the Admin note).
+const FOOTER_H: f32 = 64.0;
 
 fn row_ui(ui: &mut Ui, w: &[f32; 4], cells: [RichText; 4]) -> egui::Response {
+    row_ui_tick(ui, w, cells, None)
+}
+
+/// A row; `tick` draws a check mark after the last cell (the total row's
+/// "0.00 ✓" when every difference is zero).
+fn row_ui_tick(
+    ui: &mut Ui,
+    w: &[f32; 4],
+    cells: [RichText; 4],
+    tick: Option<egui::Color32>,
+) -> egui::Response {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for (i, cell) in cells.into_iter().enumerate() {
@@ -714,6 +777,12 @@ fn row_ui(ui: &mut Ui, w: &[f32; 4], cells: [RichText; 4]) -> egui::Response {
             };
             ui.allocate_ui_with_layout(egui::vec2(w[i], ROW_H), layout, |ui| {
                 ui.set_min_size(egui::vec2(w[i], ROW_H));
+                if i == 3
+                    && let Some(color) = tick
+                {
+                    crate::widgets::check_mark(ui, 14.0, color, &t("imports.tieout.check_mark"));
+                    ui.add_space(4.0);
+                }
                 ui.add(egui::Label::new(cell).truncate());
             });
         }
@@ -729,13 +798,33 @@ fn diff_cell(r: &Row, tokens: &Tokens) -> RichText {
     })
 }
 
-#[allow(clippy::float_arithmetic, reason = "layout pixels")]
+#[allow(
+    clippy::float_arithmetic,
+    clippy::cast_precision_loss,
+    reason = "layout pixels"
+)]
 fn table_ui(ui: &mut Ui, tokens: &Tokens, width: f32, st: &TieState, tie: &TieOut, source: &str) {
     let tab = st.tab;
     let rows = st.indexed(tab);
     // The frame's margins (12 + 12) and stroke come off the inside width.
     let inner = (width - 26.0).max(MIN_WIDTH - 26.0);
     let w = widths(inner);
+    // The rows scroll inside the table and the total rows stay below them
+    // (Q-265, P31 UI review): the rows get what is left of the visible body
+    // once the heading, the totals, the checks and the closing lines have
+    // their room, so the totals never fall off the bottom.
+    let totals_n = total_rows(st, tab, tie).len();
+    let checks_n = st.checks(tab).len();
+    let reserve = ROW_H * 2.0
+        + ROW_H * totals_n as f32
+        + if checks_n > 0 {
+            ROW_H * (checks_n as f32 + 1.0) + 8.0
+        } else {
+            0.0
+        }
+        + FOOTER_H;
+    let visible = ui.clip_rect().bottom() - ui.cursor().top();
+    let rows_h = (visible - reserve).clamp(ROW_H * MIN_ROWS, TABLE_H);
     egui::Frame::new()
         .stroke(egui::Stroke::new(1.0, tokens.border_default))
         .corner_radius(6)
@@ -767,7 +856,7 @@ fn table_ui(ui: &mut Ui, tokens: &Tokens, width: f32, st: &TieState, tie: &TieOu
                 // Virtualized: only the rows on screen are laid out.
                 egui::ScrollArea::vertical()
                     .id_salt("imports/tieout/rows")
-                    .max_height(TABLE_H)
+                    .max_height(rows_h)
                     .auto_shrink([false, true])
                     .show_rows(ui, ROW_H, rows.len(), |ui, range| {
                         for (i, r) in &rows[range] {
@@ -800,7 +889,9 @@ fn table_ui(ui: &mut Ui, tokens: &Tokens, width: f32, st: &TieState, tie: &TieOu
             }
             for [label, src, books, diff] in totals {
                 let zero = diff.is_empty() || diff == amount(Money::ZERO);
-                row_ui(
+                let tick =
+                    (zero && !diff.is_empty() && st.view.checkmark()).then_some(tokens.accent);
+                row_ui_tick(
                     ui,
                     &w,
                     [
@@ -813,6 +904,7 @@ fn table_ui(ui: &mut Ui, tokens: &Tokens, width: f32, st: &TieState, tie: &TieOu
                             tokens.warn_text
                         }),
                     ],
+                    tick,
                 );
             }
         });

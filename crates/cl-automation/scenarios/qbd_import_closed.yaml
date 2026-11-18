@@ -25,7 +25,7 @@ steps:
   - screenshot: prompt
   - click: {role: password_input, label: Closing-date password}
   - type: {text: "nope"}
-  - click: {role: button, label: Change}
+  - click: {role: button, label: Unlock and import}
   - assert_state: {key: screen.closing_attempt, equals: 1, within_ms: 4000}
   - assert_state: {key: screen.imported, equals: false}
   - assert_exists: {role: label, label: That password isn't right.}
@@ -33,7 +33,7 @@ steps:
   - click: {role: password_input, label: Closing-date password}
   - key: Ctrl+A
   - type: {text: "demo-close"}
-  - click: {role: button, label: Change}
+  - click: {role: button, label: Unlock and import}
   - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
   - assert_state: {key: screen.imported, equals: true}
   - screenshot: imported

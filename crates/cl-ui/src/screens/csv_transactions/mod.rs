@@ -1223,9 +1223,16 @@ impl Screen for CsvTransactionsScreen {
         false
     }
 
-    fn close_words(&self) -> Option<crate::windows::CloseWords> {
+    /// Review B2: closing the window doesn't stop a sent commit or undo;
+    /// quitting may; during the backup nothing has been sent.
+    fn close_words(&self, quitting: bool) -> Option<crate::windows::CloseWords> {
+        let message = match (self.phase, quitting) {
+            (Phase::BackingUp(_), _) => "txn_import.close_prompt.backup",
+            (_, true) => "txn_import.close_prompt.quit",
+            _ => "txn_import.close_prompt",
+        };
         Some(crate::windows::CloseWords {
-            message: t("txn_import.close_prompt"),
+            message: t(message),
             close: t("txn_import.close_prompt.discard"),
             keep: t("txn_import.close_prompt.keep"),
         })

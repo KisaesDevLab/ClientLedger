@@ -78,6 +78,10 @@ pub struct Entry {
     pub verified: bool,
     /// The before-import backup's file name.
     pub backup_ref: Option<String>,
+    /// That backup is still on this computer (the screen looks; normal
+    /// retention may have removed a verified batch's, Q-P31aa). Restore is
+    /// offered only when it is (review S3).
+    pub backup_present: bool,
 }
 
 /// What a row offers. Buttons a non-Admin can't use are hidden (plan §4).
@@ -108,7 +112,7 @@ pub fn actions(e: &Entry, admin: bool) -> Actions {
         undo: admin && committed,
         retry: admin && e.status == BatchStatus::Failed,
         check_status: e.status.is_running(),
-        restore: admin && committed && e.backup_ref.is_some(),
+        restore: admin && committed && e.backup_ref.is_some() && e.backup_present,
     }
 }
 
@@ -147,6 +151,7 @@ mod tests {
             conversion_date: None,
             verified,
             backup_ref: Some(format!("{id}.clbackup")),
+            backup_present: true,
         }
     }
 
@@ -179,6 +184,12 @@ mod tests {
             actions(&verified, true).undo,
             "undo until something is used"
         );
+        // S3: a verified batch's backup that retention removed: Undo stays
+        // (it takes its own backup first), Restore goes.
+        let mut pruned = verified.clone();
+        pruned.backup_present = false;
+        assert!(actions(&pruned, true).undo && !actions(&pruned, true).restore);
+        assert!(!protected_backups(std::slice::from_ref(&verified)).contains("b.clbackup"));
         let failed = entry("c", BatchStatus::Failed, false, "2026-11-01");
         assert!(actions(&failed, true).retry && !actions(&failed, true).undo);
         let running = entry("d", BatchStatus::Committing, false, "2026-11-01");

@@ -325,12 +325,57 @@ fn the_close_prompt_asks_only_while_the_job_still_runs() {
     // One read short of the end: still running.
     assert_eq!(s.running, Some(Running::Commit));
     assert!(s.dirty());
-    let w = s.close_words().expect("words");
+    // B2: closing the window doesn't stop the job; quitting may.
+    let w = s.close_words(false).expect("words");
     assert_eq!(w.message, t("imports.close.running"));
+    assert_eq!(w.close, t("imports.close.close_anyway"));
+    let q = s.close_words(true).expect("words");
+    assert_eq!(q.message, t("imports.close.running_quit"));
+    assert_eq!(q.close, t("imports.close.quit_anyway"));
+    for words in [&w.message, &q.message] {
+        assert!(!words.contains("nothing from it will be posted"), "{words}");
+    }
     // The next reads find it done: no question.
     finish(&mut s);
     assert!(s.wizard.imported);
     assert!(!s.dirty(), "{}", s.state());
+}
+
+/// Review B2: during the backup nothing was sent (closing posts nothing);
+/// once the job is out, the shell's prompt (tab close and quit) never says
+/// nothing will be posted.
+#[test]
+fn the_close_and_quit_prompts_tell_the_truth_mid_job() {
+    let f = fixture();
+    let mut s = screen(&f);
+    to_import(&mut s);
+    cmd(&mut s, "dev.imports_demo_backup_hold");
+    s.next();
+    s.poll();
+    assert!(s.in_flight() && s.running.is_none(), "{}", s.state());
+    for quitting in [false, true] {
+        let w = s.close_words(quitting).expect("words");
+        assert_eq!(w.message, t("imports.close.backup"));
+    }
+    // A held demo job stays running however often it is read.
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.imports_demo_reset");
+    to_import(&mut s);
+    cmd(&mut s, "dev.imports_demo_job_hold");
+    s.next();
+    for _ in 0..8 {
+        s.poll();
+    }
+    assert_eq!(s.running, Some(Running::Commit), "{}", s.state());
+    let mut windows = crate::windows::Windows::new();
+    let id = windows.open_new(CommandId::new(KIND), Box::new(s));
+    let (msg, close, _) = crate::windows::close_prompt_text(windows.get(id), "Import", false);
+    assert_eq!(msg, t("imports.close.running"));
+    assert_eq!(close, t("imports.close.close_anyway"));
+    let (msg, close, _) = crate::windows::close_prompt_text(windows.get(id), "Import", true);
+    assert_eq!(msg, t("imports.close.running_quit"));
+    assert_eq!(close, t("imports.close.quit_anyway"));
+    assert!(!msg.contains("will be posted"));
 }
 
 #[test]
@@ -605,7 +650,15 @@ fn an_altered_open_invoice_shows_on_receivables_and_its_history_account() {
     let st = s.state();
     assert_eq!(st["tieout_tab"], "accounts", "{st}");
     assert_eq!(st["tieout_differences_only"], true);
-    assert_eq!(st["tieout_marked"], "1200");
+    let marked = usize::try_from(st["tieout_marked"].as_u64().expect("index")).expect("index");
+    assert_eq!(
+        s.tie.as_ref().expect("tie").view.rows[marked].input.label,
+        "1200"
+    );
+    assert!(
+        !st.to_string().contains("1200"),
+        "M1: no row labels in state"
+    );
     assert!(!demo_batch(&f, &s).is_verified());
 }
 
@@ -1176,4 +1229,141 @@ fn every_e2_message_resolves_with_a_fix() {
     assert!(lines.iter().all(|l| !l.contains('{')), "{lines:?}");
     assert!(lines[1].contains("one day"), "{}", lines[1]);
     assert!(crate::i18n::has("imports.trouble.add_again"));
+}
+
+// ---- Logs (review S4, plan §3 and §5) ----------------------------------------
+
+#[derive(Clone, Default)]
+struct LogCapture(Arc<std::sync::Mutex<Vec<u8>>>);
+
+impl LogCapture {
+    fn text(&self) -> String {
+        String::from_utf8_lossy(
+            &self
+                .0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+        .into_owned()
+    }
+}
+
+impl std::io::Write for LogCapture {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend_from_slice(buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for LogCapture {
+    type Writer = LogCapture;
+    fn make_writer(&'a self) -> LogCapture {
+        self.clone()
+    }
+}
+
+/// Every name and amount in a fixture folder: cells with a letter and at
+/// least five characters (names, memos), and every amount cell (with and
+/// without its separators).
+fn fixture_words(dir: &str) -> Vec<String> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../fixtures")
+        .join(dir);
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(&root).expect("fixture dir") {
+        let path = e.expect("entry").path();
+        if path.extension().is_none_or(|x| x != "csv") {
+            continue;
+        }
+        let text = String::from_utf8_lossy(&std::fs::read(&path).expect("read")).into_owned();
+        for row in cl_import::csv::parse(&text)
+            .unwrap_or_default()
+            .iter()
+            .skip(1)
+        {
+            for cell in &row.fields {
+                let c = cell.trim();
+                let amount = c.contains('.')
+                    && c.chars().any(|ch| ch.is_ascii_digit() && ch != '0')
+                    && c.chars()
+                        .all(|ch| ch.is_ascii_digit() || ".,-()$".contains(ch));
+                if amount {
+                    out.push(c.to_string());
+                    out.push(c.replace([',', '$', '(', ')'], ""));
+                } else if c.chars().count() >= 5 && c.chars().any(char::is_alphabetic) {
+                    out.push(c.to_string());
+                }
+            }
+        }
+    }
+    out.sort();
+    out.dedup();
+    assert!(out.len() > 20, "{dir}: {} words", out.len());
+    out
+}
+
+fn assert_clean(logs: &str, words: &[String]) {
+    for w in words {
+        assert!(!logs.contains(w.as_str()), "the log names {w:?}:\n{logs}");
+    }
+}
+
+/// S4: the QuickBooks Desktop import, its tie-out, verify, spot-check and
+/// an undo, then another program's import, log no name or amount from the
+/// files (every level, every target).
+#[test]
+fn imports_logs_have_no_names_or_amounts() {
+    let capture = LogCapture::default();
+    let subscriber = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::TRACE)
+        .with_ansi(false)
+        .with_writer(capture.clone())
+        .finish();
+    tracing::subscriber::with_default(subscriber, || {
+        let f = fixture();
+        let mut s = screen(&f);
+        to_import(&mut s);
+        s.next();
+        finish(&mut s);
+        s.poll();
+        assert_eq!(s.tieout.as_ref().map(|t| t.all_zero), Some(true));
+        assert!(s.tieout_pdf().is_some());
+        s.next();
+        s.poll();
+        assert!(s.wizard.verified, "{}", s.state());
+        cmd(&mut s, "dev.imports_demo_spot_tick_all");
+        let id = s.batch.expect("batch");
+        s.ask_undo(id);
+        s.undo();
+        for _ in 0..6 {
+            s.poll();
+        }
+        assert!(s.undone, "{}", s.state());
+        drop(s);
+
+        let mut o = ImportScreen::new(Arc::clone(&f.link), today(), Source::AccountingPower);
+        o.poll();
+        o.next();
+        o.date_text = "06/30/2026".into();
+        o.opening_text = "12/31/2025".into();
+        o.sync_dates();
+        o.next();
+        cmd(&mut o, "dev.imports_demo_file_all");
+        o.next();
+        o.next();
+        o.next();
+        finish(&mut o);
+        assert!(o.wizard.imported, "{}", o.state());
+    });
+    let logs = capture.text();
+    // Something was logged (a capture that sees nothing proves nothing).
+    assert!(logs.contains("import verified"), "{logs}");
+    assert_clean(&logs, &fixture_words("qbd/shoal-creek"));
+    assert_clean(&logs, &fixture_words("imports/accounting-power"));
 }

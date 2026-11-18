@@ -373,6 +373,9 @@ pub struct DemoImports {
     pub closing_password_set: bool,
     /// Commits sent with `confirmClosedPeriod` (control channel).
     pub confirmed_closed: u32,
+    /// A running commit or undo stays running (one step short of the end)
+    /// until released: the close and quit prompts can be shown mid-job.
+    pub hold_jobs: bool,
 }
 
 /// How the demo answers the next backup before an import or an undo
@@ -401,6 +404,7 @@ impl Default for DemoImports {
             backup_mode: DemoBackup::Succeed,
             backups_taken: 0,
             fail_next_commit: None,
+            hold_jobs: false,
             closing_password_set: true,
             confirmed_closed: 0,
         }
@@ -1181,7 +1185,11 @@ impl DemoImports {
         let i = self.batch_index(id)?;
         let mut progress = None;
         if let Some((job, polls)) = self.batches[i].job {
-            let polls = polls + 1;
+            let polls = if self.hold_jobs {
+                (polls + 1).min(POLLS_TO_FINISH - 1)
+            } else {
+                polls + 1
+            };
             if polls >= POLLS_TO_FINISH {
                 self.finish(i, job);
             } else {

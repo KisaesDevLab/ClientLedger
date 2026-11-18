@@ -46,8 +46,9 @@ pub trait Screen {
     /// The close prompt's own words for a window with nothing to save (an
     /// import wizard, P30 QA-13), used instead of the bank-import ones;
     /// `None` keeps the shared wording. Not used while a save is
-    /// unconfirmed (that prompt keeps its own text).
-    fn close_words(&self) -> Option<CloseWords> {
+    /// unconfirmed (that prompt keeps its own text). `quitting`: the app is
+    /// quitting (the engine stops too), not just this window closing.
+    fn close_words(&self, _quitting: bool) -> Option<CloseWords> {
         None
     }
 
@@ -430,8 +431,8 @@ impl Window {
 
     /// The window's own close-prompt words, if it has them (P30 QA-13).
     #[must_use]
-    pub fn close_words(&self) -> Option<CloseWords> {
-        self.screen.close_words()
+    pub fn close_words(&self, quitting: bool) -> Option<CloseWords> {
+        self.screen.close_words(quitting)
     }
 }
 
@@ -451,7 +452,11 @@ pub struct CloseWords {
 /// A save that may be in the books keeps its own warning; a window with
 /// nothing to save uses its own words when it has them (P30 QA-13).
 #[must_use]
-pub fn close_prompt_text(w: Option<&Window>, title: &str) -> (String, String, String) {
+pub fn close_prompt_text(
+    w: Option<&Window>,
+    title: &str,
+    quitting: bool,
+) -> (String, String, String) {
     let unconfirmed = w.is_some_and(Window::save_unconfirmed);
     let can_save = w.is_none_or(Window::can_save);
     let keep = t("window.prompt.keep");
@@ -464,7 +469,7 @@ pub fn close_prompt_text(w: Option<&Window>, title: &str) -> (String, String, St
         );
     }
     if !can_save {
-        if let Some(words) = w.and_then(Window::close_words) {
+        if let Some(words) = w.and_then(|w| w.close_words(quitting)) {
             return (words.message, words.close, words.keep);
         }
         return (

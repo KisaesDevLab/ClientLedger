@@ -10,7 +10,7 @@ steps:
   - command: file.import_system
   - command: dev.imports_demo_reset
   - assert_state: {key: screen.screen, equals: file.import_system}
-  - click: {role: radio_button, label: Where your books are now, index: 2}
+  - click: {role: radio_button, label: QuickBooks Desktop (accounts and general ledger only)}
   - assert_state: {key: screen.source, equals: qbd_gl}
   - screenshot: source
   - key: Alt+N

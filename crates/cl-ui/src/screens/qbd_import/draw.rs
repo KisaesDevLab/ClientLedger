@@ -69,6 +69,26 @@ pub(crate) fn blocker_text(b: &Blocker) -> String {
     }
 }
 
+/// The step list's width beside the step.
+const RAIL_W: f32 = 230.0;
+/// Below this visible width the step list goes under the step.
+const NARROW: f32 = 820.0;
+
+/// The body's width that is on screen (it scrolls both ways, so its
+/// `max_rect` can run past what shows).
+#[allow(clippy::float_arithmetic, reason = "layout pixels")]
+fn visible_width(ui: &Ui) -> f32 {
+    (ui.clip_rect().right() - ui.cursor().left()).min(ui.available_width())
+}
+
+/// An engine timestamp as the owner's local date and time (`10/28/2026
+/// 2:04 PM`).
+fn local_when(s: &str) -> Option<String> {
+    let at = cl_core::Timestamp::parse_wire(s).ok()?;
+    let local = at.as_utc().with_timezone(&chrono::Local);
+    Some(local.format("%m/%d/%Y %-I:%M %p").to_string())
+}
+
 /// A batch as History's model row.
 pub(crate) fn entry_of(b: &ImportBatch) -> Entry {
     let source = Source::ALL
@@ -87,6 +107,8 @@ pub(crate) fn entry_of(b: &ImportBatch) -> Entry {
         conversion_date: b.conversion_date,
         verified: b.is_verified(),
         backup_ref: b.backup_ref.clone(),
+        // History looks the file up (`ImportScreen::backup_path`).
+        backup_present: b.backup_ref.is_some(),
     }
 }
 
@@ -112,14 +134,26 @@ impl ImportScreen {
                     match self.view {
                         View::History => self.history_ui(ui, &tokens),
                         View::Import => {
-                            ui.horizontal_top(|ui| {
+                            // README item 6: at narrow widths (the minimum
+                            // window, 200% zoom) the step list moves below
+                            // the step, which takes the whole width.
+                            if visible_width(ui) < NARROW {
                                 ui.vertical(|ui| {
-                                    ui.set_width(230.0);
+                                    self.step_ui(ui, &tokens);
+                                    ui.add_space(12.0);
+                                    ui.separator();
                                     self.rail_ui(ui, &tokens);
                                 });
-                                ui.separator();
-                                ui.vertical(|ui| self.step_ui(ui, &tokens));
-                            });
+                            } else {
+                                ui.horizontal_top(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.set_width(RAIL_W);
+                                        self.rail_ui(ui, &tokens);
+                                    });
+                                    ui.separator();
+                                    ui.vertical(|ui| self.step_ui(ui, &tokens));
+                                });
+                            }
                         }
                     }
                 });
@@ -160,20 +194,25 @@ impl ImportScreen {
                 self.show_history();
             }
             if let Some(b) = self.state.as_ref().filter(|b| b.batch.backup_ref.is_some()) {
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let when = b
-                        .batch
-                        .committed_at
-                        .as_deref()
-                        .and_then(|s| cl_core::CalendarDate::parse_wire(s.get(..10)?).ok())
-                        .map(show_date)
-                        .unwrap_or_default();
-                    note(
-                        ui,
-                        tokens,
-                        &t_with("imports.backup_taken", &[("date", &when)]),
-                    );
-                });
+                // The date and time of the import (F5); kept once seen, so
+                // an undone batch (no commit time any more) still says when.
+                if let Some(when) = b.batch.committed_at.as_deref().and_then(local_when) {
+                    self.backup_when = Some(when);
+                }
+                let text = self.backup_when.as_ref().map_or_else(
+                    || t("imports.backup_taken_plain"),
+                    |when| t_with("imports.backup_taken", &[("date", when)]),
+                );
+                // Right-aligned when there is room; else on its own line
+                // (narrow windows and 200% zoom).
+                if ui.available_width() > 340.0 {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        note(ui, tokens, &text);
+                    });
+                } else {
+                    ui.end_row();
+                    note(ui, tokens, &text);
+                }
             }
         });
     }
@@ -248,7 +287,10 @@ impl ImportScreen {
             }
         }
         ui.add_space(24.0);
-        note(ui, tokens, &t("imports.not_brought_over"));
+        // QuickBooks Desktop words only where QuickBooks Desktop is the source.
+        if matches!(self.wizard.source, Source::Qbd | Source::QbdGl) {
+            note(ui, tokens, &t("imports.not_brought_over"));
+        }
         if self.wizard.imported
             && !self.undone
             && self.allowed()
@@ -296,7 +338,7 @@ impl ImportScreen {
 
     fn source_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         if self.system {
-            let l = ui.label(t("imports.source.pick"));
+            ui.label(t("imports.source.pick"));
             ui.horizontal_wrapped(|ui| {
                 for s in crate::screens::system_import::SOURCES {
                     let r = ui.radio(
@@ -307,7 +349,6 @@ impl ImportScreen {
                         self.release_files_for_source();
                         self.wizard.set_source(s);
                     }
-                    r.labelled_by(l.id);
                 }
             });
             ui.add_space(8.0);
@@ -367,30 +408,45 @@ impl ImportScreen {
                             } else {
                                 note(ui, tokens, &status);
                             }
-                            if !pinned
-                                && !f.busy()
-                                && ui
-                                    .small_button(t("imports.files.remove"))
-                                    .on_hover_text(t_with(
-                                        "imports.files.remove_named",
-                                        &[("report", &name)],
-                                    ))
-                                    .clicked()
-                            {
-                                remove = Some(i);
+                            if !pinned && !f.busy() {
+                                // Each Remove names its report (and the
+                                // file's place on a card that takes several)
+                                // for screen readers; never the file's name.
+                                let a11y = if slot.multiple {
+                                    t_with(
+                                        "imports.files.remove_nth",
+                                        &[("report", &name), ("n", &(i + 1).to_string())],
+                                    )
+                                } else {
+                                    t_with("imports.files.remove_one", &[("report", &name)])
+                                };
+                                let r = ui.small_button(t("imports.files.remove")).on_hover_text(
+                                    t_with("imports.files.remove_named", &[("report", &name)]),
+                                );
+                                r.widget_info(|| {
+                                    egui::WidgetInfo::labeled(egui::Role::Button, true, &a11y)
+                                });
+                                if r.clicked() {
+                                    remove = Some(i);
+                                }
                             }
                         });
                     }
                     if let Some(i) = remove {
                         self.remove_file(slot.key, i);
                     }
-                    let add = if n > 0 && slot.multiple {
-                        t("imports.files.add_another")
+                    // The spoken name matches the visible words (UI review).
+                    let (add, add_named) = if n > 0 && slot.multiple {
+                        (
+                            "imports.files.add_another",
+                            "imports.files.add_another_named",
+                        )
                     } else if n > 0 {
-                        t("imports.files.replace")
+                        ("imports.files.replace", "imports.files.replace_named")
                     } else {
-                        t("imports.files.add")
+                        ("imports.files.add", "imports.files.add_named")
                     };
+                    let add = t(add);
                     ui.horizontal_wrapped(|ui| {
                         let r = ui
                             .add_enabled(!pinned && self.pick_rx.is_none(), egui::Button::new(add))
@@ -399,7 +455,7 @@ impl ImportScreen {
                             egui::WidgetInfo::labeled(
                                 egui::Role::Button,
                                 !pinned,
-                                t_with("imports.files.add_named", &[("report", &name)]),
+                                t_with(add_named, &[("report", &name)]),
                             )
                         });
                         if r.clicked() {
@@ -455,14 +511,15 @@ impl ImportScreen {
         self.sync_dates();
         if self.wizard.source.is_conversion() {
             ui.add_space(8.0);
-            let l = ui.label(RichText::new(t("imports.depth.label")).strong());
+            // Each choice is named by its own words (not the question,
+            // which made both read the same to a screen reader).
+            ui.label(RichText::new(t("imports.depth.label")).strong());
             for d in [HistoryDepth::TwoYears, HistoryDepth::All] {
                 ui.radio_value(
                     &mut self.wizard.depth,
                     d,
                     t(&format!("imports.depth.{}", d.key())),
-                )
-                .labelled_by(l.id);
+                );
             }
             if let Ok(d) = self.wizard.dates()
                 && let Some(from) = d.history_from
@@ -608,9 +665,14 @@ impl ImportScreen {
                             ui.label(format!("• {}", blocker_kind_text(&b.kind)));
                         }
                         if let Some(name) = self.blocked_backup() {
-                            note(ui, tokens, &t("imports.restore.note"));
-                            if ui.button(t("imports.restore.button")).clicked() {
-                                self.restore_backup(&name);
+                            if self.backup_path(&name).is_some() {
+                                note(ui, tokens, &t("imports.restore.note"));
+                                if ui.button(t("imports.restore.button")).clicked() {
+                                    self.restore_backup(&name);
+                                }
+                            } else {
+                                // S3: retention removed it (Q-P31aa).
+                                note(ui, tokens, &t("imports.restore.gone"));
                             }
                         }
                     }
@@ -721,8 +783,20 @@ impl ImportScreen {
             note(ui, tokens, &t("imports.history.empty"));
             return;
         }
-        let mut entries: Vec<(Entry, &ImportBatch)> =
-            list.iter().map(|b| (entry_of(b), b)).collect();
+        if self.restore_gone {
+            note(ui, tokens, &t("imports.restore.gone"));
+        }
+        let mut entries: Vec<(Entry, &ImportBatch)> = list
+            .iter()
+            .map(|b| {
+                let mut e = entry_of(b);
+                e.backup_present = b
+                    .backup_ref
+                    .as_deref()
+                    .is_some_and(|n| self.backup_path(n).is_some());
+                (e, b)
+            })
+            .collect();
         entries.sort_by(|a, b| {
             b.0.created
                 .cmp(&a.0.created)
@@ -808,62 +882,72 @@ impl ImportScreen {
             });
     }
 
+    /// Back, Start over and the step's main button, right-aligned, laid out
+    /// left to right so Tab goes Back → main button, the order on screen
+    /// (UI review). The row's width is the last frame's.
+    #[allow(clippy::float_arithmetic, reason = "layout pixels")]
     fn buttons_ui(&mut self, ui: &mut Ui) {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        let width_id = ui.scope_id().with("imports/buttons_w");
+        let last_w: f32 = ui.data(|d| d.get_temp(width_id)).unwrap_or(260.0);
+        ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 10.0;
+            if self.running.is_some() || self.backup_running() {
+                ui.label(match self.running_kind() {
+                    Running::Undo => t("imports.undo.running"),
+                    Running::Commit => t("imports.import.running"),
+                });
+            }
+            ui.add_space((ui.available_width() - last_w).max(0.0));
+            let x0 = ui.cursor().left();
             if self.view == View::History || self.wizard.step == Step::Done {
                 if ui.button(t("imports.close")).clicked() {
                     self.link
                         .push(CompanyEvent::CloseWindow(CommandId::new(self.kind())));
                 }
-                return;
-            }
-            let primary = match self.wizard.step {
-                Step::Import => t("imports.button.import"),
-                Step::TieOut => t("imports.button.verify"),
-                Step::SpotCheck => t("imports.button.finish"),
-                _ => t("imports.button.continue"),
-            };
-            let enabled = self.can_next() && self.allowed();
-            let r = ui
-                .add_enabled_ui(enabled, |ui| crate::widgets::primary_button(ui, &primary))
-                .inner
-                .on_hover_text(shortcut_hint("form.save_new"));
-            if r.clicked() {
-                self.next();
-            }
-            if self.wizard.step != Step::Source
-                && ui
-                    .add_enabled(self.can_back(), egui::Button::new(t("imports.button.back")))
-                    .on_hover_text(shortcut_hint("form.step_back"))
-                    .clicked()
-            {
-                self.back();
-            }
-            if self.wizard.step == Step::Import
-                && self.batch.is_some()
-                && !self.wizard.imported
-                && ui
-                    .add_enabled(
-                        !self.locked(),
-                        egui::Button::new(t("imports.button.start_over")),
-                    )
-                    .clicked()
-            {
-                self.start_over();
-            }
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                if self.running.is_some() || self.backup_running() {
-                    ui.label(match self.running_kind() {
-                        Running::Undo => t("imports.undo.running"),
-                        Running::Commit => t("imports.import.running"),
-                    });
+            } else {
+                if self.wizard.step == Step::Import
+                    && self.batch.is_some()
+                    && !self.wizard.imported
+                    && ui
+                        .add_enabled(
+                            !self.locked(),
+                            egui::Button::new(t("imports.button.start_over")),
+                        )
+                        .clicked()
+                {
+                    self.start_over();
                 }
-            });
+                if self.wizard.step != Step::Source
+                    && ui
+                        .add_enabled(self.can_back(), egui::Button::new(t("imports.button.back")))
+                        .on_hover_text(shortcut_hint("form.step_back"))
+                        .clicked()
+                {
+                    self.back();
+                }
+                let primary = match self.wizard.step {
+                    Step::Import => t("imports.button.import"),
+                    Step::TieOut => t("imports.button.verify"),
+                    Step::SpotCheck => t("imports.button.finish"),
+                    _ => t("imports.button.continue"),
+                };
+                let enabled = self.can_next() && self.allowed();
+                let r = ui
+                    .add_enabled_ui(enabled, |ui| crate::widgets::primary_button(ui, &primary))
+                    .inner
+                    .on_hover_text(shortcut_hint("form.save_new"));
+                if r.clicked() {
+                    self.next();
+                }
+            }
+            let used = ui.min_rect().right() - x0;
+            if (used - last_w).abs() > 0.5 {
+                ui.data_mut(|d| d.insert_temp(width_id, used));
+                ui.ctx().request_repaint();
+            }
         });
     }
 }
-
 /// The status line under a file.
 fn file_status(f: &super::SlotFile) -> String {
     if f.reading.is_some() {
@@ -876,6 +960,10 @@ fn file_status(f: &super::SlotFile) -> String {
         return t(k);
     }
     if let Some(r) = &f.refusal {
+        // One file on its card: "This file was imported before".
+        if let ImportRefusal::AlreadyCommitted { .. } = r {
+            return t("imports.refusal.already_committed_file");
+        }
         return refusal_text(r);
     }
     match &f.outcome {
@@ -928,9 +1016,7 @@ pub(crate) fn refusal_text(r: &ImportRefusal) -> String {
             "imports.refusal.period_overlap_dates",
             &[("from", &show_date(*f)), ("to", &show_date(*to))],
         ),
-        ImportRefusal::UndoBlocked { blockers } => {
-            t_with(&key, &[("n", &blockers.len().to_string())])
-        }
+        ImportRefusal::UndoBlocked { blockers } => crate::i18n::t_count(&key, blockers.len(), &[]),
         ImportRefusal::DateMismatch {
             conversion_date: Some(d),
             ..

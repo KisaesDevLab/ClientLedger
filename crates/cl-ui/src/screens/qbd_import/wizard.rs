@@ -569,10 +569,15 @@ impl ImportScreen {
             return;
         }
         if self.closing.failed(e, locked, true, closing) {
+            // The button says what it does (UI review: not "Change").
             if matches!(locked, Locked::Undo(_)) {
                 self.closing.set_ask("imports.closing.ask_undo", 1);
+                self.closing
+                    .set_verb(crate::forms::closing_prompt::Verb::UndoImport);
             } else {
                 self.closing.set_ask("imports.closing.ask_import", 1);
+                self.closing
+                    .set_verb(crate::forms::closing_prompt::Verb::Import);
             }
             self.trouble = None;
             return;
@@ -830,10 +835,14 @@ impl ImportScreen {
             .and_then(|b| b.backup_ref.clone())
     }
 
-    /// "Restore the backup taken before the import": Open Company's
-    /// restore panel, with that file (it creates a new company).
-    pub(crate) fn restore_backup(&mut self, name: &str) {
-        let path = self
+    /// Where the before-import backup `name` is on this computer, or `None`
+    /// when it is gone (normal retention removes a verified batch's,
+    /// Q-P31aa). Looked up once per name until History is read again.
+    pub(crate) fn backup_path(&mut self, name: &str) -> Option<std::path::PathBuf> {
+        if let Some(found) = self.backup_paths.get(name) {
+            return found.clone();
+        }
+        let found = self
             .link
             .store()
             .load()
@@ -849,7 +858,23 @@ impl ImportScreen {
                     })
                     .map(|b| b.path.clone())
             })
-            .unwrap_or_else(|| self.link.backup_dir.join(name));
+            .or_else(|| Some(self.link.backup_dir.join(name)))
+            // The demo's backups are simulated (no files).
+            .filter(|p| self.link.is_demo() || p.is_file());
+        self.backup_paths.insert(name.to_string(), found.clone());
+        found
+    }
+
+    /// "Restore the backup taken before the import": Open Company's
+    /// restore panel, with that file (it creates a new company). A file
+    /// that is gone is said so in plain words (review S3), never handed on.
+    pub(crate) fn restore_backup(&mut self, name: &str) {
+        self.backup_paths.remove(name);
+        let Some(path) = self.backup_path(name) else {
+            self.restore_gone = true;
+            return;
+        };
+        self.restore_gone = false;
         crate::screens::company::open::request_restore(path);
         self.link.push(crate::company::CompanyEvent::OpenWindow(
             cl_model::CommandId::new("file.open_company"),
@@ -985,6 +1010,8 @@ impl ImportScreen {
                 d.imports.backup_mode = crate::company::demo::imports::DemoBackup::HoldOnce;
             }
             "not_empty" => d.imports.company_empty = false,
+            "job_hold" => d.imports.hold_jobs = true,
+            "job_release" => d.imports.hold_jobs = false,
             "fail_commit" => d.imports.fail_next_commit = Some("IMPORT_INTERRUPTED"),
             "no_closing_password" => d.imports.closing_password_set = false,
             "differences_only" => {

@@ -167,6 +167,21 @@ fn qbo_xlsx(csv: &str) -> Vec<u8> {
     let header = rows
         .iter()
         .position(|r| r.iter().any(|c| c == "Transaction Type"));
+    // Amount columns (by their header): every amount there is a number
+    // cell, whole ones too (review M3: a raw integer value, not text).
+    let amount_header = rows
+        .iter()
+        .position(|r| r.iter().any(|c| c == "Debit" || c == "Credit"));
+    let amount_cols: Vec<usize> = amount_header
+        .map(|h| &rows[h])
+        .map(|r| {
+            r.iter()
+                .enumerate()
+                .filter(|(_, c)| matches!(c.as_str(), "Debit" | "Credit" | "Amount"))
+                .map(|(i, _)| i)
+                .collect()
+        })
+        .unwrap_or_default();
     let mut last_entry: Option<(String, String, String)> = None;
     for (r, row) in rows.iter().enumerate() {
         let mut row = row.clone();
@@ -179,13 +194,15 @@ fn qbo_xlsx(csv: &str) -> Vec<u8> {
             last_entry = Some(entry);
         }
         let r = u32::try_from(r).expect("row");
-        for (c, cell) in row.iter().enumerate() {
-            let c = u16::try_from(c).expect("col");
+        for (i, cell) in row.iter().enumerate() {
+            let c = u16::try_from(i).expect("col");
             let plain = cell.replace([',', '$'], "");
+            let amount_col = amount_header.is_some_and(|h| u32::try_from(h).is_ok_and(|h| r > h))
+                && amount_cols.contains(&i);
             // The only float in the import tests: a QBO workbook stores
             // amounts as IEEE doubles, which is what E0 must read exactly.
             match plain.parse::<f64>() {
-                Ok(n) if !plain.is_empty() && plain.contains('.') => {
+                Ok(n) if !plain.is_empty() && (plain.contains('.') || amount_col) => {
                     ws.write_number(r, c, n).expect("number");
                 }
                 _ => {
@@ -1083,4 +1100,65 @@ pub fn reimport_after_undo_allowed(h: &Harness) {
     commit(h, &s, id);
     undo(h, &s, id);
     generic_gl_upload(h, &s).expect("allowed after undo");
+}
+
+/// Review M3: a QBO workbook's raw number cells read exactly: a whole
+/// number (an integer cell, no "."), and values of 1e11 and more (which a
+/// spreadsheet shows in exponent form). The engine's sums are exact.
+pub fn qbo_xlsx_raw_values_read_exactly(h: &Harness) {
+    if !caps(h, Flow::OtherSystem) {
+        return;
+    }
+    let (s, _) = fresh_company(h, "qbo-raw-values");
+    let mut wb = rust_xlsxwriter::Workbook::new();
+    let ws = wb.add_worksheet();
+    for (r, title) in ["Bluebonnet Bakery", "Trial Balance", "As of June 30, 2026"]
+        .iter()
+        .enumerate()
+    {
+        ws.write_string(u32::try_from(r).expect("row"), 0, *title)
+            .expect("title");
+    }
+    ws.write_string(3, 1, "Debit").expect("h");
+    ws.write_string(3, 2, "Credit").expect("h");
+    // (account, debit, credit): whole numbers as integer cells; the big
+    // ones above 1e11. The only floats here are the workbook's own cells.
+    let lines: [(&str, Option<f64>, Option<f64>); 4] = [
+        ("Operating Cash", Some(12_500.0), None),
+        ("Land", Some(123_456_789_012.34), None),
+        ("Long-term Loan", None, Some(123_456_789_012.0)),
+        ("Owner's Equity", None, Some(12_500.34)),
+    ];
+    for (i, (name, dr, cr)) in lines.iter().enumerate() {
+        let r = u32::try_from(i + 4).expect("row");
+        ws.write_string(r, 0, *name).expect("name");
+        if let Some(d) = dr {
+            ws.write_number(r, 1, *d).expect("debit");
+        }
+        if let Some(c) = cr {
+            ws.write_number(r, 2, *c).expect("credit");
+        }
+    }
+    let req = UploadRequest {
+        kind: ImportKind::TrialBalance,
+        source: SourceSystem::QuickBooksOnline,
+        role: FileRole::Reference,
+        bytes: wb.save_to_buffer().expect("xlsx"),
+        file_name: "tb.xlsx".into(),
+        contact_kind: None,
+        tb_column: None,
+        tb_report_date: None,
+    };
+    let out = h.run(s.imports().upload(&req)).expect("upload");
+    assert!(out.is_clean(), "{:?}", out.problems);
+    let want: Decimal = "123456801512.34".parse().expect("decimal");
+    assert_eq!(
+        out.preview.total_debit.map(cl_core::Money::as_decimal),
+        Some(want)
+    );
+    assert_eq!(
+        out.preview.total_credit.map(cl_core::Money::as_decimal),
+        Some(want)
+    );
+    let _ = h.run(s.imports().discard(out.session.id));
 }

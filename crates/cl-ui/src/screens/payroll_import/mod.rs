@@ -2574,7 +2574,7 @@ impl Screen for PayrollImportScreen {
     }
 
     /// QA-13: the payroll wizard's own question (not the bank import's).
-    fn close_words(&self) -> Option<crate::windows::CloseWords> {
+    fn close_words(&self, _quitting: bool) -> Option<crate::windows::CloseWords> {
         Some(crate::windows::CloseWords {
             message: t("payroll.close_prompt"),
             close: t("payroll.close_prompt.discard"),

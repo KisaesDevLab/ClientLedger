@@ -466,6 +466,13 @@ pub struct ImportScreen {
     // History.
     history_job: Option<Job<Vec<ImportBatch>>>,
     pub(crate) history: Option<Vec<ImportBatch>>,
+    /// Before-import backups looked up on this computer (S3).
+    backup_paths: BTreeMap<String, Option<std::path::PathBuf>>,
+    /// Restore was asked for a backup that is no longer here.
+    pub(crate) restore_gone: bool,
+    /// When the import's backup was taken (local date and time), kept
+    /// after an undo.
+    pub(crate) backup_when: Option<String>,
 }
 
 /// Combines the files' account matches by source key: `existing` (any
@@ -497,7 +504,14 @@ pub(crate) fn merge_matches<'a>(
                 // Only the account list carries the role (U-272): keep it
                 // whichever file's match won.
                 have.system_role = role;
-                if have.name.is_empty() {
+                // A name that is only the number (a trial balance row) gives
+                // way to a file's real name (the chart's).
+                let bare = |x: &AccountMatch| {
+                    x.name.is_empty()
+                        || x.number.as_deref() == Some(x.name.as_str())
+                        || x.name == x.source_key
+                };
+                if bare(have) && !bare(m) {
                     have.name.clone_from(&m.name);
                 }
                 if have.number.is_none() {
@@ -596,6 +610,9 @@ impl ImportScreen {
             undone: false,
             history_job: None,
             history: None,
+            backup_paths: BTreeMap::new(),
+            restore_gone: false,
+            backup_when: None,
         };
         if !s.allowed() {
             s.trouble = Some(Trouble::Restricted);
@@ -879,7 +896,10 @@ impl ImportScreen {
                     && self.ask_closed.is_none()
             }
             Step::TieOut => {
-                self.tieout.as_ref().is_some_and(|t| t.all_zero)
+                // An undone import can't be verified (the engine refuses
+                // `batch_undone` too): the button is off.
+                !self.undone
+                    && self.tieout.as_ref().is_some_and(|t| t.all_zero)
                     && self.verify_job.is_none()
                     && self.allowed()
             }
@@ -953,6 +973,7 @@ impl ImportScreen {
         self.ask_closed = None;
         self.confirm_closed_next = false;
         self.undone = false;
+        self.backup_when = None;
         self.tie = None;
         self.point_at = None;
         self.pdf_message = None;
@@ -997,6 +1018,7 @@ impl ImportScreen {
     }
 
     pub(crate) fn load_history(&mut self) {
+        self.backup_paths.clear();
         self.history_job = Some(self.read(
             |d| Ok(d.imports.batches().batches),
             |s| async move { s.imports().batches_all().await },
@@ -1051,10 +1073,25 @@ impl Screen for ImportScreen {
         false
     }
 
-    fn close_words(&self) -> Option<crate::windows::CloseWords> {
-        let (message, close) = match (self.in_flight(), self.running_kind()) {
-            (true, Running::Undo) => ("imports.close.undo_running", "imports.close.quit_anyway"),
-            (true, Running::Commit) => ("imports.close.running", "imports.close.quit_anyway"),
+    /// Review B2: the words say what really happens. While only the backup
+    /// is being made nothing has been sent, so nothing posts. Once the
+    /// commit or undo is out, closing the window does not stop it (the
+    /// engine runs it to the end), and quitting may or may not: it either
+    /// finished or changed nothing, and History tells which.
+    fn close_words(&self, quitting: bool) -> Option<crate::windows::CloseWords> {
+        let sent = self.job_out.is_some() || self.running.is_some();
+        let close = if quitting {
+            "imports.close.quit_anyway"
+        } else {
+            "imports.close.close_anyway"
+        };
+        let (message, close) = match (self.in_flight(), sent, self.running_kind(), quitting) {
+            (true, false, Running::Undo, _) => ("imports.close.undo_backup", close),
+            (true, false, Running::Commit, _) => ("imports.close.backup", close),
+            (true, true, Running::Undo, false) => ("imports.close.undo_running", close),
+            (true, true, Running::Undo, true) => ("imports.close.undo_quit", close),
+            (true, true, Running::Commit, false) => ("imports.close.running", close),
+            (true, true, Running::Commit, true) => ("imports.close.running_quit", close),
             _ => ("imports.close.files", "imports.close.discard"),
         };
         Some(crate::windows::CloseWords {
@@ -1106,10 +1143,9 @@ impl Screen for ImportScreen {
                     self.view = View::Import;
                     return true;
                 }
-                if self.can_back() {
-                    self.back();
-                    return true;
-                }
+                // Esc never walks back through the steps (UI review): with
+                // nothing of its own to revert it goes to the shell, which
+                // closes the window or asks first when there is work.
                 false
             }
             _ => false,
@@ -1179,7 +1215,8 @@ impl Screen for ImportScreen {
             "tieout_differences_only": self.tie.as_ref().map(|x| x.view.differences_only),
             "tieout_rows_shown": self.tie.as_ref().map(|x| x.rows(x.tab).len() + x.checks(x.tab).len()),
             "tieout_differences": self.tie.as_ref().map(tieout::TieState::all_differences),
-            "tieout_marked": self.tie.as_ref().and_then(|x| x.focus).and_then(|i| self.tie.as_ref().map(|x| x.view.rows[i].input.label.clone())),
+            // The marked row's index (M1: never its label, which can be a name).
+            "tieout_marked": self.tie.as_ref().and_then(|x| x.focus),
             "spot_samples": self.spot.items.iter().filter(|i| i.key.starts_with("sample:")).count(),
             "pdfs_saved": self.pdfs_saved,
             "spot_items": self.spot.items.len(),
@@ -1188,6 +1225,7 @@ impl Screen for ImportScreen {
             "spot_unsaved": self.spot.unsaved(),
             "spot_saves": self.spot.saves,
             "ask_closed": self.ask_closed.is_some(),
+            "restore_gone": self.restore_gone,
             "failure": self.failure.as_ref().map(refusal_code),
         });
         if let (Value::Object(m), Value::Object(d)) = (&mut s, d4) {

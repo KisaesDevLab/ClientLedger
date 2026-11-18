@@ -52,7 +52,10 @@ pub struct SpotList {
 fn label(item: &spot_check::Item) -> String {
     t_with(
         &format!("imports.spot.{}", item.kind.key()),
-        &[("subject", item.subject.as_deref().unwrap_or_default())],
+        &[(
+            "subject",
+            item.subject.as_deref().unwrap_or_default().trim(),
+        )],
     )
 }
 
@@ -71,7 +74,9 @@ fn open_docs(items: &[cl_api::imports::TieOutItem]) -> Vec<OpenDoc> {
         .filter_map(|i| {
             Some(OpenDoc {
                 source_row: i.source_row?,
-                number: i.number.clone().unwrap_or_default(),
+                number: super::tieout::shown_number(i.number.as_deref())
+                    .unwrap_or_default()
+                    .to_string(),
                 name: i.name.clone(),
                 open: i.books,
             })
@@ -88,7 +93,9 @@ fn subject(x: &BatchTransaction) -> String {
     } else {
         t("imports.spot.type.other")
     }];
-    if let Some(n) = x.number.as_ref().or(x.vendor_invoice_number.as_ref()) {
+    if let Some(n) = super::tieout::shown_number(x.number.as_deref())
+        .or_else(|| super::tieout::shown_number(x.vendor_invoice_number.as_deref()))
+    {
         parts[0] = format!("{} {n}", parts[0]);
     }
     if let Some(d) = x.date {

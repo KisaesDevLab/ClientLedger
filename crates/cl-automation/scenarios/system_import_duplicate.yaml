@@ -8,7 +8,7 @@ steps:
   - set_zoom: {percent: 100}
   - command: file.import_system
   - command: dev.imports_demo_reset
-  - click: {role: radio_button, label: Where your books are now, index: 0}
+  - click: {role: radio_button, label: Accounting Power}
   - key: Alt+N
   - assert_state: {key: screen.step, equals: dates}
   - click: {role: text_input, label: Switch date}

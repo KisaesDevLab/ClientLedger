@@ -1196,13 +1196,19 @@ impl TieOutAccount {
     /// What the row is called on screen: the source account's key (the
     /// owner's own number or name) when there is one, else the books'.
     #[must_use]
+    ///
+    /// The account's name follows its number ("1000 · Farm Checking"), so
+    /// the owner can tell the accounts apart (P31 UI review).
     pub fn label(&self) -> String {
-        if let Some(k) = self.source_keys.first() {
-            return k.clone();
-        }
-        match (self.number.as_deref(), self.name.as_str()) {
-            (Some(n), "") => n.to_string(),
-            (Some(n), name) => format!("{n} · {name}"),
+        let key = self
+            .source_keys
+            .first()
+            .map(String::as_str)
+            .or(self.number.as_deref());
+        match (key, self.name.as_str()) {
+            (Some(k), "") => k.to_string(),
+            (Some(k), name) if k == name || k.ends_with(name) => k.to_string(),
+            (Some(k), name) => format!("{k} · {name}"),
             (None, name) => name.to_string(),
         }
     }

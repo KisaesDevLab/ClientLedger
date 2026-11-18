@@ -10,7 +10,7 @@ steps:
   - command: file.import_system
   - command: dev.imports_demo_reset
   - assert_state: {key: screen.screen, equals: file.import_system}
-  - click: {role: radio_button, label: Where your books are now, index: 1}
+  - click: {role: radio_button, label: QuickBooks Online}
   - assert_state: {key: screen.source, equals: qbo}
   - screenshot: source
   - key: Alt+N

@@ -1106,6 +1106,10 @@ fn main() -> std::process::ExitCode {
             contract_imports::system_qbo_ties_out,
         ),
         (
+            "imports::qbo_xlsx_raw_values_read_exactly",
+            contract_imports::qbo_xlsx_raw_values_read_exactly,
+        ),
+        (
             "imports::system_qbd_gl_ties_out",
             contract_imports::system_qbd_gl_ties_out,
         ),

@@ -10,7 +10,7 @@ steps:
   - set_zoom: {percent: 100}
   - command: file.import_system
   - command: dev.imports_demo_reset
-  - click: {role: radio_button, label: Where your books are now, index: 3}
+  - click: {role: radio_button, label: Another program (spreadsheet layout)}
   - assert_state: {key: screen.source, equals: generic}
   - key: Alt+N
   - assert_state: {key: screen.step, equals: dates}
@@ -41,7 +41,7 @@ steps:
   - key: Alt+N
   - assert_state: {key: screen.verified, equals: true, within_ms: 4000}
   - command: dev.imports_demo_reset
-  - click: {role: radio_button, label: Where your books are now, index: 3}
+  - click: {role: radio_button, label: Another program (spreadsheet layout)}
   - key: Alt+N
   - assert_state: {key: screen.step, equals: dates}
   - click: {role: text_input, label: Switch date}
@@ -53,7 +53,7 @@ steps:
   - key: Alt+N
   - assert_state: {key: screen.step, equals: files}
   - command: dev.imports_demo_file_all
-  - click: {role: button, label: Remove, index: 3}
+  - click: {role: button, label: Remove General Ledger file 1}
   - assert_state: {key: screen.files, equals: 4, within_ms: 4000}
   - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/imports/generic-altered/gl.csv"]}
   - click: {role: button, label: Add file for General Ledger}

@@ -21,7 +21,7 @@ steps:
   - command: dev.imports_demo_file_all
   - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
   - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/qbd/shoal-creek-altered/open-item/open-invoices.csv"]}
-  - click: {role: button, label: Add file for Open Invoices}
+  - click: {role: button, label: Replace file for Open Invoices}
   - assert_state: {key: screen.files, equals: 12, within_ms: 4000}
   - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
   - key: Alt+N
@@ -47,10 +47,10 @@ steps:
   - command: dev.imports_demo_file_all
   - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
   # The journal card takes several files: the 2025-2026 one is the 8th card's file.
-  - click: {role: button, label: Remove, index: 7}
+  - click: {role: button, label: Remove Journal file 2}
   - assert_state: {key: screen.files, equals: 11, within_ms: 4000}
   - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/qbd/shoal-creek-altered/repointed/journal-2025-2026.csv"]}
-  - click: {role: button, label: Add file for Journal}
+  - click: {role: button, label: Add another file for Journal}
   - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
   - key: Alt+N
   - key: Alt+N
@@ -72,7 +72,7 @@ steps:
   - command: dev.imports_demo_file_all
   - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
   - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/qbd/shoal-creek-altered/journal-overlap.csv"]}
-  - click: {role: button, label: Add file for Journal}
+  - click: {role: button, label: Add another file for Journal}
   - assert_state: {key: screen.files, equals: 13, within_ms: 4000}
   - key: Alt+N
   - key: Alt+N
