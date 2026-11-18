@@ -1206,6 +1206,13 @@ impl PreferencesScreen {
         if after.ai != self.committed.ai || outcome.consent.is_some() {
             self.link.bus().publish(crate::data_bus::Change::Ai);
         }
+        // P30 QA-14: an open form (Import Payroll's Review) reads the tag
+        // rule and the default tag again.
+        if after.company.require_tag_every_line != self.committed.company.require_tag_every_line
+            || after.company.default_tag != self.committed.company.default_tag
+        {
+            self.link.bus().publish(crate::data_bus::Change::Tags);
+        }
         match &outcome.intake {
             Some(stored) => self.finish_intake_save(stored, &mut after),
             // Not sent (unchanged, or no engine to take it): the baseline
@@ -1916,6 +1923,12 @@ impl Screen for PreferencesScreen {
             ),
             "email": self.edits.email.state(&self.secrets_saved),
             "account_numbers": self.edits.company.account_numbers,
+            // P30 QA: the tag options as shown (the check box's state is
+            // also in the AccessKit tree as `checked`). Flags only.
+            "tags": {
+                "every_line": self.edits.company.require_tag_every_line,
+                "default_tag": self.edits.company.default_tag.is_some(),
+            },
             "thresholds_1099": thresholds_1099::state_json(
                 &self.edits.thresholds,
                 self.loaded.thresholds.as_ref(),
