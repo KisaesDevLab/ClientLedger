@@ -64,6 +64,18 @@ net_income_2025 = "5140.49"
 "CM-7" = "-1234.00"
 "payment:Riverside Café" = "-300.00"
 
+# The document each open-item row becomes (E2a, design a). The unapplied
+# payment comes in as a credit memo, never a customer payment (engine spike).
+[open_item_documents]
+"1005" = "invoice"
+"1004" = "invoice"
+"CM-7" = "credit_memo"
+"payment:Riverside Café" = "credit_memo"
+"F-131" = "bill"
+"VC-9" = "vendor_credit"
+"OCT26" = "bill"
+"NP-552" = "bill"
+
 [unpaid_bills]
 "F-131" = "389.44"
 "VC-9" = "-50.00"

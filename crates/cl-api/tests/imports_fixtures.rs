@@ -149,6 +149,32 @@ fn open_items_and_valuation_equal_their_control_accounts() {
     assert_eq!(vendors.values().copied().sum::<Decimal>(), sum(&ap));
 }
 
+/// Engine spike: every open item maps to a document; the unapplied
+/// payment ("Payment" on Open Invoices) is a credit memo, with a negative
+/// open balance like the QBD credit memo.
+#[test]
+fn open_items_map_to_documents_and_payments_are_credit_memos() {
+    let e = expected(QBD);
+    let want = section(&e, "open_item_documents");
+    let mut items = qbd_open_items(&text(QBD, "open-invoices.csv"));
+    items.extend(qbd_open_items(&text(QBD, "unpaid-bills.csv")));
+    assert_eq!(items.len(), want.len());
+    for i in &items {
+        let doc = match i.kind.to_ascii_lowercase().as_str() {
+            "invoice" => "invoice",
+            "credit memo" | "payment" => "credit_memo",
+            "bill" => "bill",
+            "credit" => "vendor_credit",
+            other => panic!("unknown open-item type {other}"),
+        };
+        assert_eq!(want[&i.key], doc, "{}", i.key);
+        if matches!(doc, "credit_memo" | "vendor_credit") {
+            assert!(i.open < Decimal::ZERO, "{} is a credit", i.key);
+        }
+    }
+    assert!(items.iter().any(|i| i.kind == "Payment"));
+}
+
 /// S5: the reference trial balance, both agings and the valuation are dated
 /// the conversion date; the opening trial balance the day before history
 /// starts; no journal row is after the conversion date or before history.
