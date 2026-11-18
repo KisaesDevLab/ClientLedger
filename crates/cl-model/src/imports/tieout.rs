@@ -6,6 +6,7 @@
 //! - ✓ (and Mark verified) only when the engine says `allZero`.
 
 use cl_core::{Money, MoneyStyle};
+use rust_decimal::Decimal;
 
 /// Which part of the tie-out a row is in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -54,6 +55,20 @@ pub struct RowIn {
     pub books: Option<Money>,
     /// Books minus source, as the engine computed it.
     pub diff: Money,
+    /// Books minus source quantity (inventory rows), as the engine sent it.
+    pub quantity_diff: Option<Decimal>,
+    /// The engine's id of the row's account, document or item (to point at
+    /// a difference the engine named by id).
+    pub id: Option<String>,
+}
+
+impl RowIn {
+    /// A row of the books with no row in the source file (an open item or
+    /// an account only the books have).
+    #[must_use]
+    pub fn books_only(&self) -> bool {
+        self.section != Section::Checks && self.source_row.is_none()
+    }
 }
 
 /// One row as shown.
@@ -67,7 +82,9 @@ pub struct Row {
     pub books_text: String,
     /// Difference text (exact under a cent).
     pub diff_text: String,
-    /// The difference is exactly zero.
+    /// The quantity difference, when there is one (the engine's digits).
+    pub quantity_text: Option<String>,
+    /// The amount and the quantity differences are exactly zero.
     pub zero: bool,
 }
 
@@ -106,12 +123,16 @@ impl View {
         View {
             rows: rows
                 .into_iter()
-                .map(|r| Row {
-                    source_text: amount_text(r.source),
-                    books_text: amount_text(r.books),
-                    diff_text: diff_text(r.diff),
-                    zero: r.diff.is_zero(),
-                    input: r,
+                .map(|r| {
+                    let quantity = r.quantity_diff.filter(|q| !q.is_zero());
+                    Row {
+                        source_text: amount_text(r.source),
+                        books_text: amount_text(r.books),
+                        diff_text: diff_text(r.diff),
+                        quantity_text: quantity.map(|q| q.normalize().to_string()),
+                        zero: r.diff.is_zero() && quantity.is_none(),
+                        input: r,
+                    }
                 })
                 .collect(),
             all_zero,
@@ -146,6 +167,36 @@ impl View {
     pub fn differences(&self) -> Vec<&Row> {
         self.rows.iter().filter(|r| !r.zero).collect()
     }
+
+    /// The row the engine named (by section, then source row, else id), for
+    /// pointing the owner at a difference verify refused.
+    #[must_use]
+    pub fn find(&self, section: Section, source_row: Option<u64>, id: Option<&str>) -> Option<usize> {
+        let of = |r: &&Row| r.input.section == section;
+        let by_row = source_row.and_then(|n| {
+            self.rows
+                .iter()
+                .filter(of)
+                .position(|r| r.input.source_row == Some(n))
+        });
+        by_row
+            .or_else(|| {
+                let id = id?;
+                self.rows
+                    .iter()
+                    .filter(of)
+                    .position(|r| r.input.id.as_deref() == Some(id))
+            })
+            .map(|i| {
+                // The index within the section, back to the whole list.
+                self.rows
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, r)| r.input.section == section)
+                    .nth(i)
+                    .map_or(0, |(k, _)| k)
+            })
+    }
 }
 
 #[cfg(test)]
@@ -165,7 +216,39 @@ mod tests {
             source: Some(m("4311.67")),
             books: Some(m("4311.67")),
             diff: m(diff),
+            quantity_diff: None,
+            id: None,
         }
+    }
+
+    #[test]
+    fn a_quantity_difference_is_a_difference() {
+        let mut stock = row(Section::Inventory, "Live Oak", "0.00");
+        stock.quantity_diff = Some(Decimal::new(-5, 1));
+        let mut same = row(Section::Inventory, "Mulch", "0.00");
+        same.quantity_diff = Some(Decimal::ZERO);
+        let v = View::new(vec![stock, same], false);
+        assert!(!v.rows[0].zero, "value ties, quantity does not");
+        assert_eq!(v.rows[0].quantity_text.as_deref(), Some("-0.5"));
+        assert!(v.rows[1].zero && v.rows[1].quantity_text.is_none());
+        assert_eq!(v.differences().len(), 1);
+    }
+
+    #[test]
+    fn a_difference_is_found_by_row_then_id() {
+        let mut a = row(Section::Accounts, "1000", "0.00");
+        a.id = Some("acct-1".into());
+        let mut b = row(Section::Accounts, "1200", "10.00");
+        b.source_row = None;
+        b.id = Some("acct-2".into());
+        let mut c = row(Section::Receivables, "1005", "5.00");
+        c.source_row = Some(9);
+        let v = View::new(vec![c, a, b], false);
+        assert_eq!(v.find(Section::Receivables, Some(9), None), Some(2));
+        assert_eq!(v.find(Section::Accounts, None, Some("acct-2")), Some(1));
+        assert_eq!(v.find(Section::Accounts, Some(99), Some("acct-1")), Some(0));
+        assert_eq!(v.find(Section::Payables, Some(9), None), None);
+        assert!(v.rows[1].input.books_only() && !v.rows[0].input.books_only());
     }
 
     #[test]

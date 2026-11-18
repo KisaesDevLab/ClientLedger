@@ -523,13 +523,26 @@ async fn refusals_keep_codes_and_ids_never_messages() {
     let e = refusal(
         409,
         "TIEOUT_NOT_ZERO",
-        r#"{"firstDifferences":[{"accountId":"x"},{"accountId":"y"}]}"#,
+        r#"{"batchId":"b","differenceCount":31,"firstDifferences":[
+            {"section":"accounts","key":null,"sourceRow":6,"accountId":"5c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b04","transactionId":null,"itemId":null,"diffExact":"10.00"},
+            {"section":"balanceRows","key":"history_ar","sourceRow":null,"accountId":null,"transactionId":null,"itemId":null,"diffExact":"-10.00"},
+            {"section":"later","key":null,"sourceRow":null,"diffExact":"1.00"}]}"#,
     )
     .await;
-    assert_eq!(
-        import_refusal(&e),
-        Some(ImportRefusal::TieOutNotZero { differences: 2 })
-    );
+    let Some(ImportRefusal::TieOutNotZero {
+        difference_count,
+        first,
+    }) = import_refusal(&e)
+    else {
+        panic!("not zero: {e:?}")
+    };
+    assert_eq!(difference_count, 31, "the count, not the list's length");
+    assert_eq!(first.len(), 3);
+    assert_eq!(first[0].section, Some(DifferenceSection::Accounts));
+    assert_eq!(first[0].source_row, Some(6));
+    assert!(first[0].account.is_some());
+    assert_eq!(first[1].key.as_deref(), Some("history_ar"));
+    assert_eq!(first[2].section, None, "a section from a newer engine");
     for (code, want) in [
         ("IMPORT_BUSY", ImportRefusal::Busy),
         ("IMPORT_COMPANY_NOT_EMPTY", ImportRefusal::CompanyNotEmpty),
@@ -838,18 +851,37 @@ async fn batches_all_follows_the_cursor() {
     assert!(gets[1].contains("cursor=c2"));
 }
 
-const TIEOUT: &str = r#"{"asOf":"2026-10-27",
+/// The as-built E3 shape (`import-tieout.service.ts` `Tieout`).
+const TIEOUT: &str = r#"{"batchId":"4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b03","asOf":"2026-10-27",
+ "computedAt":"2026-11-18T10:00:00.000Z","books":"company",
+ "referenceTrialBalance":{"sessionId":"6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b05","reportDate":"2026-10-27"},
  "accounts":[
-  {"accountId":"5c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b04","name":"Accounts Receivable","sourceRow":6,"sourceKeys":["1200"],
+  {"accountId":"5c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b04","number":"1100","name":"Accounts Receivable","sourceRow":6,
+   "sourceRows":[6,7],"sourceKeys":["1200","1210"],
    "sourceExact":"4311.67","booksExact":"4321.67","diffExact":"10.00"},
-  {"accountId":null,"name":"Fuel","sourceRow":12,"sourceKeys":["6100"],
-   "sourceExact":"339.44","booksExact":"339.4440","diffExact":"0.0040"}],
- "arItems":[{"sourceRow":9,"contactName":"Riverside Café","number":null,"sourceExact":"-300.00","booksExact":"-300.00","diffExact":"0.00"}],
+  {"accountId":null,"number":null,"name":"Fuel","sourceRow":12,"sourceRows":[12],"sourceKeys":["6100"],
+   "sourceExact":"339.44","booksExact":"339.4440","diffExact":"0.0040"},
+  {"accountId":"5c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b06","number":"3900","name":"Retained Earnings","sourceRow":null,
+   "sourceRows":[],"sourceKeys":[],"sourceExact":"0.00","booksExact":"-25.00","diffExact":"-25.00"}],
+ "arItems":[
+  {"sourceRow":9,"sessionId":"6a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b07","transactionId":"7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b08",
+   "contactName":"Riverside Café","number":"CM-7","docType":"credit_memo","date":"2026-10-01",
+   "sourceExact":"-300.00","booksExact":"-300.00","diffExact":"0.00"},
+  {"sourceRow":null,"sessionId":null,"transactionId":"7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b09",
+   "contactName":null,"number":"1011","docType":"invoice","date":"2026-10-20",
+   "sourceExact":"0.00","booksExact":"45.00","diffExact":"45.00"}],
  "apItems":[],
- "inventoryItems":[{"sourceRow":5,"itemName":"Live Oak 15gal","sourceExact":"1125.00","booksExact":"1125.00","diffExact":"0.00"}],
- "balanceRows":[{"key":"history_ar","diffExact":"-10.00"},{"key":"valuation_vs_asset","diffExact":"0.00"},{"key":"from_the_future","diffExact":"0.00"}],
- "totals":{"sourceExact":"0.00","booksExact":"0.00","diffExact":"0.0040"},
- "allZero":false}"#;
+ "inventoryItems":[{"sourceRow":5,"item":"Live Oak 15gal","itemId":"8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b0a",
+   "sourceQuantity":"12.5","booksQuantity":"12","quantityDiff":"-0.5",
+   "sourceExact":"1125.00","booksExact":"1125.00","diffExact":"0.00"}],
+ "balanceRows":[
+  {"key":"history_ar","accountId":"5c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b0b","sourceExact":"0.00","booksExact":"-10.00","diffExact":"-10.00"},
+  {"key":"valuation_vs_asset","accountId":null,"sourceExact":"1125.00","booksExact":"1125.00","diffExact":"0.00"},
+  {"key":"from_the_future","accountId":null,"sourceExact":"0.00","booksExact":"0.00","diffExact":"0.00"}],
+ "totals":{"accounts":{"sourceDebitExact":"4651.11","sourceCreditExact":"4651.11","booksDebitExact":"4661.1140","booksCreditExact":"4676.11"},
+  "ar":{"sourceExact":"6880.00","booksExact":"6925.00","diffExact":"45.00"},"ap":null,
+  "inventory":{"sourceExact":"1125.00","booksExact":"1125.00","diffExact":"0.00"}},
+ "differenceCount":6,"allZero":false,"verifiedAt":null}"#;
 
 #[tokio::test]
 async fn tieout_reads_exact_differences_and_hides_owner_data() {
@@ -861,35 +893,49 @@ async fn tieout_reads_exact_differences_and_hides_owner_data() {
         .await;
     let s = session_with_caps(&server, &ALL).await;
     let t = s.imports().tieout(bid()).await.expect("tieout");
+    let sent = body_of(&requests(&server, "POST").await[0]);
+    assert_eq!(sent["requireReference"], true, "always compared (S9)");
     assert_eq!(t.as_of, day("2026-10-27"));
+    assert_eq!(t.batch, Some(bid()));
+    assert_eq!(t.books, Some(TieOutBooks::Company));
+    assert_eq!(
+        t.reference.and_then(|r| r.report_date),
+        Some(day("2026-10-27"))
+    );
     assert!(!t.all_zero);
+    assert_eq!(t.difference_count, 6);
     assert_eq!(t.accounts[0].diff, m("10.00"));
-    assert_eq!(t.accounts[0].source_keys, vec!["1200".to_string()]);
+    assert_eq!(t.accounts[0].source_rows, vec![6, 7]);
+    assert_eq!(t.accounts[0].number.as_deref(), Some("1100"));
+    assert_eq!(t.accounts[0].label(), "1200", "the source's own key first");
     assert_eq!(
         t.accounts[1].diff,
         m("0.0040"),
         "a difference under a cent stays exact"
     );
     assert_eq!(t.accounts[1].account, None);
+    assert_eq!(t.accounts[2].source_row, None, "books only");
+    assert_eq!(t.accounts[2].label(), "3900 · Retained Earnings");
     assert_eq!(t.ar_items[0].source, m("-300.00"));
-    assert_eq!(t.inventory_items[0].name, "Live Oak 15gal");
-    assert_eq!(
-        t.balance_rows,
-        vec![
-            BalanceRow {
-                key: BalanceKey::HistoryAr,
-                diff: m("-10.00")
-            },
-            BalanceRow {
-                key: BalanceKey::ValuationVsAsset,
-                diff: m("0.00")
-            },
-        ],
-        "an unknown check is skipped"
-    );
-    assert_eq!(t.totals.diff, Some(m("0.0040")));
+    assert_eq!(t.ar_items[0].doc_type.as_deref(), Some("credit_memo"));
+    assert!(t.ar_items[0].transaction.is_some());
+    assert_eq!(t.ar_items[1].source_row, None, "no row made it");
+    assert_eq!(t.ar_items[1].name, "");
+    let stock = &t.inventory_items[0];
+    assert_eq!(stock.name, "Live Oak 15gal");
+    assert_eq!(stock.quantity_diff.to_string(), "-0.5");
+    assert!(stock.diff.is_zero() && !stock.ties(), "a quantity difference");
+    assert_eq!(t.balance_rows.len(), 2, "an unknown check is skipped");
+    assert_eq!(t.balance_rows[0].key, BalanceKey::HistoryAr);
+    assert_eq!(t.balance_rows[0].books, m("-10.00"));
+    assert_eq!(t.balance_rows[1].account, None);
+    let ar = t.totals.ar.expect("ar total");
+    assert_eq!((ar.source, ar.diff), (m("6880.00"), m("45.00")));
+    assert_eq!(t.totals.ap, None);
+    let tb = t.totals.accounts.expect("tb totals");
+    assert_eq!(tb.books_debit, m("4661.1140"));
     let dbg = format!("{t:?}");
-    for owner in ["Café", "Fuel", "Live Oak", "4311", "339"] {
+    for owner in ["Café", "Fuel", "Live Oak", "4311", "339", "6880", "4651"] {
         assert!(!dbg.contains(owner), "{owner} in {dbg}");
     }
     let number = TIEOUT.replace(r#""diffExact":"10.00""#, r#""diffExact":10.0"#);
@@ -902,10 +948,33 @@ async fn tieout_reads_exact_differences_and_hides_owner_data() {
         tieout_from(no_flag.as_bytes()).is_err(),
         "allZero is required"
     );
+    let qty = TIEOUT.replace(r#""quantityDiff":"-0.5""#, r#""quantityDiff":-0.5"#);
+    assert!(tieout_from(qty.as_bytes()).is_err(), "quantities are exact");
 }
 
 #[tokio::test]
-async fn verify_and_spot_check() {
+async fn tieout_refusals_are_codes() {
+    let e = refusal(422, "TIEOUT_REFERENCE_REQUIRED", r#"{"asOf":"2026-10-27"}"#).await;
+    assert_eq!(
+        import_refusal(&e),
+        Some(ImportRefusal::TieOutReferenceRequired {
+            as_of: Some(day("2026-10-27"))
+        })
+    );
+    for (code, want) in [
+        ("TIEOUT_NO_DATE", ImportRefusal::TieOutNoDate),
+        (
+            "TIEOUT_REFERENCE_AMBIGUOUS",
+            ImportRefusal::TieOutReferenceAmbiguous,
+        ),
+    ] {
+        let e = refusal(422, code, "{}").await;
+        assert_eq!(import_refusal(&e), Some(want), "{code}");
+    }
+}
+
+#[tokio::test]
+async fn verify_transactions_and_spot_check() {
     let server = MockServer::start().await;
     let verified = BATCH_JSON
         .replace(r#""status":"draft""#, r#""status":"committed""#)
@@ -913,19 +982,60 @@ async fn verify_and_spot_check() {
             r#""verifiedAt":null"#,
             r#""verifiedAt":"2026-11-18T11:00:00Z""#,
         );
+    let kept = TIEOUT
+        .replace(r#""allZero":false"#, r#""allZero":true"#)
+        .replace(
+            r#""verifiedAt":null"#,
+            r#""verifiedAt":"2026-11-18T11:00:00Z""#,
+        );
     Mock::given(method("POST"))
         .and(path(format!("/api/v1/imports/batches/{BATCH}/verify")))
-        .respond_with(json(200, &format!(r#"{{"batch":{verified}}}"#)))
+        .respond_with(json(
+            200,
+            &format!(r#"{{"batch":{verified},"tieout":{kept}}}"#),
+        ))
         .mount(&server)
         .await;
     Mock::given(method("PUT"))
         .and(path(format!("/api/v1/imports/batches/{BATCH}/spot-check")))
-        .respond_with(json(200, &format!(r#"{{"batch":{verified}}}"#)))
+        .respond_with(json(
+            200,
+            r#"{"spotCheck":{"items":[],"updatedAt":"2026-11-18T11:00:00Z","updatedBy":"u"}}"#,
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/imports/batches/{BATCH}/transactions")))
+        .respond_with(json(
+            200,
+            r#"{"transactions":[{"id":"7a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b08","txnType":"invoice","txnDate":"2026-10-01",
+              "txnNumber":"1005","vendorInvoiceNumber":null,"status":"posted","contactId":"9a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b0c",
+              "contactName":"Brightwater HOA","total":"3500.00"}],"nextCursor":"c2","total":41}"#,
+        ))
         .mount(&server)
         .await;
     let s = session_with_caps(&server, &ALL).await;
-    let b = s.imports().verify(bid()).await.expect("verified");
-    assert!(b.is_verified());
+    let v = s.imports().verify(bid()).await.expect("verified");
+    assert!(v.batch.is_verified());
+    assert!(v.tieout.all_zero && v.tieout.verified_at.is_some());
+    let page = s
+        .imports()
+        .transactions(bid(), Some("c1"), 500)
+        .await
+        .expect("page");
+    let gets = requests(&server, "GET").await;
+    let get = gets
+        .iter()
+        .find(|r| r.url.path().ends_with("/transactions"))
+        .expect("sent");
+    let q = get.url.query().unwrap_or_default().to_string();
+    assert!(q.contains("limit=200") && q.contains("cursor=c1"), "{q}");
+    assert_eq!(page.total, 41);
+    assert_eq!(page.next_cursor.as_deref(), Some("c2"));
+    let t = &page.transactions[0];
+    assert_eq!(t.txn_type, "invoice");
+    assert_eq!(t.total, m("3500.00"));
+    assert!(!format!("{page:?}").contains("Brightwater"));
     let items = vec![
         SpotCheckItem {
             key: "bank:1000".into(),
@@ -952,7 +1062,11 @@ async fn verify_and_spot_check() {
     dup[1].key = "bank:1000".into();
     let mut long = items.clone();
     long[0].note = "x".repeat(MAX_NOTE_CHARS + 1);
-    for bad in [dup, long] {
+    let mut long_key = items.clone();
+    long_key[0].key = "k".repeat(MAX_SPOT_KEY_CHARS + 1);
+    let mut long_label = items.clone();
+    long_label[0].label = "l".repeat(MAX_SPOT_LABEL_CHARS + 1);
+    for bad in [dup, long, long_key, long_label] {
         assert!(matches!(
             s.imports().save_spot_check(bid(), &bad).await,
             Err(ApiError::Local(LocalValidation::InvalidValue))

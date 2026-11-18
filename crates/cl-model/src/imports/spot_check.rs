@@ -72,6 +72,18 @@ pub struct OpenDoc {
     pub open: Money,
 }
 
+/// A transaction the batch created (the engine's list), a sample candidate.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Txn {
+    /// Its id.
+    pub id: String,
+    /// The engine's type (`invoice`, `bill`, `journal_entry`, …): saved in
+    /// the key so the sample opens in its form from a reopened list.
+    pub txn_type: String,
+    /// What the item names (number, date, name).
+    pub subject: String,
+}
+
 /// What the generator reads.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Input {
@@ -87,8 +99,8 @@ pub struct Input {
     pub payroll: Option<AccountRef>,
     /// The company has inventory.
     pub inventory: bool,
-    /// The batch's transaction ids (any order).
-    pub transactions: Vec<String>,
+    /// The batch's transactions (any order).
+    pub transactions: Vec<Txn>,
     /// The batch id (seeds the sample).
     pub batch_id: u128,
 }
@@ -194,10 +206,26 @@ pub fn generate(input: &Input) -> Vec<Item> {
     if input.inventory {
         out.push(item(Kind::Inventory, "", None));
     }
-    for t in sample(&input.transactions, input.batch_id) {
-        out.push(item(Kind::Sample, &t, None));
+    let ids: Vec<String> = input.transactions.iter().map(|t| t.id.clone()).collect();
+    for id in sample(&ids, input.batch_id) {
+        if let Some(t) = input.transactions.iter().find(|t| t.id == id) {
+            out.push(item(
+                Kind::Sample,
+                &format!("{}:{}", t.txn_type, t.id),
+                Some(t.subject.clone()),
+            ));
+        }
     }
     out
+}
+
+/// A sample item's transaction (`sample:<type>:<id>` keys): its type and
+/// id, to open it in its form.
+#[must_use]
+pub fn sample_target(key: &str) -> Option<(&str, &str)> {
+    let rest = key.strip_prefix("sample:")?;
+    let (kind, id) = rest.split_once(':')?;
+    (!kind.is_empty() && !id.is_empty()).then_some((kind, id))
 }
 
 /// Keeps the owner's ticks and notes from a saved list for the same keys.
@@ -238,6 +266,17 @@ mod tests {
         (0..n).map(|i| format!("txn-{i:03}")).collect()
     }
 
+    fn txns(n: usize) -> Vec<Txn> {
+        ids(n)
+            .into_iter()
+            .map(|id| Txn {
+                subject: format!("Invoice {id}"),
+                id,
+                txn_type: "invoice".into(),
+            })
+            .collect()
+    }
+
     fn input() -> Input {
         Input {
             banks: vec![AccountRef {
@@ -258,7 +297,7 @@ mod tests {
             }),
             payroll: None,
             inventory: true,
-            transactions: ids(40),
+            transactions: txns(40),
             batch_id: 0x4b0c_4e8e_6f6e_4c1d_8a37_6c1f_4d8e_9b03,
         }
     }
@@ -282,6 +321,13 @@ mod tests {
         unique.dedup();
         assert_eq!(unique.len(), keys.len());
         assert!(!complete(&items));
+        let s = items.iter().find(|i| i.kind == Kind::Sample).expect("sample");
+        let (kind, id) = sample_target(&s.key).expect("target");
+        assert_eq!(kind, "invoice");
+        assert!(id.starts_with("txn-"));
+        assert_eq!(s.subject.as_deref(), Some(format!("Invoice {id}").as_str()));
+        assert_eq!(sample_target("bank:a1"), None);
+        assert_eq!(sample_target("sample:invoice:"), None);
     }
 
     #[test]

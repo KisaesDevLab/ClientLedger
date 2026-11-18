@@ -27,8 +27,9 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use cl_core::ids::{AccountId, parse_uuid};
+use cl_core::ids::{AccountId, ContactId, ItemId, TransactionId, parse_uuid};
 use cl_core::{CalendarDate, Money};
+use rust_decimal::Decimal;
 use serde_json::{Map, Value, json};
 
 use crate::client::{Call, Method};
@@ -37,7 +38,8 @@ use crate::idempotency::IdempotencyKey;
 use crate::resources::customer_payments::{error_code, require};
 use crate::resources::operations::{
     IMPORT_BATCH, IMPORT_BATCH_COMMIT, IMPORT_BATCH_CREATE, IMPORT_BATCH_SPOT_CHECK,
-    IMPORT_BATCH_TIEOUT, IMPORT_BATCH_UNDO, IMPORT_BATCH_VERIFY, IMPORT_BATCHES, IMPORTS_DISCARD,
+    IMPORT_BATCH_TIEOUT, IMPORT_BATCH_TRANSACTIONS, IMPORT_BATCH_UNDO, IMPORT_BATCH_VERIFY,
+    IMPORT_BATCHES, IMPORTS_DISCARD,
     IMPORTS_SESSION, IMPORTS_UPLOAD, Operation,
 };
 use crate::resources::posting::{ClosedPeriodAuthorization, PostingOptions, posting_body};
@@ -56,6 +58,17 @@ pub const HISTORY_PAGE: u16 = 50;
 pub const HISTORY_MAX_PAGES: usize = 20;
 /// The longest spot-check note the desktop sends.
 pub const MAX_NOTE_CHARS: usize = 500;
+/// The engine's spot-check limits: items, key and label lengths.
+pub const MAX_SPOT_ITEMS: usize = 200;
+/// The longest spot-check key.
+pub const MAX_SPOT_KEY_CHARS: usize = 100;
+/// The longest spot-check label.
+pub const MAX_SPOT_LABEL_CHARS: usize = 300;
+/// The largest page of a batch's transactions the engine gives.
+pub const TRANSACTIONS_PAGE: u16 = 200;
+/// Tie-out and verify always compare with the reference trial balance
+/// (S9); the desktop never turns that off.
+const REQUIRE_REFERENCE: &[u8] = br#"{"requireReference":true}"#;
 
 /// Which import flow a screen runs; each needs its own capabilities.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1067,16 +1080,23 @@ pub struct JobAccepted {
     pub replayed: bool,
 }
 
-/// One tie-out account row. Owner data: `Debug` hides names and amounts.
+/// One tie-out account row (one per books account; several source rows can
+/// merge, e.g. two QBD A/R accounts). Owner data: `Debug` hides names and
+/// amounts.
 #[derive(Clone, PartialEq, Eq)]
 pub struct TieOutAccount {
-    /// The books' account, when matched.
+    /// The books' account (`None`: a source row that matched nothing, or
+    /// "Retained Earnings (Prior Years)" with no tagged account).
     pub account: Option<AccountId>,
-    /// The account's name.
+    /// The books account's number.
+    pub number: Option<String>,
+    /// The account's name (the books', else the source's).
     pub name: String,
-    /// The reference trial balance row.
+    /// The first reference trial balance row (`None`: books only).
     pub source_row: Option<u64>,
-    /// The source accounts that map here (several QBD A/R accounts, Q-P31k).
+    /// Every reference trial balance row merged here.
+    pub source_rows: Vec<u64>,
+    /// The source accounts that map here (number, else name; Q-P31k).
     pub source_keys: Vec<String>,
     /// Source balance (debit positive).
     pub source: Money,
@@ -1084,6 +1104,22 @@ pub struct TieOutAccount {
     pub books: Money,
     /// Books minus source.
     pub diff: Money,
+}
+
+impl TieOutAccount {
+    /// What the row is called on screen: the source account's key (the
+    /// owner's own number or name) when there is one, else the books'.
+    #[must_use]
+    pub fn label(&self) -> String {
+        if let Some(k) = self.source_keys.first() {
+            return k.clone();
+        }
+        match (self.number.as_deref(), self.name.as_str()) {
+            (Some(n), "") => n.to_string(),
+            (Some(n), name) => format!("{n} · {name}"),
+            (None, name) => name.to_string(),
+        }
+    }
 }
 
 impl fmt::Debug for TieOutAccount {
@@ -1096,18 +1132,27 @@ impl fmt::Debug for TieOutAccount {
     }
 }
 
-/// One open item (A/R, A/P) or inventory item. Owner data.
+/// One open item (A/R or A/P). Owner data.
 #[derive(Clone, PartialEq, Eq)]
 pub struct TieOutItem {
-    /// The source file row (the item's key).
-    pub source_row: u64,
-    /// Customer, vendor or item name.
+    /// The source file row (the item's key; `None`: an open item in the
+    /// books no row made).
+    pub source_row: Option<u64>,
+    /// The file it came from.
+    pub session: Option<ImportSessionId>,
+    /// The document the import made (or found).
+    pub transaction: Option<TransactionId>,
+    /// Customer or vendor (the source's name, "Customer:Job" kept).
     pub name: String,
-    /// The document number (open items).
+    /// The document number.
     pub number: Option<String>,
-    /// Source amount.
+    /// The document type (`invoice`, `credit_memo`, `bill`, …).
+    pub doc_type: Option<String>,
+    /// The document date.
+    pub date: Option<CalendarDate>,
+    /// Source amount (signed: credits negative).
     pub source: Money,
-    /// Books amount.
+    /// Books open balance as of the conversion date.
     pub books: Money,
     /// Books minus source.
     pub diff: Money,
@@ -1117,7 +1162,51 @@ impl fmt::Debug for TieOutItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TieOutItem")
             .field("source_row", &self.source_row)
+            .field("transaction", &self.transaction)
             .field("zero", &self.diff.is_zero())
+            .finish_non_exhaustive()
+    }
+}
+
+/// One inventory item (the valuation file against the books' valuation).
+/// Quantities are the engine's exact decimals (any number of places), never
+/// computed here. Owner data.
+#[derive(Clone, PartialEq, Eq)]
+pub struct TieOutStock {
+    /// The valuation file row (`None`: stock in the books no row made).
+    pub source_row: Option<u64>,
+    /// The item's name.
+    pub name: String,
+    /// The books' item.
+    pub item: Option<ItemId>,
+    /// Quantity on hand in the file.
+    pub source_quantity: Decimal,
+    /// Quantity on hand in the books.
+    pub books_quantity: Decimal,
+    /// Books minus file quantity.
+    pub quantity_diff: Decimal,
+    /// File value.
+    pub source: Money,
+    /// Books value (cents).
+    pub books: Money,
+    /// Books minus file value.
+    pub diff: Money,
+}
+
+impl TieOutStock {
+    /// Both the value and the quantity agree.
+    #[must_use]
+    pub fn ties(&self) -> bool {
+        self.diff.is_zero() && self.quantity_diff.is_zero()
+    }
+}
+
+impl fmt::Debug for TieOutStock {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TieOutStock")
+            .field("source_row", &self.source_row)
+            .field("item", &self.item)
+            .field("ties", &self.ties())
             .finish_non_exhaustive()
     }
 }
@@ -1141,6 +1230,12 @@ wire_enum!(
 pub struct BalanceRow {
     /// Which check.
     pub key: BalanceKey,
+    /// The account checked (a history account; `None` for the valuation).
+    pub account: Option<AccountId>,
+    /// Source figure (0.00 for a history account).
+    pub source: Money,
+    /// Books figure.
+    pub books: Money,
     /// The difference (0.00 when it holds).
     pub diff: Money,
 }
@@ -1150,19 +1245,60 @@ impl fmt::Debug for BalanceRow {
         f.debug_struct("BalanceRow")
             .field("key", &self.key)
             .field("zero", &self.diff.is_zero())
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
-/// Tie-out totals.
+/// One side's totals (the A/R, A/P or inventory file against the books).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct TieOutTotal {
+    /// The file's total.
+    pub source: Money,
+    /// The books' total.
+    pub books: Money,
+    /// Books minus source.
+    pub diff: Money,
+}
+
+impl fmt::Debug for TieOutTotal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TieOutTotal")
+            .field("zero", &self.diff.is_zero())
+            .finish_non_exhaustive()
+    }
+}
+
+/// The trial balance's column totals (the engine sends no difference total:
+/// the screen shows these as given and never subtracts them).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct TrialBalanceTotals {
+    /// Source debits.
+    pub source_debit: Money,
+    /// Source credits.
+    pub source_credit: Money,
+    /// Books debits.
+    pub books_debit: Money,
+    /// Books credits.
+    pub books_credit: Money,
+}
+
+impl fmt::Debug for TrialBalanceTotals {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("TrialBalanceTotals(..)")
+    }
+}
+
+/// Tie-out totals: each `None` when the batch has no such file.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct TieOutTotals {
-    /// Source total.
-    pub source: Option<Money>,
-    /// Books total.
-    pub books: Option<Money>,
-    /// Difference total.
-    pub diff: Option<Money>,
+    /// The trial balance's column totals.
+    pub accounts: Option<TrialBalanceTotals>,
+    /// The A/R aging (open invoices) against the books.
+    pub ar: Option<TieOutTotal>,
+    /// The A/P aging (unpaid bills) against the books.
+    pub ap: Option<TieOutTotal>,
+    /// The valuation file against the books.
+    pub inventory: Option<TieOutTotal>,
 }
 
 impl fmt::Debug for TieOutTotals {
@@ -1171,12 +1307,39 @@ impl fmt::Debug for TieOutTotals {
     }
 }
 
+wire_enum!(
+    /// What the books side of the tie-out is.
+    TieOutBooks {
+        /// The whole company (it was empty at the commit).
+        Company => "company",
+        /// Only the batch's own transactions (Q-P31h).
+        Batch => "batch",
+    }
+);
+
+/// The reference trial balance compared.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReferenceTrialBalance {
+    /// Its file.
+    pub session: Option<ImportSessionId>,
+    /// Its report date.
+    pub report_date: Option<CalendarDate>,
+}
+
 /// The engine's tie-out of a batch (E3). The screen shows ✓ only when
 /// `all_zero` is true; it never re-derives a balance.
 #[derive(Clone, PartialEq, Eq)]
 pub struct TieOut {
-    /// The date compared.
+    /// The batch.
+    pub batch: Option<ImportBatchId>,
+    /// The date compared (the conversion date).
     pub as_of: CalendarDate,
+    /// When the engine computed it (engine text).
+    pub computed_at: Option<String>,
+    /// Whole company, or the batch's own lines.
+    pub books: Option<TieOutBooks>,
+    /// The reference trial balance.
+    pub reference: Option<ReferenceTrialBalance>,
     /// Accounts.
     pub accounts: Vec<TieOutAccount>,
     /// Open invoices.
@@ -1184,28 +1347,125 @@ pub struct TieOut {
     /// Unpaid bills.
     pub ap_items: Vec<TieOutItem>,
     /// Inventory items.
-    pub inventory_items: Vec<TieOutItem>,
+    pub inventory_items: Vec<TieOutStock>,
     /// Balance checks.
     pub balance_rows: Vec<BalanceRow>,
     /// Totals.
     pub totals: TieOutTotals,
+    /// How many differences the engine counted.
+    pub difference_count: u64,
     /// The engine says every difference is exactly zero.
     pub all_zero: bool,
+    /// When it was verified (engine text; the stored tie-out after verify).
+    pub verified_at: Option<String>,
 }
 
 impl fmt::Debug for TieOut {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Totals are amounts: left out.
         f.debug_struct("TieOut")
+            .field("batch", &self.batch)
             .field("as_of", &self.as_of)
+            .field("books", &self.books)
             .field("accounts", &self.accounts.len())
             .field("ar_items", &self.ar_items.len())
             .field("ap_items", &self.ap_items.len())
             .field("inventory_items", &self.inventory_items.len())
             .field("balance_rows", &self.balance_rows)
+            .field("difference_count", &self.difference_count)
             .field("all_zero", &self.all_zero)
             .finish_non_exhaustive()
     }
+}
+
+/// A verified batch (`POST …/verify` 200): the batch and the tie-out kept.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Verified {
+    /// The batch (`verified_at` set).
+    pub batch: ImportBatch,
+    /// The tie-out it was verified on.
+    pub tieout: TieOut,
+}
+
+wire_enum!(
+    /// Which part of the tie-out a first difference is in.
+    DifferenceSection {
+        /// A trial balance account.
+        Accounts => "accounts",
+        /// An open invoice.
+        ArItems => "arItems",
+        /// An unpaid bill.
+        ApItems => "apItems",
+        /// An inventory item.
+        InventoryItems => "inventoryItems",
+        /// A balance check.
+        BalanceRows => "balanceRows",
+        /// A side's totals.
+        Totals => "totals",
+    }
+);
+
+/// One of the first differences of a refused verify: ids and rows only
+/// (the engine never names accounts or contacts here; amounts are read
+/// from the tie-out, not from this list).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TieOutDifference {
+    /// Where it is (`None`: a section from a newer engine).
+    pub section: Option<DifferenceSection>,
+    /// A balance check's key, or `ar` / `ap` / `inventory` for totals.
+    pub key: Option<String>,
+    /// The source file row.
+    pub source_row: Option<u64>,
+    /// The account.
+    pub account: Option<AccountId>,
+    /// The document.
+    pub transaction: Option<TransactionId>,
+    /// The item.
+    pub item: Option<ItemId>,
+}
+
+/// One transaction a batch created (`GET …/transactions`). Owner data.
+#[derive(Clone, PartialEq, Eq)]
+pub struct BatchTransaction {
+    /// Its id.
+    pub id: TransactionId,
+    /// The engine's type (`invoice`, `bill`, `journal_entry`, …).
+    pub txn_type: String,
+    /// Its date.
+    pub date: Option<CalendarDate>,
+    /// Its number.
+    pub number: Option<String>,
+    /// The vendor's invoice number (bills).
+    pub vendor_invoice_number: Option<String>,
+    /// The engine's status.
+    pub status: Option<String>,
+    /// The customer or vendor.
+    pub contact: Option<ContactId>,
+    /// Their name.
+    pub contact_name: Option<String>,
+    /// The document total (a journal entry's debits), exact.
+    pub total: Money,
+}
+
+impl fmt::Debug for BatchTransaction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BatchTransaction")
+            .field("id", &self.id)
+            .field("txn_type", &self.txn_type)
+            .field("date", &self.date)
+            .finish_non_exhaustive()
+    }
+}
+
+/// One page of a batch's transactions (order: date, id).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct BatchTransactionPage {
+    /// The page.
+    pub transactions: Vec<BatchTransaction>,
+    /// The next page's cursor.
+    pub next_cursor: Option<String>,
+    /// How many match in all.
+    pub total: u64,
 }
 
 /// Something that keeps a batch from being undone.
@@ -1252,9 +1512,23 @@ pub enum ImportRefusal {
     },
     /// 409 `TIEOUT_NOT_ZERO`: verify refused.
     TieOutNotZero {
-        /// How many differences the engine listed first.
-        differences: usize,
+        /// How many differences the engine counted (all of them).
+        difference_count: u64,
+        /// The first ones (at most 20; ids and rows only).
+        first: Vec<TieOutDifference>,
     },
+    /// 422 `TIEOUT_REFERENCE_REQUIRED`: the batch has no reference trial
+    /// balance to compare with (every source needs one, S9).
+    TieOutReferenceRequired {
+        /// The date it should be dated.
+        as_of: Option<CalendarDate>,
+    },
+    /// 422 `TIEOUT_NO_DATE`: no conversion date and no dated reference
+    /// trial balance.
+    TieOutNoDate,
+    /// 422 `TIEOUT_REFERENCE_AMBIGUOUS`: more than one reference trial
+    /// balance and no conversion date to pick one.
+    TieOutReferenceAmbiguous,
     /// 409 `IMPORT_COMPANY_NOT_EMPTY`: a QBD conversion needs an empty
     /// company.
     CompanyNotEmpty,
@@ -1425,9 +1699,23 @@ fn refusal_from(code: &str, details: Option<&crate::ConflictDetails>) -> Option<
                 })
                 .unwrap_or_default(),
         },
-        "TIEOUT_NOT_ZERO" => ImportRefusal::TieOutNotZero {
-            differences: details.map_or(0, |d| d.list_len("firstDifferences")),
-        },
+        "TIEOUT_NOT_ZERO" => {
+            let first: Vec<TieOutDifference> = details
+                .and_then(|d| d.raw("firstDifferences"))
+                .and_then(Value::as_array)
+                .map(|l| l.iter().map(difference_from).collect())
+                .unwrap_or_default();
+            ImportRefusal::TieOutNotZero {
+                difference_count: details
+                    .and_then(|d| d.raw("differenceCount"))
+                    .and_then(Value::as_u64)
+                    .unwrap_or_else(|| u64::try_from(first.len()).unwrap_or(u64::MAX)),
+                first,
+            }
+        }
+        "TIEOUT_REFERENCE_REQUIRED" => ImportRefusal::TieOutReferenceRequired { as_of: day("asOf") },
+        "TIEOUT_NO_DATE" => ImportRefusal::TieOutNoDate,
+        "TIEOUT_REFERENCE_AMBIGUOUS" => ImportRefusal::TieOutReferenceAmbiguous,
         "IMPORT_COMPANY_NOT_EMPTY" => ImportRefusal::CompanyNotEmpty,
         "IMPORT_SESSION_IN_BATCH" => ImportRefusal::SessionInBatch,
         "IMPORT_FISCAL_YEAR_LOCKED" => ImportRefusal::FiscalYearLocked,
@@ -1849,32 +2137,101 @@ fn accepted_from(body: &[u8], replayed: bool) -> Result<JobAccepted, ApiError> {
     })
 }
 
-fn item_from(i: &Value, name_key: &str) -> Result<TieOutItem, ApiError> {
+/// An exact decimal string that is not money (a quantity, any places).
+fn quantity(v: &Value) -> Result<Decimal, ApiError> {
+    let s = v.as_str().ok_or(ApiError::InexactMoney { what: WHAT })?;
+    Decimal::from_str_exact(s).map_err(|_| decode_err())
+}
+
+fn strings(v: &Value) -> Vec<String> {
+    v.as_array()
+        .map(|l| {
+            l.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn item_from(i: &Value) -> Result<TieOutItem, ApiError> {
     Ok(TieOutItem {
-        source_row: i["sourceRow"].as_u64().ok_or_else(decode_err)?,
-        name: i[name_key].as_str().unwrap_or_default().to_string(),
+        source_row: i["sourceRow"].as_u64(),
+        session: opt_id(&i["sessionId"]),
+        transaction: opt_id(&i["transactionId"]),
+        name: i["contactName"].as_str().unwrap_or_default().to_string(),
         number: text(&i["number"]),
+        doc_type: text(&i["docType"]),
+        date: date(&i["date"]),
         source: money(&i["sourceExact"])?,
         books: money(&i["booksExact"])?,
         diff: money(&i["diffExact"])?,
     })
 }
 
-fn items_from(v: &Value, name_key: &str) -> Result<Vec<TieOutItem>, ApiError> {
-    v.as_array().map_or_else(
-        || Ok(Vec::new()),
-        |l| l.iter().map(|i| item_from(i, name_key)).collect(),
-    )
+fn items_from(v: &Value) -> Result<Vec<TieOutItem>, ApiError> {
+    v.as_array()
+        .map_or_else(|| Ok(Vec::new()), |l| l.iter().map(item_from).collect())
 }
 
-/// Reads the tie-out (E3).
-pub(crate) fn tieout_from(body: &[u8]) -> Result<TieOut, ApiError> {
-    let v = parse_json(body)?;
-    let v = if v["tieout"].is_object() {
-        &v["tieout"]
-    } else {
-        &v
-    };
+fn stock_from(i: &Value) -> Result<TieOutStock, ApiError> {
+    Ok(TieOutStock {
+        source_row: i["sourceRow"].as_u64(),
+        name: i["item"].as_str().unwrap_or_default().to_string(),
+        item: opt_id(&i["itemId"]),
+        source_quantity: quantity(&i["sourceQuantity"])?,
+        books_quantity: quantity(&i["booksQuantity"])?,
+        quantity_diff: quantity(&i["quantityDiff"])?,
+        source: money(&i["sourceExact"])?,
+        books: money(&i["booksExact"])?,
+        diff: money(&i["diffExact"])?,
+    })
+}
+
+fn total_from(t: &Value) -> Result<Option<TieOutTotal>, ApiError> {
+    if !t.is_object() {
+        return Ok(None);
+    }
+    Ok(Some(TieOutTotal {
+        source: money(&t["sourceExact"])?,
+        books: money(&t["booksExact"])?,
+        diff: money(&t["diffExact"])?,
+    }))
+}
+
+fn totals_from(t: &Value) -> Result<TieOutTotals, ApiError> {
+    let a = &t["accounts"];
+    Ok(TieOutTotals {
+        accounts: if a.is_object() {
+            Some(TrialBalanceTotals {
+                source_debit: money(&a["sourceDebitExact"])?,
+                source_credit: money(&a["sourceCreditExact"])?,
+                books_debit: money(&a["booksDebitExact"])?,
+                books_credit: money(&a["booksCreditExact"])?,
+            })
+        } else {
+            None
+        },
+        ar: total_from(&t["ar"])?,
+        ap: total_from(&t["ap"])?,
+        inventory: total_from(&t["inventory"])?,
+    })
+}
+
+/// One of `firstDifferences` (ids only; its amount is not read).
+fn difference_from(d: &Value) -> TieOutDifference {
+    TieOutDifference {
+        section: d["section"].as_str().and_then(DifferenceSection::from_wire),
+        key: text(&d["key"]),
+        source_row: d["sourceRow"].as_u64(),
+        account: opt_id(&d["accountId"]),
+        transaction: opt_id(&d["transactionId"]),
+        item: opt_id(&d["itemId"]),
+    }
+}
+
+/// Reads a tie-out object (E3 as built).
+fn tieout_value(v: &Value) -> Result<TieOut, ApiError> {
     let accounts = v["accounts"]
         .as_array()
         .ok_or_else(decode_err)?
@@ -1882,17 +2239,14 @@ pub(crate) fn tieout_from(body: &[u8]) -> Result<TieOut, ApiError> {
         .map(|a| {
             Ok(TieOutAccount {
                 account: opt_id(&a["accountId"]),
+                number: text(&a["number"]),
                 name: a["name"].as_str().unwrap_or_default().to_string(),
                 source_row: a["sourceRow"].as_u64(),
-                source_keys: a["sourceKeys"]
+                source_rows: a["sourceRows"]
                     .as_array()
-                    .map(|l| {
-                        l.iter()
-                            .filter_map(Value::as_str)
-                            .map(str::to_string)
-                            .collect()
-                    })
+                    .map(|l| l.iter().filter_map(Value::as_u64).collect())
                     .unwrap_or_default(),
+                source_keys: strings(&a["sourceKeys"]),
                 source: money(&a["sourceExact"])?,
                 books: money(&a["booksExact"])?,
                 diff: money(&a["diffExact"])?,
@@ -1907,26 +2261,88 @@ pub(crate) fn tieout_from(body: &[u8]) -> Result<TieOut, ApiError> {
                     // An unknown check from a newer engine is skipped, but
                     // `all_zero` still covers it.
                     let key = r["key"].as_str().and_then(BalanceKey::from_wire)?;
-                    Some(money(&r["diffExact"]).map(|diff| BalanceRow { key, diff }))
+                    Some((|| {
+                        Ok(BalanceRow {
+                            key,
+                            account: opt_id(&r["accountId"]),
+                            source: money(&r["sourceExact"])?,
+                            books: money(&r["booksExact"])?,
+                            diff: money(&r["diffExact"])?,
+                        })
+                    })())
                 })
-                .collect::<Result<_, _>>()
+                .collect::<Result<_, ApiError>>()
         })
         .transpose()?
         .unwrap_or_default();
-    let t = &v["totals"];
+    let r = &v["referenceTrialBalance"];
     Ok(TieOut {
+        batch: opt_id(&v["batchId"]),
         as_of: date(&v["asOf"]).ok_or_else(decode_err)?,
+        computed_at: text(&v["computedAt"]),
+        books: v["books"].as_str().and_then(TieOutBooks::from_wire),
+        reference: r.is_object().then(|| ReferenceTrialBalance {
+            session: opt_id(&r["sessionId"]),
+            report_date: date(&r["reportDate"]),
+        }),
         accounts,
-        ar_items: items_from(&v["arItems"], "contactName")?,
-        ap_items: items_from(&v["apItems"], "contactName")?,
-        inventory_items: items_from(&v["inventoryItems"], "itemName")?,
+        ar_items: items_from(&v["arItems"])?,
+        ap_items: items_from(&v["apItems"])?,
+        inventory_items: v["inventoryItems"].as_array().map_or_else(
+            || Ok(Vec::new()),
+            |l| l.iter().map(stock_from).collect::<Result<_, _>>(),
+        )?,
         balance_rows,
-        totals: TieOutTotals {
-            source: opt_money(&t["sourceExact"])?,
-            books: opt_money(&t["booksExact"])?,
-            diff: opt_money(&t["diffExact"])?,
-        },
+        totals: totals_from(&v["totals"])?,
+        difference_count: count(&v["differenceCount"]),
         all_zero: v["allZero"].as_bool().ok_or_else(decode_err)?,
+        verified_at: text(&v["verifiedAt"]),
+    })
+}
+
+/// Reads the tie-out (E3): a bare tie-out, or `{tieout}`.
+pub(crate) fn tieout_from(body: &[u8]) -> Result<TieOut, ApiError> {
+    let v = parse_json(body)?;
+    if v["tieout"].is_object() {
+        tieout_value(&v["tieout"])
+    } else {
+        tieout_value(&v)
+    }
+}
+
+/// Reads a verify answer `{batch, tieout}`.
+pub(crate) fn verified_from(body: &[u8]) -> Result<Verified, ApiError> {
+    let v = parse_json(body)?;
+    Ok(Verified {
+        batch: batch_from(&v["batch"])?,
+        tieout: tieout_value(&v["tieout"])?,
+    })
+}
+
+/// Reads `{transactions, nextCursor, total}`.
+pub(crate) fn transactions_from(body: &[u8]) -> Result<BatchTransactionPage, ApiError> {
+    let v = parse_json(body)?;
+    let list = v["transactions"].as_array().ok_or_else(decode_err)?;
+    let transactions = list
+        .iter()
+        .map(|t| {
+            Ok(BatchTransaction {
+                id: opt_id(&t["id"]).ok_or_else(decode_err)?,
+                txn_type: t["txnType"].as_str().ok_or_else(decode_err)?.to_string(),
+                date: date(&t["txnDate"]),
+                number: text(&t["txnNumber"]),
+                vendor_invoice_number: text(&t["vendorInvoiceNumber"]),
+                status: text(&t["status"]),
+                contact: opt_id(&t["contactId"]),
+                contact_name: text(&t["contactName"]),
+                total: money(&t["total"])?,
+            })
+        })
+        .collect::<Result<_, ApiError>>()?;
+    Ok(BatchTransactionPage {
+        transactions,
+        next_cursor: text(&v["nextCursor"]),
+        total: count(&v["total"]),
     })
 }
 
@@ -2148,22 +2564,45 @@ impl Imports<'_> {
     /// [`ApiError`].
     pub async fn tieout(&self, id: ImportBatchId) -> Result<TieOut, ApiError> {
         require(self.0, Capabilities::IMPORTS_TIEOUT)?;
-        let call = at(&IMPORT_BATCH_TIEOUT, &id.to_string()).json_body(b"{}".to_vec());
+        let call = at(&IMPORT_BATCH_TIEOUT, &id.to_string()).json_body(REQUIRE_REFERENCE.to_vec());
         let reply = self.0.send(&IMPORT_BATCH_TIEOUT, call, None).await?;
         tieout_from(&reply.body)
     }
 
     /// Marks the batch verified: the engine recomputes the tie-out and
-    /// refuses unless every difference is zero.
+    /// refuses unless every difference is zero. Verifying a verified batch
+    /// answers with what it kept.
     ///
     /// # Errors
-    /// 409 `TIEOUT_NOT_ZERO`; 403 `IMPORT_ADMIN_REQUIRED`; any
-    /// [`ApiError`].
-    pub async fn verify(&self, id: ImportBatchId) -> Result<ImportBatch, ApiError> {
+    /// 409 `TIEOUT_NOT_ZERO` (with the first differences' ids); 403
+    /// `IMPORT_ADMIN_REQUIRED`; 409 `IMPORT_BUSY`; the tie-out's refusals;
+    /// any [`ApiError`].
+    pub async fn verify(&self, id: ImportBatchId) -> Result<Verified, ApiError> {
         require(self.0, Capabilities::IMPORTS_TIEOUT)?;
-        let call = at(&IMPORT_BATCH_VERIFY, &id.to_string()).json_body(b"{}".to_vec());
+        let call = at(&IMPORT_BATCH_VERIFY, &id.to_string()).json_body(REQUIRE_REFERENCE.to_vec());
         let reply = self.0.send(&IMPORT_BATCH_VERIFY, call, None).await?;
-        one_batch_from(&reply.body)
+        verified_from(&reply.body)
+    }
+
+    /// One page of the transactions the batch created (date, then id).
+    ///
+    /// # Errors
+    /// 400 `INVALID_CURSOR`; any [`ApiError`].
+    pub async fn transactions(
+        &self,
+        id: ImportBatchId,
+        cursor: Option<&str>,
+        limit: u16,
+    ) -> Result<BatchTransactionPage, ApiError> {
+        require(self.0, Capabilities::IMPORTS_TIEOUT)?;
+        let mut call = at(&IMPORT_BATCH_TRANSACTIONS, &id.to_string());
+        call.query
+            .push(("limit".into(), limit.clamp(1, TRANSACTIONS_PAGE).to_string()));
+        if let Some(c) = cursor {
+            call.query.push(("cursor".into(), c.to_string()));
+        }
+        let reply = self.0.send(&IMPORT_BATCH_TRANSACTIONS, call, None).await?;
+        transactions_from(&reply.body)
     }
 
     /// Saves the spot-check list on the batch.
@@ -2178,11 +2617,15 @@ impl Imports<'_> {
     ) -> Result<(), ApiError> {
         require(self.0, Capabilities::IMPORTS_TIEOUT)?;
         let mut seen = std::collections::BTreeSet::new();
-        if items.iter().any(|i| {
-            i.key.trim().is_empty()
-                || !seen.insert(i.key.as_str())
-                || i.note.chars().count() > MAX_NOTE_CHARS
-        }) {
+        if items.len() > MAX_SPOT_ITEMS
+            || items.iter().any(|i| {
+                i.key.trim().is_empty()
+                    || i.key.chars().count() > MAX_SPOT_KEY_CHARS
+                    || i.label.chars().count() > MAX_SPOT_LABEL_CHARS
+                    || !seen.insert(i.key.as_str())
+                    || i.note.chars().count() > MAX_NOTE_CHARS
+            })
+        {
             return Err(local(LocalValidation::InvalidValue));
         }
         let list: Vec<Value> = items
