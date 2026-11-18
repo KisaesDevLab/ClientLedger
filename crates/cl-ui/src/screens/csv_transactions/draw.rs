@@ -434,7 +434,10 @@ impl CsvTransactionsScreen {
                     {
                         self.back();
                     }
-                    let ready = self.plan.as_ref().is_some_and(|p| p.can_import())
+                    let ready = self
+                        .plan
+                        .as_ref()
+                        .is_some_and(cl_model::imports::csv_txn::TxnPlan::can_import)
                         && self.engine_problems.is_empty()
                         && self.trouble.is_none();
                     if self.admin()

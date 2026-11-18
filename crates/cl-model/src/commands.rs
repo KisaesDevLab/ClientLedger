@@ -633,8 +633,14 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Slow Demo Bank Import Preparation (developer)",
     ),
     // P31 D5: the spreadsheet import scenarios run light and dark in one app.
-    dev_action("dev.txn_import_demo_reset", "Reset Demo Spreadsheet Import (developer)"),
-    dev_action("dev.txn_import_demo_file_good", "Demo Spreadsheet: Good File (developer)"),
+    dev_action(
+        "dev.txn_import_demo_reset",
+        "Reset Demo Spreadsheet Import (developer)",
+    ),
+    dev_action(
+        "dev.txn_import_demo_file_good",
+        "Demo Spreadsheet: Good File (developer)",
+    ),
     dev_action(
         "dev.txn_import_demo_file_bad_rows",
         "Demo Spreadsheet: File with Problems (developer)",

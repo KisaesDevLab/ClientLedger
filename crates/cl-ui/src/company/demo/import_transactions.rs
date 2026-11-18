@@ -110,6 +110,7 @@ impl DemoTxnImport {
     }
 
     /// The verified backup before a commit or undo: its file name.
+    #[allow(clippy::result_unit_err, reason = "the demo's failure carries nothing")]
     ///
     /// # Errors
     /// `()` when the developer switch fails it.
@@ -132,8 +133,11 @@ impl DemoTxnImport {
     pub fn upload(&mut self, csv: &[u8], accounts: &[String]) -> Result<UploadOutcome, ApiError> {
         let hash: String = sha2::Sha256::digest(csv)
             .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+            .fold(String::new(), |mut h, b| {
+                use std::fmt::Write as _;
+                let _ = write!(h, "{b:02x}");
+                h
+            });
         if let Some(b) = self.imported.get(&hash) {
             return Err(conflict(
                 "IMPORT_ALREADY_COMMITTED",

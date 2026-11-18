@@ -246,6 +246,7 @@ fn csv_txn_unbalanced_entry_is_blocked_with_its_difference() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines, reason = "one row per problem kind")]
 fn csv_txn_row_problems_name_the_row_and_field() {
     let r = rows(&[
         &["1", "Invoice", "2026-03-02", "1", "", "Sales", "10", "", ""],

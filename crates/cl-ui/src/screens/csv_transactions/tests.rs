@@ -95,13 +95,15 @@ fn csv_transactions_backup_failure_sends_nothing() {
     assert_eq!(s.trouble, Some(Trouble::BackupFailed(Action::Commit)));
     assert_eq!(s.phase, Phase::Idle);
     demo(&f, |d| {
-        assert_eq!(d.txn_import.commits_received, 0, "nothing sent")
+        assert_eq!(d.txn_import.commits_received, 0, "nothing sent");
     });
     s.try_again();
     s.poll();
     settle(&mut s);
     assert_eq!(s.step, Step::Done);
-    demo(&f, |d| assert_eq!(d.txn_import.commits_received, 1));
+    demo(&f, |d| {
+        assert_eq!(d.txn_import.commits_received, 1);
+    });
 }
 
 #[test]
@@ -151,7 +153,7 @@ fn csv_transactions_lost_answer_waits_for_check_status() {
     settle(&mut s);
     assert_eq!(s.step, Step::Done, "{}", s.state());
     demo(&f, |d| {
-        assert_eq!(d.txn_import.commits_received, 1, "never resent")
+        assert_eq!(d.txn_import.commits_received, 1, "never resent");
     });
 }
 
@@ -216,7 +218,7 @@ fn csv_transactions_closed_books_ask_for_the_password() {
     settle(&mut s);
     assert_eq!(s.step, Step::Done, "{}", s.state());
     demo(&f, |d| {
-        assert_eq!(d.txn_import.backups_made, 2, "a backup before each send")
+        assert_eq!(d.txn_import.backups_made, 2, "a backup before each send");
     });
 }
 

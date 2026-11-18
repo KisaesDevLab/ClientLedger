@@ -254,7 +254,7 @@ pub struct CsvTransactionsScreen {
     open: Option<(TenantId, String)>,
     pub(crate) step: Step,
     pick_rx: Option<Receiver<Vec<std::path::PathBuf>>>,
-    reading: Option<Receiver<Result<(String, Vec<u8>), &'static str>>>,
+    reading: Option<Receiver<FileRead>>,
     pub(crate) file_name: Option<String>,
     pub(crate) file_error: Option<&'static str>,
     pub(crate) headers: Vec<String>,
@@ -284,8 +284,11 @@ pub struct CsvTransactionsScreen {
     pub(crate) closing: ClosingPrompt<Action>,
 }
 
+/// A chosen file read off the egui thread: its name and bytes, or an i18n key.
+type FileRead = Result<(String, Vec<u8>), &'static str>;
+
 /// Reads a chosen file off the egui thread (up to 10 MB).
-fn read_file(path: &std::path::Path) -> Result<(String, Vec<u8>), &'static str> {
+fn read_file(path: &std::path::Path) -> FileRead {
     let meta = std::fs::metadata(path).map_err(|_| "txn_import.file.open")?;
     if meta.len() > cl_api::import_transactions::MAX_UPLOAD_BYTES as u64 {
         return Err("txn_import.file.too_large");
