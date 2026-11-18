@@ -476,6 +476,65 @@ fn csv_txn_has_no_floats() {
     }
 }
 
+/// A small quote-aware splitter for the fixtures (the screen uses
+/// `cl_import::csv`).
+fn split_csv(text: &str) -> Vec<Vec<String>> {
+    text.lines()
+        .map(|line| {
+            let mut cells = vec![String::new()];
+            let mut quoted = false;
+            for c in line.chars() {
+                match c {
+                    '"' => quoted = !quoted,
+                    ',' if !quoted => cells.push(String::new()),
+                    _ => cells.last_mut().expect("cell").push(c),
+                }
+            }
+            cells
+        })
+        .collect()
+}
+
+/// `fixtures/import_transactions/`: the good file's totals are the hand
+/// totals in its README; the bad file has the problems listed there.
+#[test]
+fn csv_txn_fixtures_match_their_hand_totals() {
+    let good = split_csv(include_str!(
+        "../../../../fixtures/import_transactions/good.csv"
+    ));
+    let headers: Vec<&str> = good[0].iter().map(String::as_str).collect();
+    let m = guess_mapping(&headers);
+    assert_eq!(m.len(), 14, "every column maps");
+    let plan = build(&good[1..], 2, &m);
+    assert!(plan.can_import(), "{plan:?}");
+    let totals: Vec<String> = plan
+        .documents
+        .iter()
+        .map(|d| d.total().to_string())
+        .collect();
+    assert_eq!(totals, ["1562.50", "480.00", "685.25", "200.00", "89.99"]);
+    let bad = split_csv(include_str!(
+        "../../../../fixtures/import_transactions/bad-rows.csv"
+    ));
+    let plan = build(&bad[1..], 2, &m);
+    let got: Vec<(usize, &str)> = plan
+        .problems
+        .iter()
+        .map(|p| (p.row, p.kind.code()))
+        .collect();
+    assert_eq!(
+        got,
+        [
+            (2, "missing"),
+            (3, "type_unknown"),
+            (4, "date_invalid"),
+            (5, "amount_too_precise"),
+            (6, "unbalanced"),
+            (8, "amount_invalid"),
+            (9, "amount_missing"),
+        ]
+    );
+}
 proptest! {
     /// Any amount with up to four places reads back exactly, in every
     /// accepted spelling.

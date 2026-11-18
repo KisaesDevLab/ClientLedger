@@ -45,6 +45,8 @@ pub mod operations;
 pub mod payments;
 // P30: payroll import (U-242 to U-251).
 pub mod payroll;
+// P31 D5: spreadsheet transaction import (U-261, U-268).
+pub mod import_transactions;
 pub mod posting;
 pub mod printing;
 pub(crate) mod reconcile;

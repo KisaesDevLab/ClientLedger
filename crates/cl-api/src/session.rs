@@ -179,6 +179,8 @@ impl Client {
         );
         self.exec()
             .set_payroll_v1(info.capabilities.has(Capabilities::PAYROLL_IMPORT_POST));
+        self.exec()
+            .set_imports_batch_v1(info.capabilities.has(Capabilities::IMPORTS_BATCH));
         lock(&self.inner.caps).clone_from(&info.capabilities);
         Ok(info)
     }

@@ -524,6 +524,12 @@ impl Capabilities {
     /// Mode A check (`departments`, `departmentsTruncated`), Mode B signed
     /// amounts. Optional: the screen works without it (sample departments).
     pub const PAYROLL_IMPORT_REVIEW: &'static str = "payroll-import-review-v1";
+    /// U-261 (P31 E1): import batches (create, commit 202 + progress, undo;
+    /// commit and undo keyed, one transaction each).
+    pub const IMPORTS_BATCH: &'static str = "imports-batch-v1";
+    /// U-268 (P31 E4): the `transactions` import kind (invoices, bills and
+    /// journal entries from a spreadsheet; no sales tax, Q-P31i).
+    pub const IMPORTS_TRANSACTIONS: &'static str = "imports-transactions-v1";
     /// U-175 (P26 QA-6): a bank file goes into any bank register account
     /// (`bank`, `checking`, `savings`, `cash`, `petty_cash`) or a card.
     pub const BANK_IMPORT_ACCOUNT_TYPES: &'static str = "bank-import-account-types-v1";

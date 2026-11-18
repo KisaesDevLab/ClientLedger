@@ -72,6 +72,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::FeedAcceptV1) => "keyable-feed-accept",
             RetryClass::Keyable(KeySet::FeedUndoV1) => "keyable-feed-undo",
             RetryClass::Keyable(KeySet::PayrollV1) => "keyable-payroll",
+            RetryClass::Keyable(KeySet::ImportsBatchV1) => "keyable-imports-batch",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
             RetryClass::Query => "query",
@@ -176,6 +177,9 @@ pub enum KeySet {
     /// `payroll-import-post-v1` (U-244, P30): payroll post and reverse (key
     /// required; one transaction each).
     PayrollV1,
+    /// `imports-batch-v1` (U-261, P31 E1): import batch commit and undo (key
+    /// required; one transaction each, run as a background job).
+    ImportsBatchV1,
 }
 
 impl KeySet {
@@ -212,6 +216,7 @@ impl KeySet {
             KeySet::FeedAcceptV1 => crate::wire::Capabilities::FEED_ACCEPT,
             KeySet::FeedUndoV1 => crate::wire::Capabilities::FEED_UNDO,
             KeySet::PayrollV1 => crate::wire::Capabilities::PAYROLL_IMPORT_POST,
+            KeySet::ImportsBatchV1 => crate::wire::Capabilities::IMPORTS_BATCH,
         }
     }
 }
@@ -278,7 +283,7 @@ impl Operation {
     }
 }
 
-const fn op(
+pub(crate) const fn op(
     method: Method,
     route: &'static str,
     retry: RetryClass,

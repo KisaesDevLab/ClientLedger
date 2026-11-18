@@ -249,6 +249,8 @@ pub use resources::feed::{
     Feed, FeedDeposit, FeedGrouping, FeedGroupings, FeedItemId, GROUPINGS_LIMIT,
 };
 pub use resources::payroll;
+// P31 D5: `cl_api::import_transactions::…`.
+pub use resources::import_transactions;
 // P26: bank feed review.
 pub use resources::feed_accept::{
     ACCEPT_MAX, AcceptFailure, AcceptItem, AcceptOutcome, AcceptRequest, AcceptSkip, DraftLink,
