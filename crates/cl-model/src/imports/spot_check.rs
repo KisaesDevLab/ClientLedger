@@ -321,7 +321,10 @@ mod tests {
         unique.dedup();
         assert_eq!(unique.len(), keys.len());
         assert!(!complete(&items));
-        let s = items.iter().find(|i| i.kind == Kind::Sample).expect("sample");
+        let s = items
+            .iter()
+            .find(|i| i.kind == Kind::Sample)
+            .expect("sample");
         let (kind, id) = sample_target(&s.key).expect("target");
         assert_eq!(kind, "invoice");
         assert!(id.starts_with("txn-"));

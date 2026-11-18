@@ -19,7 +19,8 @@ Account | QuickBooks Desktop | ClientLedger | Difference
 6100 | 339.44 | 339.44 | 0.00
 6300 | 2,100.00 | 2,100.00 | 0.00
 6400 | 1,750.00 | 1,750.00 | 0.00
-Total (all 15 accounts) | 0.00 | 0.00 | 0.00
+Total debits | 53,785.46 | 53,785.46 | 
+Total credits | 53,785.46 | 53,785.46 | 
 
 ## A/R aging
 Invoice | QuickBooks Desktop | ClientLedger | Difference
@@ -27,6 +28,7 @@ Invoice | QuickBooks Desktop | ClientLedger | Difference
 1005 | 3,500.00 | 3,500.00 | 0.00
 CM-7 | -1,234.00 | -1,234.00 | 0.00
 payment:Riverside Café | -300.00 | -300.00 | 0.00
+Total (all 4) | 4,311.67 | 4,311.67 | 0.00
 
 ## A/P aging
 Bill | QuickBooks Desktop | ClientLedger | Difference
@@ -34,12 +36,14 @@ F-131 | 389.44 | 389.44 | 0.00
 NP-552 | 800.00 | 800.00 | 0.00
 OCT26 | 750.00 | 750.00 | 0.00
 VC-9 | -50.00 | -50.00 | 0.00
+Total (all 4) | 1,889.44 | 1,889.44 | 0.00
 
 ## Inventory
 Item | QuickBooks Desktop | ClientLedger | Difference
 Live Oak 15gal | 1,125.00 | 1,125.00 | 0.00
 Mulch (bag) | 325.00 | 325.00 | 0.00
 Native Shrub 3gal | 1,950.00 | 1,950.00 | 0.00
+Total (all 3) | 3,400.00 | 3,400.00 | 0.00
 
 ## Must be 0.00 at the switch date
 Receivables before conversion | 0.00

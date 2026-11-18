@@ -333,7 +333,9 @@ fn is_retained_earnings_pair(t: &TieOut, a: &cl_api::imports::TieOutAccount) -> 
 fn retained_earnings_pending(t: &TieOut) -> bool {
     let pending = t.accounts.iter().any(|a| is_retained_earnings_pair(t, a));
     if pending {
-        eprintln!("PENDING(engine QBD Retained Earnings merge): prior-year income on two equity accounts");
+        eprintln!(
+            "PENDING(engine QBD Retained Earnings merge): prior-year income on two equity accounts"
+        );
     }
     pending
 }
@@ -341,7 +343,11 @@ fn retained_earnings_pending(t: &TieOut) -> bool {
 /// The nonzero account differences, keyed by the source account key.
 fn account_diffs(t: &TieOut) -> fx::Balances {
     let mut d = fx::Balances::new();
-    for a in t.accounts.iter().filter(|a| !is_retained_earnings_pair(t, a)) {
+    for a in t
+        .accounts
+        .iter()
+        .filter(|a| !is_retained_earnings_pair(t, a))
+    {
         // Keyed as EXPECTED.toml has it: the source key, else the number.
         let key = a
             .source_keys

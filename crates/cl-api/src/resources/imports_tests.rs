@@ -924,7 +924,10 @@ async fn tieout_reads_exact_differences_and_hides_owner_data() {
     let stock = &t.inventory_items[0];
     assert_eq!(stock.name, "Live Oak 15gal");
     assert_eq!(stock.quantity_diff.to_string(), "-0.5");
-    assert!(stock.diff.is_zero() && !stock.ties(), "a quantity difference");
+    assert!(
+        stock.diff.is_zero() && !stock.ties(),
+        "a quantity difference"
+    );
     assert_eq!(t.balance_rows.len(), 2, "an unknown check is skipped");
     assert_eq!(t.balance_rows[0].key, BalanceKey::HistoryAr);
     assert_eq!(t.balance_rows[0].books, m("-10.00"));

@@ -237,6 +237,54 @@ pub fn badge(ui: &mut Ui, count: u32) -> Response {
     response
 }
 
+/// Paints a check mark in `rect` (two strokes). The bundled fonts draw
+/// U+2713 as a plain "√", so marks that must read as a check are drawn.
+pub fn paint_check(painter: &egui::Painter, rect: egui::Rect, stroke: Stroke) {
+    let p = |x: f32, y: f32| {
+        Pos2::new(
+            rect.left() + rect.width() * x,
+            rect.top() + rect.height() * y,
+        )
+    };
+    painter.line(vec![p(0.2, 0.52), p(0.42, 0.74), p(0.8, 0.3)], stroke);
+}
+
+/// A drawn check mark `size` points square, with `label` for screen readers
+/// and the control channel.
+pub fn check_mark(ui: &mut Ui, size: f32, color: Color32, label: &str) -> Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    if ui.is_rect_visible(rect) {
+        paint_check(
+            ui.painter(),
+            rect,
+            Stroke::new((size / 8.0).max(1.5), color),
+        );
+    }
+    response.widget_info(|| WidgetInfo::labeled(Role::Image, true, label));
+    response
+}
+
+/// A filled circle with a drawn check (a finished step in a step rail).
+pub fn circled_check(
+    ui: &mut Ui,
+    size: f32,
+    fill: Color32,
+    mark: Color32,
+    label: &str,
+) -> Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    if ui.is_rect_visible(rect) {
+        ui.painter().circle_filled(rect.center(), size / 2.0, fill);
+        paint_check(
+            ui.painter(),
+            rect.shrink(size * 0.18),
+            Stroke::new((size / 9.0).max(1.5), mark),
+        );
+    }
+    response.widget_info(|| WidgetInfo::labeled(Role::Image, true, label));
+    response
+}
+
 /// A filled dot, the "unsaved changes" mark on tabs and rail entries.
 pub fn paint_dot(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32) {
     painter.circle_filled(center, radius, color);

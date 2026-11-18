@@ -31,10 +31,11 @@ use std::collections::BTreeMap;
 
 use cl_api::imports::{
     AccountMatch, BalanceKey, BalanceRow, BatchFailure, BatchFile, BatchPage, BatchState,
-    BatchStatus, CommitRequest, FilePreview, FileRole, ImportBatch, ImportBatchId, ImportKind,
-    ImportSession, ImportSessionId, JobAccepted, MatchStatus, NewBatch, Progress, RowProblem,
-    SessionStatus, SourceSystem, SpotCheckItem, TieOut, TieOutAccount, TieOutItem, TieOutTotals,
-    UndoBlocker, UploadOutcome, UploadRequest,
+    BatchStatus, BatchTransaction, CommitRequest, FilePreview, FileRole, ImportBatch,
+    ImportBatchId, ImportKind, ImportSession, ImportSessionId, JobAccepted, MatchStatus, NewBatch,
+    Progress, ReferenceTrialBalance, RowProblem, SessionStatus, SourceSystem, SpotCheckItem,
+    TieOut, TieOutAccount, TieOutBooks, TieOutItem, TieOutStock, TieOutTotal, TieOutTotals,
+    TrialBalanceTotals, UndoBlocker, UploadOutcome, UploadRequest, Verified,
 };
 use cl_api::{
     ApiError, ConflictDetails, ConflictReason, ErrorCode, IdempotencyKey, UserText, ValidationError,
@@ -1266,64 +1267,160 @@ impl DemoImports {
 
     fn committed(&self, id: ImportBatchId) -> Result<&DemoBatch, ApiError> {
         let b = &self.batches[self.batch_index(id)?];
-        if b.batch.status == BatchStatus::Committed {
-            Ok(b)
-        } else {
-            Err(conflict(
+        match b.batch.status {
+            BatchStatus::Committed => Ok(b),
+            BatchStatus::Undone => Err(conflict(
+                "IMPORT_BATCH_UNDONE",
+                json!({"batchId": id.to_string()}),
+            )),
+            other => Err(conflict(
                 "IMPORT_BATCH_NOT_COMMITTED",
-                json!({"status": b.batch.status.as_wire()}),
-            ))
+                json!({"batchId": id.to_string(), "status": other.as_wire()}),
+            )),
         }
     }
 
-    /// The batch's tie-out against the reference files.
+    /// The batch's tie-out against the reference files (after verify, the
+    /// one kept).
     ///
     /// # Errors
-    /// `NotFound`; 409 `IMPORT_BATCH_NOT_COMMITTED`.
+    /// `NotFound`; 409 `IMPORT_BATCH_NOT_COMMITTED`, `IMPORT_BATCH_UNDONE`.
     pub fn tieout(&self, id: ImportBatchId) -> Result<TieOut, ApiError> {
         let b = self.committed(id)?;
-        tieout_of(&SETS[b.set], b.batch.conversion_date)
+        let mut t = tieout_of(&SETS[b.set], b.batch.conversion_date)?;
+        t.batch = Some(id);
+        t.verified_at.clone_from(&b.batch.verified_at);
+        Ok(t)
     }
 
-    /// Marks the batch verified when every difference is zero.
+    /// Marks the batch verified when every difference is zero; again
+    /// answers with what it kept.
     ///
     /// # Errors
-    /// `NotFound`; 409 `IMPORT_BATCH_NOT_COMMITTED`, `TIEOUT_NOT_ZERO`.
-    pub fn verify(&mut self, id: ImportBatchId) -> Result<ImportBatch, ApiError> {
+    /// `NotFound`; 409 `IMPORT_BATCH_NOT_COMMITTED`, `IMPORT_BATCH_UNDONE`,
+    /// `TIEOUT_NOT_ZERO` (ids and rows only, like the engine).
+    pub fn verify(&mut self, id: ImportBatchId) -> Result<Verified, ApiError> {
         let t = self.tieout(id)?;
         if !t.all_zero {
-            let first: Vec<Value> = t
-                .accounts
-                .iter()
-                .filter(|a| !a.diff.is_zero())
-                .take(10)
-                .map(|a| json!({"name": a.name, "diffExact": a.diff.to_wire()}))
-                .collect();
             return Err(conflict(
                 "TIEOUT_NOT_ZERO",
-                json!({"firstDifferences": first}),
+                json!({
+                    "batchId": id.to_string(),
+                    "differenceCount": t.difference_count,
+                    "firstDifferences": first_differences(&t),
+                }),
             ));
         }
         let i = self.batch_index(id)?;
         let b = &mut self.batches[i].batch;
-        b.verified_at = Some("2026-10-27T13:00:00.000Z".into());
-        b.verified_by = Some("demo-admin".into());
-        Ok(b.clone())
+        if b.verified_at.is_none() {
+            b.verified_at = Some("2026-10-27T13:00:00.000Z".into());
+            b.verified_by = Some("demo-admin".into());
+        }
+        let batch = b.clone();
+        let mut tieout = t;
+        tieout.verified_at.clone_from(&batch.verified_at);
+        Ok(Verified { batch, tieout })
     }
 
-    /// Saves the spot-check list on the batch.
+    /// Saves the spot-check list on a committed batch.
     ///
     /// # Errors
-    /// `NotFound`.
+    /// `NotFound`; 409 `IMPORT_BATCH_NOT_COMMITTED`, `IMPORT_BATCH_UNDONE`.
     pub fn save_spot_check(
         &mut self,
         id: ImportBatchId,
         items: &[SpotCheckItem],
     ) -> Result<(), ApiError> {
+        self.committed(id)?;
         let i = self.batch_index(id)?;
         self.batches[i].batch.spot_check = items.to_vec();
         Ok(())
     }
+
+    /// The transactions a committed batch made (the spot-check pool): one
+    /// per open invoice and unpaid bill of the set, with the set's own
+    /// amounts. Empty for any other batch.
+    #[must_use]
+    pub fn transactions(&self, id: ImportBatchId) -> Vec<BatchTransaction> {
+        let Ok(b) = self.committed(id) else {
+            return Vec::new();
+        };
+        let set = &SETS[b.set];
+        if !set.qbd {
+            return Vec::new();
+        }
+        let date = day(section(set.base, "company")
+            .get("conversion_date")
+            .map_or("", String::as_str));
+        let mut out = Vec::new();
+        for (n, (kind, list)) in [("invoice", "open_invoices"), ("bill", "unpaid_bills")]
+            .into_iter()
+            .enumerate()
+        {
+            for (k, (number, value)) in (0_u64..).zip(section(set.base, list)) {
+                let Some(total) = money(Some(&value)) else {
+                    continue;
+                };
+                let Ok(txn) = uuid(k + 1, 0x70 + u8::try_from(n).unwrap_or(0)).parse() else {
+                    continue;
+                };
+                out.push(BatchTransaction {
+                    id: txn,
+                    txn_type: kind.into(),
+                    date,
+                    number: Some(number),
+                    vendor_invoice_number: None,
+                    status: Some("posted".into()),
+                    contact: None,
+                    contact_name: None,
+                    total,
+                });
+            }
+        }
+        out
+    }
+}
+
+/// `firstDifferences` as the engine sends them: section, key, source row
+/// and ids only (never a name), at most 20.
+fn first_differences(t: &TieOut) -> Vec<Value> {
+    let row = |section: &str, key: Option<&str>, r: Option<u64>| {
+        json!({"section": section, "key": key, "sourceRow": r, "accountId": null,
+               "transactionId": null, "itemId": null})
+    };
+    let mut out: Vec<Value> = t
+        .accounts
+        .iter()
+        .filter(|a| !a.diff.is_zero())
+        .map(|a| row("accounts", None, a.source_row))
+        .collect();
+    out.extend(
+        t.ar_items
+            .iter()
+            .filter(|i| !i.diff.is_zero())
+            .map(|i| row("arItems", None, i.source_row)),
+    );
+    out.extend(
+        t.ap_items
+            .iter()
+            .filter(|i| !i.diff.is_zero())
+            .map(|i| row("apItems", None, i.source_row)),
+    );
+    out.extend(
+        t.inventory_items
+            .iter()
+            .filter(|i| !i.ties())
+            .map(|i| row("inventoryItems", None, i.source_row)),
+    );
+    out.extend(
+        t.balance_rows
+            .iter()
+            .filter(|r| !r.diff.is_zero())
+            .map(|r| row("balanceRows", Some(r.key.as_wire()), None)),
+    );
+    out.truncate(20);
+    out
 }
 
 /// One posted file's result as the engine reports it: counts, and the
@@ -1366,25 +1463,36 @@ fn overlap_refusal(
     conflict("IMPORT_PERIOD_OVERLAP", d)
 }
 
-/// The tie-out of a set: the reference trial balance, plus the differences
-/// the altered set's expectation names (books minus source).
+/// The tie-out of a set (E3 as built): the reference trial balance, plus
+/// the differences the altered set's expectation names (books minus
+/// source). Every amount is `EXPECTED.toml`'s: the trial balance columns
+/// and the aging totals are its `[totals]`, an altered set's total
+/// differences its `[totals_diff]`. The demo plays the engine, so it counts
+/// the rows that differ (`differenceCount`), as the engine does.
 fn tieout_of(set: &Set, conversion: Option<CalendarDate>) -> Result<TieOut, ApiError> {
     let reference = section(set.base, "reference_tb");
     let diffs = set.altered.map(|t| section(t, "diffs")).unwrap_or_default();
     let mut keys: Vec<&String> = reference.keys().chain(diffs.keys()).collect();
     keys.sort();
     keys.dedup();
-    let zero = Money::from_cents(0).map_err(|_| decode())?;
+    let zero = Money::ZERO;
     let mut accounts = Vec::new();
-    for key in keys {
+    for (row, key) in (2_u64..).zip(keys) {
         let source = money(reference.get(key)).unwrap_or(zero);
         let diff = money(diffs.get(key)).unwrap_or(zero);
         let books = source.checked_add(diff).map_err(|_| decode())?;
+        let in_source = reference.contains_key(key);
         accounts.push(TieOutAccount {
             account: None,
-            name: key.clone(),
-            source_row: None,
-            source_keys: vec![key.clone()],
+            number: Some(key.clone()),
+            name: String::new(),
+            source_row: in_source.then_some(row),
+            source_rows: if in_source { vec![row] } else { Vec::new() },
+            source_keys: if in_source {
+                vec![key.clone()]
+            } else {
+                Vec::new()
+            },
             source,
             books,
             diff,
@@ -1402,28 +1510,25 @@ fn tieout_of(set: &Set, conversion: Option<CalendarDate>) -> Result<TieOut, ApiE
             ("valuation_vs_asset", BalanceKey::ValuationVsAsset),
         ]
         .into_iter()
-        .map(|(name, key)| BalanceRow {
-            key,
-            diff: money(balances.get(name)).unwrap_or(zero),
+        .map(|(name, key)| {
+            let diff = money(balances.get(name)).unwrap_or(zero);
+            BalanceRow {
+                key,
+                account: None,
+                source: zero,
+                books: diff,
+                diff,
+            }
         })
         .collect()
     } else {
         Vec::new()
     };
-    let all_zero =
-        accounts.iter().all(|a| a.diff.is_zero()) && balance_rows.iter().all(|r| r.diff.is_zero());
-    let total =
-        |f: fn(&TieOutAccount) -> Money| Money::sum(accounts.iter().map(f)).map_err(|_| decode());
-    let totals = TieOutTotals {
-        source: Some(total(|a| a.source)?),
-        books: Some(total(|a| a.books)?),
-        diff: Some(total(|a| a.diff)?),
-    };
     let as_of = conversion
         .or_else(|| day(section(set.base, "company").get("conversion_date")?))
         .ok_or_else(decode)?;
     let item_diffs = set.altered.map(|t| section(t, "items")).unwrap_or_default();
-    let items = |name: &str, numbered: bool| -> Result<Vec<TieOutItem>, ApiError> {
+    let items = |name: &str| -> Result<Vec<TieOutItem>, ApiError> {
         if !set.qbd {
             return Ok(Vec::new());
         }
@@ -1433,9 +1538,13 @@ fn tieout_of(set: &Set, conversion: Option<CalendarDate>) -> Result<TieOut, ApiE
             let source = money(Some(&value)).ok_or_else(decode)?;
             let diff = money(item_diffs.get(&key)).unwrap_or(zero);
             out.push(TieOutItem {
-                source_row: row,
-                name: if numbered { String::new() } else { key.clone() },
-                number: numbered.then_some(key),
+                source_row: Some(row),
+                session: None,
+                transaction: None,
+                name: String::new(),
+                number: Some(key),
+                doc_type: None,
+                date: Some(as_of),
                 source,
                 books: source.checked_add(diff).map_err(|_| decode())?,
                 diff,
@@ -1443,24 +1552,94 @@ fn tieout_of(set: &Set, conversion: Option<CalendarDate>) -> Result<TieOut, ApiE
         }
         Ok(out)
     };
-    let receivables = items("open_invoices", true)?;
-    let payables = items("unpaid_bills", true)?;
-    let inventory_items = items("inventory_valuation", false)?;
-    let all_zero = all_zero
-        && receivables
+    let receivables = items("open_invoices")?;
+    let payables = items("unpaid_bills")?;
+    let mut inventory_items = Vec::new();
+    if set.qbd {
+        for (row, (key, value)) in (2_u64..).zip(section(set.base, "inventory_valuation")) {
+            let source = money(Some(&value)).ok_or_else(decode)?;
+            let diff = money(item_diffs.get(&key)).unwrap_or(zero);
+            inventory_items.push(TieOutStock {
+                source_row: Some(row),
+                name: key,
+                item: None,
+                // EXPECTED.toml has values only: the demo shows no
+                // quantity difference.
+                source_quantity: rust_decimal::Decimal::ZERO,
+                books_quantity: rust_decimal::Decimal::ZERO,
+                quantity_diff: rust_decimal::Decimal::ZERO,
+                source,
+                books: source.checked_add(diff).map_err(|_| decode())?,
+                diff,
+            });
+        }
+    }
+    let totals_of = section(set.base, "totals");
+    let total_diffs = set
+        .altered
+        .map(|t| section(t, "totals_diff"))
+        .unwrap_or_default();
+    let side = |file: &str, key: &str, present: bool| -> Result<Option<TieOutTotal>, ApiError> {
+        let Some(source) = money(totals_of.get(file)).filter(|_| present) else {
+            return Ok(None);
+        };
+        let diff = money(total_diffs.get(key)).unwrap_or(zero);
+        Ok(Some(TieOutTotal {
+            source,
+            books: source.checked_add(diff).map_err(|_| decode())?,
+            diff,
+        }))
+    };
+    let tb = money(totals_of.get("reference_tb_debits"));
+    let totals = TieOutTotals {
+        accounts: tb.map(|d| TrialBalanceTotals {
+            source_debit: d,
+            source_credit: d,
+            books_debit: d,
+            books_credit: d,
+        }),
+        ar: side("open_invoices", "ar", !receivables.is_empty())?,
+        ap: side("unpaid_bills", "ap", !payables.is_empty())?,
+        inventory: side(
+            "inventory_valuation",
+            "inventory",
+            !inventory_items.is_empty(),
+        )?,
+    };
+    let differing = accounts.iter().filter(|a| !a.diff.is_zero()).count()
+        + receivables
             .iter()
             .chain(&payables)
-            .chain(&inventory_items)
-            .all(|i| i.diff.is_zero());
+            .filter(|i| !i.diff.is_zero())
+            .count()
+        + inventory_items.iter().filter(|i| !i.ties()).count()
+        + balance_rows.iter().filter(|r| !r.diff.is_zero()).count()
+        + [totals.ar, totals.ap, totals.inventory]
+            .iter()
+            .flatten()
+            .filter(|x| !x.diff.is_zero())
+            .count();
+    let reference_tb = section(set.base, "files")
+        .values()
+        .any(|v| v.starts_with("trial_balance:reference"));
     Ok(TieOut {
+        batch: None,
         as_of,
+        computed_at: Some(COMMITTED_AT.into()),
+        books: Some(TieOutBooks::Company),
+        reference: reference_tb.then_some(ReferenceTrialBalance {
+            session: None,
+            report_date: Some(as_of),
+        }),
         accounts,
         ar_items: receivables,
         ap_items: payables,
         inventory_items,
         balance_rows,
         totals,
-        all_zero,
+        difference_count: u64::try_from(differing).unwrap_or(u64::MAX),
+        all_zero: differing == 0,
+        verified_at: None,
     })
 }
 

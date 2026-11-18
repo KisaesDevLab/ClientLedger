@@ -930,6 +930,16 @@ pub(crate) fn refusal_text(r: &ImportRefusal) -> String {
             "imports.refusal.inventory_period_closed_on",
             &[("date", &show_date(*d))],
         ),
+        ImportRefusal::TieOutNotZero {
+            difference_count, ..
+        } if *difference_count > 0 => t_with(
+            "imports.refusal.tieout_not_zero_n",
+            &[("n", &difference_count.to_string())],
+        ),
+        ImportRefusal::TieOutReferenceRequired { as_of: Some(d) } => t_with(
+            "imports.refusal.tieout_reference_required_on",
+            &[("date", &show_date(*d))],
+        ),
         _ => t(&key),
     }
 }

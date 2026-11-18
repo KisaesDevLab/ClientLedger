@@ -536,6 +536,17 @@ fn the_tie_out_is_verified_only_when_every_difference_is_zero() {
     assert_ne!(s.spot.items.len(), 0);
     assert!(s.spot.items.iter().any(|i| i.key.starts_with("ar:")));
     assert!(s.spot.items.iter().any(|i| i.key == "inventory"));
+    // Five of the batch's own transactions, each opening in its form.
+    let samples: Vec<&str> = s
+        .spot
+        .items
+        .iter()
+        .map(|i| i.key.as_str())
+        .filter(|k| k.starts_with("sample:"))
+        .collect();
+    assert_eq!(samples.len(), cl_model::imports::spot_check::SAMPLES);
+    assert!(samples.iter().all(|k| s.open_sample(k)), "{samples:?}");
+    assert!(!s.open_sample("bank:x"));
     assert_eq!(s.spot.saves, 1);
     assert_eq!(demo_batch(&f, &s).spot_check.len(), s.spot.items.len());
 }
@@ -589,7 +600,12 @@ fn an_altered_open_invoice_shows_on_receivables_and_its_history_account() {
         s.trouble
     );
     s.poll();
-    assert_eq!(s.state()["tieout_tab"], "receivables", "the tab is kept");
+    // The first difference the engine named (account 1200's row) is shown:
+    // its tab, only differences, the row marked.
+    let st = s.state();
+    assert_eq!(st["tieout_tab"], "accounts", "{st}");
+    assert_eq!(st["tieout_differences_only"], true);
+    assert_eq!(st["tieout_marked"], "1200");
     assert!(!demo_batch(&f, &s).is_verified());
 }
 

@@ -127,8 +127,11 @@ pub(crate) enum Trouble {
     /// The answer was lost: it may have gone through.
     Unknown,
     PasswordWait,
-    /// Not the company Admin, or an account is hidden from this user.
+    /// Not the company Admin.
     Restricted,
+    /// An account is hidden from this user (403 `SENSITIVE_HIDDEN`: the
+    /// import routes refuse while any is).
+    Hidden,
     Unsupported,
     EngineDown,
     /// The backup before the import (or undo) failed: nothing was sent.
@@ -151,7 +154,8 @@ impl Trouble {
         match e {
             ApiError::OutcomeUnknown { .. } => Trouble::Unknown,
             ApiError::ClosingPasswordRateLimited { .. } => Trouble::PasswordWait,
-            ApiError::Sensitive(_) | ApiError::Forbidden { .. } => Trouble::Restricted,
+            ApiError::Sensitive(_) => Trouble::Hidden,
+            ApiError::Forbidden { .. } => Trouble::Restricted,
             ApiError::Local(cl_api::LocalValidation::Unsupported) => Trouble::Unsupported,
             ApiError::EngineUnavailable { .. } => Trouble::EngineDown,
             ApiError::NotFound { .. } => Trouble::Gone,
@@ -166,6 +170,7 @@ impl Trouble {
             Trouble::Unknown => "unknown",
             Trouble::PasswordWait => "password_wait",
             Trouble::Restricted => "restricted",
+            Trouble::Hidden => "hidden",
             Trouble::Unsupported => "unsupported",
             Trouble::EngineDown => "engine_down",
             Trouble::BackupFailed => "backup_failed",
@@ -185,6 +190,9 @@ pub(crate) fn refusal_code(r: &ImportRefusal) -> &'static str {
         ImportRefusal::Busy => "busy",
         ImportRefusal::UndoBlocked { .. } => "undo_blocked",
         ImportRefusal::TieOutNotZero { .. } => "tieout_not_zero",
+        ImportRefusal::TieOutReferenceRequired { .. } => "tieout_reference_required",
+        ImportRefusal::TieOutNoDate => "tieout_no_date",
+        ImportRefusal::TieOutReferenceAmbiguous => "tieout_reference_ambiguous",
         ImportRefusal::CompanyNotEmpty => "company_not_empty",
         ImportRefusal::SessionInBatch => "session_in_batch",
         ImportRefusal::FiscalYearLocked => "fiscal_year_locked",
@@ -412,7 +420,10 @@ pub struct ImportScreen {
     pub(crate) pdf_message: Option<(bool, String)>,
     /// Tie-out PDFs written (control channel).
     pub(crate) pdfs_saved: u32,
-    verify_job: Option<Job<ImportBatch>>,
+    verify_job: Option<Job<cl_api::imports::Verified>>,
+    /// The first differences a refused verify named, applied when the
+    /// tie-out it reloads arrives.
+    point_at: Option<Vec<cl_api::imports::TieOutDifference>>,
     /// The spot-check list (step 7), saved with the batch.
     pub(crate) spot: spot_check::SpotList,
     // Undo.
@@ -542,6 +553,7 @@ impl ImportScreen {
             pdf_message: None,
             pdfs_saved: 0,
             verify_job: None,
+            point_at: None,
             spot: spot_check::SpotList::default(),
             confirm_undo: None,
             undo_pending: None,
@@ -676,6 +688,10 @@ impl ImportScreen {
                         st.tab = old.tab;
                         st.view.differences_only = old.view.differences_only;
                     }
+                    // Verify was refused: show the first difference it named.
+                    if let Some(first) = self.point_at.take() {
+                        st.point_at(&first);
+                    }
                     self.tie = Some(st);
                     self.tieout = Some(t);
                 }
@@ -684,24 +700,38 @@ impl ImportScreen {
         }
         if let Some(r) = poll(&mut self.verify_job) {
             match r {
-                Ok(b) => {
+                Ok(v) => {
+                    let b = v.batch;
                     self.wizard.verified = b.is_verified();
                     if self.wizard.verified {
                         tracing::info!(target: "imports", "import verified");
                         self.trouble = None;
-                        // The list comes from this tie-out: verify drops
-                        // the rows it was made from (E3).
+                        // The tie-out it was verified on (kept by the engine).
+                        let mut st = tieout::TieState::new(&v.tieout);
+                        if let Some(old) = &self.tie {
+                            st.tab = old.tab;
+                        }
+                        self.tie = Some(st);
+                        self.tieout = Some(v.tieout);
+                        // The list comes from this tie-out and the batch's
+                        // transactions (the samples): verify drops the rows
+                        // the tie-out was made from (E3).
                         if self.wizard.source.steps().contains(&Step::SpotCheck) {
                             self.spot.build(&b, self.tieout.as_ref(), &self.chart);
-                            self.save_spot_check();
+                            // Saved once the samples are in (or could not
+                            // be read); a saved list is kept as it is.
+                            self.spot.save_after_samples = self.spot.unsaved();
+                            self.load_spot_samples(&b);
                         }
                         self.wizard.next(self.today);
                     }
                 }
                 Err(e) => {
                     let t = Trouble::of(&e);
-                    if matches!(t, Trouble::Refused(ImportRefusal::TieOutNotZero { .. })) {
-                        // The books moved since: show the engine's rows now.
+                    if let Trouble::Refused(ImportRefusal::TieOutNotZero { first, .. }) = &t {
+                        // Show the engine's rows now, with the first
+                        // difference it named marked.
+                        self.point_at = Some(first.clone());
                         self.load_tieout();
                     }
                     self.trouble = Some(t);
@@ -1103,7 +1133,9 @@ impl Screen for ImportScreen {
             "tieout_tabs": self.tie.as_ref().map(|x| x.tabs().iter().map(|t| t.key()).collect::<Vec<_>>()),
             "tieout_differences_only": self.tie.as_ref().map(|x| x.view.differences_only),
             "tieout_rows_shown": self.tie.as_ref().map(|x| x.rows(x.tab).len() + x.checks(x.tab).len()),
-            "tieout_differences": self.tie.as_ref().map(|x| x.view.differences().len()),
+            "tieout_differences": self.tie.as_ref().map(|x| x.all_differences()),
+            "tieout_marked": self.tie.as_ref().and_then(|x| x.focus).and_then(|i| self.tie.as_ref().map(|x| x.view.rows[i].input.label.clone())),
+            "spot_samples": self.spot.items.iter().filter(|i| i.key.starts_with("sample:")).count(),
             "pdfs_saved": self.pdfs_saved,
             "spot_items": self.spot.items.len(),
             "spot_done": self.spot.items.iter().filter(|i| i.done).count(),

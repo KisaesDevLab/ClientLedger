@@ -39,8 +39,7 @@ use crate::resources::customer_payments::{error_code, require};
 use crate::resources::operations::{
     IMPORT_BATCH, IMPORT_BATCH_COMMIT, IMPORT_BATCH_CREATE, IMPORT_BATCH_SPOT_CHECK,
     IMPORT_BATCH_TIEOUT, IMPORT_BATCH_TRANSACTIONS, IMPORT_BATCH_UNDO, IMPORT_BATCH_VERIFY,
-    IMPORT_BATCHES, IMPORTS_DISCARD,
-    IMPORTS_SESSION, IMPORTS_UPLOAD, Operation,
+    IMPORT_BATCHES, IMPORTS_DISCARD, IMPORTS_SESSION, IMPORTS_UPLOAD, Operation,
 };
 use crate::resources::posting::{ClosedPeriodAuthorization, PostingOptions, posting_body};
 use crate::session::Session;
@@ -1713,7 +1712,9 @@ fn refusal_from(code: &str, details: Option<&crate::ConflictDetails>) -> Option<
                 first,
             }
         }
-        "TIEOUT_REFERENCE_REQUIRED" => ImportRefusal::TieOutReferenceRequired { as_of: day("asOf") },
+        "TIEOUT_REFERENCE_REQUIRED" => {
+            ImportRefusal::TieOutReferenceRequired { as_of: day("asOf") }
+        }
         "TIEOUT_NO_DATE" => ImportRefusal::TieOutNoDate,
         "TIEOUT_REFERENCE_AMBIGUOUS" => ImportRefusal::TieOutReferenceAmbiguous,
         "IMPORT_COMPANY_NOT_EMPTY" => ImportRefusal::CompanyNotEmpty,
@@ -2596,8 +2597,10 @@ impl Imports<'_> {
     ) -> Result<BatchTransactionPage, ApiError> {
         require(self.0, Capabilities::IMPORTS_TIEOUT)?;
         let mut call = at(&IMPORT_BATCH_TRANSACTIONS, &id.to_string());
-        call.query
-            .push(("limit".into(), limit.clamp(1, TRANSACTIONS_PAGE).to_string()));
+        call.query.push((
+            "limit".into(),
+            limit.clamp(1, TRANSACTIONS_PAGE).to_string(),
+        ));
         if let Some(c) = cursor {
             call.query.push(("cursor".into(), c.to_string()));
         }

@@ -233,11 +233,26 @@ fn happy_path_commits_over_polls_then_ties_out_to_zero() {
     assert!(t.accounts.iter().all(|a| a.diff.is_zero()));
     assert!(t.balance_rows.iter().all(|r| r.diff.is_zero()));
     assert_eq!(t.balance_rows.len(), 4);
-    let cash = t.accounts.iter().find(|a| a.name == "1000").expect("1000");
+    let cash = t
+        .accounts
+        .iter()
+        .find(|a| a.label() == "1000")
+        .expect("1000");
     assert_eq!(cash.books, money("26684.35"));
 
     let v = d.verify(b.id).expect("verify");
-    assert!(v.is_verified());
+    assert!(v.batch.is_verified());
+    assert!(v.tieout.verified_at.is_some());
+    // Idempotent: again answers with what it kept.
+    let again = d.verify(b.id).expect("verify again");
+    assert_eq!(again.batch.verified_at, v.batch.verified_at);
+    assert_eq!(
+        t.totals.ar.map(|x| x.source),
+        Some(money("4311.67")),
+        "the A/R aging total from EXPECTED.toml"
+    );
+    let txns = d.transactions(b.id);
+    assert!(!txns.is_empty() && txns.iter().any(|x| x.txn_type == "invoice"));
     let items = vec![SpotCheckItem {
         key: "bank:1000".into(),
         label: "Checking".into(),
@@ -261,19 +276,34 @@ fn the_altered_set_differs_on_the_right_accounts_and_cannot_verify() {
     finish(&mut d, b.id);
     let t = d.tieout(b.id).expect("tieout");
     assert!(!t.all_zero);
-    let diff = |n: &str| t.accounts.iter().find(|a| a.name == n).expect(n).diff;
+    let diff = |n: &str| t.accounts.iter().find(|a| a.label() == n).expect(n).diff;
     assert_eq!(diff("6100"), money("-389.44"));
     assert_eq!(diff("6200"), money("389.44"));
-    let off: Vec<&str> = t
+    let off: Vec<String> = t
         .accounts
         .iter()
         .filter(|a| !a.diff.is_zero())
-        .map(|a| a.name.as_str())
+        .map(cl_api::imports::TieOutAccount::label)
         .collect();
     assert_eq!(off, ["6100", "6200"]);
-    assert_eq!(t.totals.diff, Some(money("0.00")));
+    assert_eq!(t.difference_count, 2);
+    assert_eq!(t.totals.ar.map(|x| x.diff), Some(money("0.00")));
     let e = d.verify(b.id).expect_err("refused");
-    assert_eq!(refusal(&e), ImportRefusal::TieOutNotZero { differences: 2 });
+    let ImportRefusal::TieOutNotZero {
+        difference_count,
+        first,
+    } = refusal(&e)
+    else {
+        panic!("not zero")
+    };
+    assert_eq!(difference_count, 2);
+    assert_eq!(first.len(), 2);
+    assert!(
+        first
+            .iter()
+            .all(|x| x.section == Some(cl_api::imports::DifferenceSection::Accounts)),
+        "ids and rows only"
+    );
 }
 
 #[test]
@@ -297,7 +327,7 @@ fn the_open_item_set_leaves_receivables_before_conversion_off() {
     assert_eq!(
         t.accounts
             .iter()
-            .find(|a| a.name == "1200")
+            .find(|a| a.label() == "1200")
             .expect("1200")
             .diff,
         money("10.00")
@@ -665,7 +695,7 @@ fn other_systems_tie_out_from_their_own_sets() {
     finish(&mut d, b.id);
     let t = d.tieout(b.id).expect("tieout");
     assert!(t.balance_rows.is_empty(), "no QBD history rows");
-    let diff = |n: &str| t.accounts.iter().find(|a| a.name == n).expect(n).diff;
+    let diff = |n: &str| t.accounts.iter().find(|a| a.label() == n).expect(n).diff;
     assert_eq!(diff("1010"), money("9.00"));
     assert_eq!(diff("6010"), money("-9.00"));
     assert!(!t.all_zero);

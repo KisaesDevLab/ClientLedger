@@ -171,7 +171,12 @@ impl View {
     /// The row the engine named (by section, then source row, else id), for
     /// pointing the owner at a difference verify refused.
     #[must_use]
-    pub fn find(&self, section: Section, source_row: Option<u64>, id: Option<&str>) -> Option<usize> {
+    pub fn find(
+        &self,
+        section: Section,
+        source_row: Option<u64>,
+        id: Option<&str>,
+    ) -> Option<usize> {
         let of = |r: &&Row| r.input.section == section;
         let by_row = source_row.and_then(|n| {
             self.rows
