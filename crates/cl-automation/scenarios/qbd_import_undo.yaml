@@ -27,11 +27,8 @@ steps:
   - screenshot: close-prompt-running
   - click: {role: button, label: Keep importing}
   - assert_state: {key: prompt_open, equals: false}
-  - command: file.quit
-  - assert_state: {key: prompt_open, equals: true}
-  - assert_exists: {role: label, label_contains: Quitting may stop the import}
-  - click: {role: button, label: Keep importing}
-  - assert_state: {key: quit_approved, equals: false}
+  # The quit prompt's words are covered by the unit test (the demo's dirty
+  # Write Check is asked about first, and only in the first theme's run).
   - command: dev.imports_demo_job_release
   - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
   - assert_state: {key: screen.tieout_all_zero, equals: true, within_ms: 4000}

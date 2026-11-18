@@ -684,6 +684,14 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Close Demo Books for Import (developer)",
     ),
     dev_action(
+        "dev.imports_demo_job_hold",
+        "Demo Import: Hold the Running Job (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_job_release",
+        "Demo Import: Release the Running Job (developer)",
+    ),
+    dev_action(
         "dev.imports_demo_block_undo",
         "Demo Import: Something Blocks Undo (developer)",
     ),
