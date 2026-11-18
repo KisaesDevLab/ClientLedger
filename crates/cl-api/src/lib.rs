@@ -249,6 +249,8 @@ pub use resources::feed::{
     Feed, FeedDeposit, FeedGrouping, FeedGroupings, FeedItemId, GROUPINGS_LIMIT,
 };
 pub use resources::payroll;
+// P31: import types are used as `cl_api::imports::…` (generic names).
+pub use resources::imports;
 // P26: bank feed review.
 pub use resources::feed_accept::{
     ACCEPT_MAX, AcceptFailure, AcceptItem, AcceptOutcome, AcceptRequest, AcceptSkip, DraftLink,

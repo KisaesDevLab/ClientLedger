@@ -1,0 +1,1643 @@
+//! QuickBooks Desktop and other-system imports (P31; engine U-260 to U-268).
+//!
+//! The engine does all of the accounting. It reads every file, parses every
+//! amount exactly (`imports-amounts-v1`), commits a whole batch of files in
+//! one transaction as a background job, undoes it the same way, and computes
+//! the tie-out against the reference files. This module only carries its
+//! answers.
+//!
+//! - Nothing here parses an amount from a file or adds one up. Preview totals
+//!   and tie-out amounts are the engine's exact decimal strings read into
+//!   [`Money`]; a JSON number is `InexactMoney`, never rounded.
+//! - Every upload asks the engine never to post an unmapped account to
+//!   suspense (`unmappedAccountsToSuspense: false`, Q-P31c);
+//!   [`UploadRequest`] has no way to change that. The file goes up under a
+//!   neutral name (`import.<ext>`): the owner's file name never reaches the
+//!   engine.
+//! - Commit and undo take the screen's [`IdempotencyKey`] (`imports-batch-v1`
+//!   replays it) and a backup reference, and are sent once: the engine
+//!   answers 202 and the screen polls [`Imports::batch`]. "Try again" after a
+//!   lost answer is the owner's click with the same key; "Check status"
+//!   reads the batch.
+//! - Engine messages can name people (U-270); refusals keep codes, row
+//!   numbers and ids only.
+//! - `Debug` output names ids, kinds, statuses, dates and counts only: never
+//!   amounts, account or contact names, or file contents.
+
+use std::collections::BTreeMap;
+use std::fmt;
+
+use cl_core::ids::{AccountId, parse_uuid};
+use cl_core::{CalendarDate, Money};
+use serde_json::{Map, Value, json};
+
+use crate::client::{Call, Method};
+use crate::errors::{ApiError, LocalValidation};
+use crate::idempotency::IdempotencyKey;
+use crate::resources::customer_payments::{error_code, require};
+use crate::resources::operations::{
+    IMPORT_BATCH, IMPORT_BATCH_COMMIT, IMPORT_BATCH_CREATE, IMPORT_BATCH_SPOT_CHECK,
+    IMPORT_BATCH_TIEOUT, IMPORT_BATCH_UNDO, IMPORT_BATCH_VERIFY, IMPORT_BATCHES, IMPORTS_DISCARD,
+    IMPORTS_SESSION, IMPORTS_UPLOAD, Operation,
+};
+use crate::resources::posting::{ClosedPeriodAuthorization, PostingOptions, posting_body};
+use crate::session::Session;
+use crate::wire::Capabilities;
+
+const WHAT: &str = "import";
+
+/// The engine's upload limit (10 MB per file), checked before sending.
+pub const MAX_UPLOAD_BYTES: usize = 10 * 1024 * 1024;
+/// The file types the engine reads.
+pub const FILE_EXTENSIONS: [&str; 5] = ["csv", "txt", "tsv", "xlsx", "xls"];
+/// History page size.
+pub const HISTORY_PAGE: u16 = 50;
+/// The most History pages read at once.
+pub const HISTORY_MAX_PAGES: usize = 20;
+/// The longest spot-check note the desktop sends.
+pub const MAX_NOTE_CHARS: usize = 500;
+
+/// Which import flow a screen runs; each needs its own capabilities.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Flow {
+    /// QuickBooks Desktop conversion (lists, history, open items, valuation).
+    QbdConversion,
+    /// Another accounting system (or QBD GL only) on the Bulk Import kinds.
+    OtherSystem,
+    /// Invoices, bills and journal entries from a spreadsheet (kind
+    /// `transactions`).
+    Transactions,
+}
+
+impl Flow {
+    /// Every capability the flow needs.
+    #[must_use]
+    pub const fn capabilities(self) -> &'static [&'static str] {
+        match self {
+            Flow::QbdConversion => &[
+                Capabilities::IMPORTS_AMOUNTS,
+                Capabilities::IMPORTS_BATCH,
+                Capabilities::QBD_OPEN_ITEMS,
+                Capabilities::QBD_MAPPING,
+                Capabilities::QBD_DATES,
+                Capabilities::IMPORTS_TIEOUT,
+            ],
+            Flow::OtherSystem => &[
+                Capabilities::IMPORTS_AMOUNTS,
+                Capabilities::IMPORTS_BATCH,
+                Capabilities::QBD_MAPPING,
+                Capabilities::IMPORTS_TIEOUT,
+            ],
+            Flow::Transactions => &[
+                Capabilities::IMPORTS_AMOUNTS,
+                Capabilities::IMPORTS_BATCH,
+                Capabilities::IMPORTS_TRANSACTIONS,
+            ],
+        }
+    }
+
+    /// True when the engine has everything the flow needs.
+    #[must_use]
+    pub fn supported(self, caps: &Capabilities) -> bool {
+        self.capabilities().iter().all(|c| caps.has(c))
+    }
+}
+
+fn decode_err() -> ApiError {
+    ApiError::Decode { what: WHAT }
+}
+
+fn local(v: LocalValidation) -> ApiError {
+    ApiError::Local(v)
+}
+
+macro_rules! uuid_id {
+    ($(#[$doc:meta])* $name:ident) => {
+        $(#[$doc])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub struct $name(uuid::Uuid);
+
+        impl $name {
+            /// Parses an id.
+            ///
+            /// # Errors
+            /// `Decode` when it is not a UUID.
+            pub fn parse(s: &str) -> Result<$name, ApiError> {
+                parse_uuid(s).map($name).map_err(|_| decode_err())
+            }
+
+            /// The raw UUID (seeds, keys).
+            #[must_use]
+            pub const fn as_uuid(self) -> uuid::Uuid {
+                self.0
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = ApiError;
+
+            fn from_str(s: &str) -> Result<$name, ApiError> {
+                $name::parse(s)
+            }
+        }
+
+        impl fmt::Display for $name {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                self.0.fmt(f)
+            }
+        }
+    };
+}
+
+uuid_id!(
+    /// One uploaded import file (a session in the engine).
+    ImportSessionId
+);
+uuid_id!(
+    /// One import batch: the unit of commit, undo and verification.
+    ImportBatchId
+);
+
+macro_rules! wire_enum {
+    ($(#[$doc:meta])* $name:ident { $($(#[$vdoc:meta])* $v:ident => $w:literal),+ $(,)? }) => {
+        $(#[$doc])*
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub enum $name {
+            $($(#[$vdoc])* $v,)+
+        }
+
+        impl $name {
+            /// Every value, in declaration order.
+            pub const ALL: &'static [$name] = &[$($name::$v),+];
+
+            /// The wire name.
+            #[must_use]
+            pub const fn as_wire(self) -> &'static str {
+                match self {
+                    $($name::$v => $w,)+
+                }
+            }
+
+            /// Reads a wire name.
+            #[must_use]
+            pub fn from_wire(s: &str) -> Option<$name> {
+                match s {
+                    $($w => Some($name::$v),)+
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+wire_enum!(
+    /// The system a file came from.
+    SourceSystem {
+        /// Accounting Power.
+        AccountingPower => "accounting_power",
+        /// QuickBooks Online.
+        QuickBooksOnline => "quickbooks_online",
+        /// QuickBooks Desktop (conversion and GL only).
+        QuickBooksDesktop => "quickbooks_desktop",
+        /// The engine's generic CSV layout.
+        Generic => "generic",
+    }
+);
+
+wire_enum!(
+    /// What a file holds.
+    ImportKind {
+        /// Chart of accounts.
+        Coa => "coa",
+        /// Customers, vendors or other names (one list per file).
+        Contacts => "contacts",
+        /// A trial balance (opening balances, or a reference to tie out to).
+        TrialBalance => "trial_balance",
+        /// Journal or general ledger transactions.
+        GlTransactions => "gl_transactions",
+        /// QBD Open Invoices (E2a).
+        OpenInvoices => "open_invoices",
+        /// QBD Unpaid Bills Detail (E2a).
+        UnpaidBills => "unpaid_bills",
+        /// QBD Item List (E2b).
+        Items => "items",
+        /// QBD Inventory Valuation Summary (E2b).
+        InventoryValuation => "inventory_valuation",
+        /// Invoices, bills and journal entries from a spreadsheet (E4).
+        Transactions => "transactions",
+    }
+);
+
+impl ImportKind {
+    /// The capability the engine needs for this kind beyond the batch.
+    #[must_use]
+    pub const fn capability(self) -> Option<&'static str> {
+        match self {
+            ImportKind::OpenInvoices | ImportKind::UnpaidBills => {
+                Some(Capabilities::QBD_OPEN_ITEMS)
+            }
+            ImportKind::Items | ImportKind::InventoryValuation => Some(Capabilities::QBD_MAPPING),
+            ImportKind::Transactions => Some(Capabilities::IMPORTS_TRANSACTIONS),
+            ImportKind::Coa
+            | ImportKind::Contacts
+            | ImportKind::TrialBalance
+            | ImportKind::GlTransactions => None,
+        }
+    }
+}
+
+wire_enum!(
+    /// Whether a file is posted or only compared against (S9).
+    FileRole {
+        /// Posted by the commit.
+        Post => "post",
+        /// Never posted; the tie-out compares the books with it.
+        Reference => "reference",
+    }
+);
+
+wire_enum!(
+    /// Which list a contacts file is.
+    ContactKind {
+        /// Customer list.
+        Customer => "customer",
+        /// Vendor list.
+        Vendor => "vendor",
+        /// QBD Other Names: imported as vendors (Q-78).
+        Other => "other",
+    }
+);
+
+wire_enum!(
+    /// Which Accounting Power balance column a trial balance uses.
+    TbColumn {
+        /// Beginning balance.
+        Beginning => "beginning",
+        /// Adjusted balance.
+        Adjusted => "adjusted",
+    }
+);
+
+wire_enum!(
+    /// Where one uploaded file stands.
+    SessionStatus {
+        /// Read and checked.
+        Uploaded => "uploaded",
+        /// Checked again against the books.
+        Validated => "validated",
+        /// Its batch is committing.
+        Committing => "committing",
+        /// Posted by a committed batch.
+        Committed => "committed",
+        /// Its batch failed (nothing posted).
+        Failed => "failed",
+        /// Discarded.
+        Cancelled => "cancelled",
+        /// Its batch was undone.
+        Undone => "undone",
+    }
+);
+
+wire_enum!(
+    /// What a batch is.
+    BatchKind {
+        /// A full conversion (QBD, or another system's history).
+        Conversion => "conversion",
+        /// One file on its own.
+        Single => "single",
+        /// Spreadsheet transactions.
+        Transactions => "transactions",
+    }
+);
+
+wire_enum!(
+    /// Where a batch stands (S1).
+    BatchStatus {
+        /// Grouped, not committed.
+        Draft => "draft",
+        /// The commit job is running.
+        Committing => "committing",
+        /// Posted.
+        Committed => "committed",
+        /// The commit job failed; nothing was posted. Retry with a new key.
+        Failed => "failed",
+        /// The undo job is running.
+        Undoing => "undoing",
+        /// Undone: nothing it created is left.
+        Undone => "undone",
+    }
+);
+
+impl BatchStatus {
+    /// A job is running: keep polling.
+    #[must_use]
+    pub const fn is_running(self) -> bool {
+        matches!(self, BatchStatus::Committing | BatchStatus::Undoing)
+    }
+}
+
+/// One file to upload, checked before anything is sent.
+#[derive(Clone, PartialEq, Eq)]
+pub struct UploadRequest {
+    /// What the file holds.
+    pub kind: ImportKind,
+    /// Where it came from.
+    pub source: SourceSystem,
+    /// Posted, or a reference for the tie-out.
+    pub role: FileRole,
+    /// The file's bytes, exactly as read.
+    pub bytes: Vec<u8>,
+    /// The owner's file name; only its extension is used.
+    pub file_name: String,
+    /// Which list a contacts file is (required for contacts, else `None`).
+    pub contact_kind: Option<ContactKind>,
+    /// Accounting Power trial balance column.
+    pub tb_column: Option<TbColumn>,
+    /// The trial balance date when the file carries none (Accounting Power,
+    /// Generic).
+    pub tb_report_date: Option<CalendarDate>,
+}
+
+impl fmt::Debug for UploadRequest {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("UploadRequest")
+            .field("kind", &self.kind)
+            .field("source", &self.source)
+            .field("role", &self.role)
+            .field("bytes", &self.bytes.len())
+            .field("contact_kind", &self.contact_kind)
+            .field("tb_column", &self.tb_column)
+            .field("tb_report_date", &self.tb_report_date)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The file's extension when the engine reads that type (lower-case).
+#[must_use]
+pub fn file_extension(file_name: &str) -> Option<String> {
+    let ext = file_name.rsplit_once('.')?.1.to_ascii_lowercase();
+    FILE_EXTENSIONS.contains(&ext.as_str()).then_some(ext)
+}
+
+impl UploadRequest {
+    /// Checks the request before anything is sent.
+    ///
+    /// # Errors
+    /// `AttachmentTooLarge` over 10 MB; `AttachmentType` for another file
+    /// type; `InvalidValue` for an empty file, a contacts file without its
+    /// list, a list on another kind, or a trial balance option on another
+    /// kind.
+    pub fn check(&self) -> Result<String, LocalValidation> {
+        if self.bytes.len() > MAX_UPLOAD_BYTES {
+            return Err(LocalValidation::AttachmentTooLarge);
+        }
+        let ext = file_extension(&self.file_name).ok_or(LocalValidation::AttachmentType)?;
+        let contacts = self.kind == ImportKind::Contacts;
+        let tb = self.kind == ImportKind::TrialBalance;
+        if self.bytes.is_empty()
+            || contacts != self.contact_kind.is_some()
+            || (!tb && (self.tb_column.is_some() || self.tb_report_date.is_some()))
+        {
+            return Err(LocalValidation::InvalidValue);
+        }
+        Ok(ext)
+    }
+
+    /// The engine's `options` JSON. Always refuses suspense for unmapped
+    /// accounts (Q-P31c).
+    #[must_use]
+    pub fn options(&self) -> Value {
+        let mut m = Map::new();
+        m.insert("unmappedAccountsToSuspense".into(), json!(false));
+        if let Some(k) = self.contact_kind {
+            m.insert("contactKind".into(), json!(k.as_wire()));
+        }
+        if let Some(c) = self.tb_column {
+            m.insert("tbColumn".into(), json!(c.as_wire()));
+        }
+        if let Some(d) = self.tb_report_date {
+            m.insert("tbReportDate".into(), json!(d.to_wire()));
+        }
+        Value::Object(m)
+    }
+
+    /// The capabilities this upload needs.
+    fn capabilities(&self) -> Vec<&'static str> {
+        let mut caps = vec![Capabilities::IMPORTS_AMOUNTS];
+        if let Some(c) = self.kind.capability() {
+            caps.push(c);
+        }
+        if self.role == FileRole::Reference {
+            caps.push(Capabilities::IMPORTS_BATCH);
+        }
+        if self.contact_kind == Some(ContactKind::Other) {
+            caps.push(Capabilities::QBD_MAPPING);
+        }
+        caps
+    }
+
+    /// The multipart body: `kind`, `sourceSystem`, `role`, `options` (JSON
+    /// text) and the file under a neutral name.
+    fn multipart(&self, ext: &str) -> (String, Vec<u8>) {
+        let boundary = format!("cl-import-{}", uuid::Uuid::new_v4().simple());
+        let mut body = Vec::with_capacity(self.bytes.len() + 1024);
+        for (name, value) in [
+            ("kind", self.kind.as_wire().to_string()),
+            ("sourceSystem", self.source.as_wire().to_string()),
+            ("role", self.role.as_wire().to_string()),
+            ("options", self.options().to_string()),
+        ] {
+            body.extend_from_slice(
+                format!(
+                    "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+                )
+                .as_bytes(),
+            );
+        }
+        let content_type = match ext {
+            "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "xls" => "application/vnd.ms-excel",
+            _ => "text/csv",
+        };
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"import.{ext}\"\r\nContent-Type: {content_type}\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(&self.bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        (boundary, body)
+    }
+}
+
+/// A row the engine could not read: row number, column and code only (the
+/// engine's message can quote cells).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RowProblem {
+    /// 1-based file row; 0 for the whole file.
+    pub row_number: u64,
+    /// The column, when the engine named one.
+    pub field: Option<String>,
+    /// The engine code (`IMPORT_AMOUNT_INVALID`, `IMPORT_BAD_DATE`, …).
+    pub code: String,
+}
+
+/// One uploaded file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportSession {
+    /// Its id.
+    pub id: ImportSessionId,
+    /// What it holds.
+    pub kind: ImportKind,
+    /// Where it came from.
+    pub source: SourceSystem,
+    /// Posted or reference (`None` from an engine without E1).
+    pub role: Option<FileRole>,
+    /// Where it stands.
+    pub status: SessionStatus,
+    /// Data rows.
+    pub row_count: u64,
+    /// Rows with problems.
+    pub error_count: u64,
+    /// The report date the engine read (trial balances, agings, valuation).
+    pub report_date: Option<CalendarDate>,
+    /// The batch it is in.
+    pub batch: Option<ImportBatchId>,
+}
+
+/// What the engine read from a file. Totals are exact; `Debug` hides them.
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct FilePreview {
+    /// Rows read.
+    pub total_rows: u64,
+    /// Rows with problems.
+    pub error_count: u64,
+    /// Transactions found (journal files).
+    pub entry_count: Option<u64>,
+    /// The report date (trial balances).
+    pub report_date: Option<CalendarDate>,
+    /// Debits, as the engine summed them (trial balances).
+    pub total_debit: Option<Money>,
+    /// Credits, as the engine summed them (trial balances).
+    pub total_credit: Option<Money>,
+}
+
+impl fmt::Debug for FilePreview {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("FilePreview")
+            .field("total_rows", &self.total_rows)
+            .field("error_count", &self.error_count)
+            .field("entry_count", &self.entry_count)
+            .field("report_date", &self.report_date)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The engine's answer to an upload (and to reading a session back).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UploadOutcome {
+    /// The file.
+    pub session: ImportSession,
+    /// What was read.
+    pub preview: FilePreview,
+    /// Rows the engine could not read.
+    pub problems: Vec<RowProblem>,
+}
+
+impl UploadOutcome {
+    /// Nothing blocks putting the file in a batch.
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.problems.is_empty() && self.session.error_count == 0
+    }
+}
+
+/// A QBD class mapped to a tag (built with `cl_model::lists::class_map`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClassTarget {
+    /// The tag group, for a `Parent:Child` class.
+    pub group: Option<String>,
+    /// The tag.
+    pub tag: String,
+}
+
+/// Batch options (E1, E2b, E2c). Owner data (account keys, class names):
+/// `Debug` shows counts only.
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct BatchOptions {
+    /// The fiscal year's first month (1-12); only for an empty company.
+    pub fiscal_year_start_month: Option<u8>,
+    /// History before this date is skipped (Q-142 "two years"); `None` is
+    /// "All".
+    pub history_from: Option<CalendarDate>,
+    /// Refuse the commit unless the company is empty (QBD, Q-P31h).
+    pub require_empty_company: bool,
+    /// Source account key → account (the mapping review's choices).
+    pub account_map: BTreeMap<String, AccountId>,
+    /// Source class → tag.
+    pub class_map: BTreeMap<String, ClassTarget>,
+}
+
+impl fmt::Debug for BatchOptions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BatchOptions")
+            .field("fiscal_year_start_month", &self.fiscal_year_start_month)
+            .field("history_from", &self.history_from)
+            .field("require_empty_company", &self.require_empty_company)
+            .field("account_map", &self.account_map.len())
+            .field("class_map", &self.class_map.len())
+            .finish()
+    }
+}
+
+impl BatchOptions {
+    /// The engine's `options`.
+    ///
+    /// # Errors
+    /// `InvalidValue` for a month outside 1-12 or a blank class tag.
+    pub fn body(&self) -> Result<Value, LocalValidation> {
+        let mut m = Map::new();
+        if let Some(month) = self.fiscal_year_start_month {
+            if !(1..=12).contains(&month) {
+                return Err(LocalValidation::InvalidValue);
+            }
+            m.insert("fiscalYearStartMonth".into(), json!(month));
+        }
+        if let Some(d) = self.history_from {
+            m.insert("historyFrom".into(), json!(d.to_wire()));
+        }
+        m.insert(
+            "requireEmptyCompany".into(),
+            json!(self.require_empty_company),
+        );
+        if !self.account_map.is_empty() {
+            let am: Map<String, Value> = self
+                .account_map
+                .iter()
+                .map(|(k, a)| (k.clone(), json!(a.to_string())))
+                .collect();
+            m.insert("accountMap".into(), Value::Object(am));
+        }
+        if !self.class_map.is_empty() {
+            let mut cm = Map::new();
+            for (class, t) in &self.class_map {
+                if t.tag.trim().is_empty() {
+                    return Err(LocalValidation::InvalidValue);
+                }
+                let mut o = Map::new();
+                if let Some(g) = &t.group {
+                    o.insert("group".into(), json!(g));
+                }
+                o.insert("tag".into(), json!(t.tag));
+                cm.insert(class.clone(), Value::Object(o));
+            }
+            m.insert("classMap".into(), Value::Object(cm));
+        }
+        Ok(Value::Object(m))
+    }
+
+    fn capabilities(&self) -> Vec<&'static str> {
+        let mut caps = vec![Capabilities::IMPORTS_BATCH];
+        if self.history_from.is_some() {
+            caps.push(Capabilities::QBD_DATES);
+        }
+        if !self.account_map.is_empty() || !self.class_map.is_empty() {
+            caps.push(Capabilities::QBD_MAPPING);
+        }
+        caps
+    }
+}
+
+/// A new batch.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewBatch {
+    /// Where the files came from.
+    pub source: SourceSystem,
+    /// What the batch is.
+    pub kind: BatchKind,
+    /// The uploaded files, in commit order.
+    pub sessions: Vec<ImportSessionId>,
+    /// Options.
+    pub options: BatchOptions,
+}
+
+/// One item of the spot-check list (Q-144).
+#[derive(Clone, PartialEq, Eq)]
+pub struct SpotCheckItem {
+    /// Stable key (`bank:<account>`, `ar:<row>`, `sample:<n>`, …).
+    pub key: String,
+    /// The owner's label, as shown.
+    pub label: String,
+    /// Ticked.
+    pub done: bool,
+    /// The owner's note.
+    pub note: String,
+}
+
+impl fmt::Debug for SpotCheckItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SpotCheckItem")
+            .field("key", &self.key)
+            .field("done", &self.done)
+            .finish_non_exhaustive()
+    }
+}
+
+/// A batch: the conversion record (Q-144).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImportBatch {
+    /// Its id.
+    pub id: ImportBatchId,
+    /// Where its files came from.
+    pub source: SourceSystem,
+    /// What it is.
+    pub kind: BatchKind,
+    /// Where it stands.
+    pub status: BatchStatus,
+    /// Its files.
+    pub sessions: Vec<ImportSessionId>,
+    /// The verified backup taken before the commit (file name).
+    pub backup_ref: Option<String>,
+    /// The company had no transactions at commit (tie-out uses the whole
+    /// trial balance).
+    pub company_was_empty: Option<bool>,
+    /// The conversion date (the reference trial balance's date).
+    pub conversion_date: Option<CalendarDate>,
+    /// History start (`None` = all history).
+    pub history_from: Option<CalendarDate>,
+    /// When the tie-out was verified (engine text).
+    pub verified_at: Option<String>,
+    /// Who verified it (a user id).
+    pub verified_by: Option<String>,
+    /// The saved spot-check list.
+    pub spot_check: Vec<SpotCheckItem>,
+    /// When it was made (engine text).
+    pub created_at: Option<String>,
+    /// When it was committed (engine text).
+    pub committed_at: Option<String>,
+}
+
+impl ImportBatch {
+    /// The tie-out was verified.
+    #[must_use]
+    pub fn is_verified(&self) -> bool {
+        self.verified_at.is_some()
+    }
+}
+
+/// A running job's progress.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Progress {
+    /// The engine's step name (`accounts`, `journal`, …).
+    pub step: String,
+    /// Units done.
+    pub done: u64,
+    /// Units in all.
+    pub total: u64,
+}
+
+/// Why a commit or undo job failed (nothing was posted, S1).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BatchFailure {
+    /// The engine code.
+    pub code: String,
+    /// The file row, when one row caused it.
+    pub row_number: Option<u64>,
+    /// The file it was in.
+    pub session: Option<ImportSessionId>,
+}
+
+impl BatchFailure {
+    /// The failure as a refusal the screen explains, when it is one.
+    #[must_use]
+    pub fn refusal(&self) -> Option<ImportRefusal> {
+        refusal_from(&self.code, None)
+    }
+}
+
+/// A batch with its job state (`GET /imports/batches/{id}`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BatchState {
+    /// The batch.
+    pub batch: ImportBatch,
+    /// The running job's progress.
+    pub progress: Option<Progress>,
+    /// Why the last job failed.
+    pub error: Option<BatchFailure>,
+}
+
+/// One page of History.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct BatchPage {
+    /// Newest first.
+    pub batches: Vec<ImportBatch>,
+    /// The next page's cursor.
+    pub next_cursor: Option<String>,
+}
+
+/// What to send with a commit. The closing-date password and the staff
+/// confirmation are for a batch dated in a closed period only (S2).
+#[derive(Clone, Debug, Default)]
+pub struct CommitRequest {
+    /// The verified backup's file name (required).
+    pub backup_ref: String,
+    /// The closing-date password, when the owner gave it.
+    pub closed_period: Option<ClosedPeriodAuthorization>,
+    /// The owner confirmed posting into a closed period when no closing
+    /// password is set (plan S2, `ledger.service.ts` staff confirm). Only
+    /// sent when true; never set by default.
+    pub confirm_closed_period: bool,
+}
+
+/// The engine accepted a commit or undo (202); poll the batch.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JobAccepted {
+    /// The batch.
+    pub batch: ImportBatchId,
+    /// A replay of an earlier send with the same key.
+    pub replayed: bool,
+}
+
+/// One tie-out account row. Owner data: `Debug` hides names and amounts.
+#[derive(Clone, PartialEq, Eq)]
+pub struct TieOutAccount {
+    /// The books' account, when matched.
+    pub account: Option<AccountId>,
+    /// The account's name.
+    pub name: String,
+    /// The reference trial balance row.
+    pub source_row: Option<u64>,
+    /// The source accounts that map here (several QBD A/R accounts, Q-P31k).
+    pub source_keys: Vec<String>,
+    /// Source balance (debit positive).
+    pub source: Money,
+    /// Books balance (debit positive).
+    pub books: Money,
+    /// Books minus source.
+    pub diff: Money,
+}
+
+impl fmt::Debug for TieOutAccount {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TieOutAccount")
+            .field("account", &self.account)
+            .field("source_row", &self.source_row)
+            .field("zero", &self.diff.is_zero())
+            .finish_non_exhaustive()
+    }
+}
+
+/// One open item (A/R, A/P) or inventory item. Owner data.
+#[derive(Clone, PartialEq, Eq)]
+pub struct TieOutItem {
+    /// The source file row (the item's key).
+    pub source_row: u64,
+    /// Customer, vendor or item name.
+    pub name: String,
+    /// The document number (open items).
+    pub number: Option<String>,
+    /// Source amount.
+    pub source: Money,
+    /// Books amount.
+    pub books: Money,
+    /// Books minus source.
+    pub diff: Money,
+}
+
+impl fmt::Debug for TieOutItem {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TieOutItem")
+            .field("source_row", &self.source_row)
+            .field("zero", &self.diff.is_zero())
+            .finish_non_exhaustive()
+    }
+}
+
+wire_enum!(
+    /// A balance check of the tie-out.
+    BalanceKey {
+        /// "Receivables before conversion" must be 0.00.
+        HistoryAr => "history_ar",
+        /// "Payables before conversion" must be 0.00.
+        HistoryAp => "history_ap",
+        /// "Inventory before conversion" must be 0.00.
+        HistoryInventory => "history_inventory",
+        /// The valuation equals the Inventory Asset accounts.
+        ValuationVsAsset => "valuation_vs_asset",
+    }
+);
+
+/// One balance check row.
+#[derive(Clone, PartialEq, Eq)]
+pub struct BalanceRow {
+    /// Which check.
+    pub key: BalanceKey,
+    /// The difference (0.00 when it holds).
+    pub diff: Money,
+}
+
+impl fmt::Debug for BalanceRow {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BalanceRow")
+            .field("key", &self.key)
+            .field("zero", &self.diff.is_zero())
+            .finish()
+    }
+}
+
+/// Tie-out totals.
+#[derive(Clone, PartialEq, Eq, Default)]
+pub struct TieOutTotals {
+    /// Source total.
+    pub source: Option<Money>,
+    /// Books total.
+    pub books: Option<Money>,
+    /// Difference total.
+    pub diff: Option<Money>,
+}
+
+impl fmt::Debug for TieOutTotals {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("TieOutTotals(..)")
+    }
+}
+
+/// The engine's tie-out of a batch (E3). The screen shows ✓ only when
+/// `all_zero` is true; it never re-derives a balance.
+#[derive(Clone, PartialEq, Eq)]
+pub struct TieOut {
+    /// The date compared.
+    pub as_of: CalendarDate,
+    /// Accounts.
+    pub accounts: Vec<TieOutAccount>,
+    /// Open invoices.
+    pub ar_items: Vec<TieOutItem>,
+    /// Unpaid bills.
+    pub ap_items: Vec<TieOutItem>,
+    /// Inventory items.
+    pub inventory_items: Vec<TieOutItem>,
+    /// Balance checks.
+    pub balance_rows: Vec<BalanceRow>,
+    /// Totals.
+    pub totals: TieOutTotals,
+    /// The engine says every difference is exactly zero.
+    pub all_zero: bool,
+}
+
+impl fmt::Debug for TieOut {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TieOut")
+            .field("as_of", &self.as_of)
+            .field("accounts", &self.accounts.len())
+            .field("ar_items", &self.ar_items.len())
+            .field("ap_items", &self.ap_items.len())
+            .field("inventory_items", &self.inventory_items.len())
+            .field("balance_rows", &self.balance_rows)
+            .field("all_zero", &self.all_zero)
+            .finish()
+    }
+}
+
+/// Something that keeps a batch from being undone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UndoBlocker {
+    /// What it is (`payment`, `reconciliation`, `deposit`, …).
+    pub kind: String,
+    /// Its id.
+    pub id: Option<String>,
+    /// The engine's reason code.
+    pub reason: Option<String>,
+}
+
+/// An import refusal the screen explains (codes only; engine messages can
+/// name people, U-270).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ImportRefusal {
+    /// 409 `IMPORT_ALREADY_COMMITTED`: this file was imported before.
+    AlreadyCommitted {
+        /// The earlier batch.
+        batch: Option<ImportBatchId>,
+        /// The earlier file.
+        session: Option<ImportSessionId>,
+        /// When it was committed (engine text).
+        committed_at: Option<String>,
+    },
+    /// 409 `IMPORT_PERIOD_OVERLAP`: journal dates overlap an earlier import
+    /// or another file of this batch.
+    PeriodOverlap {
+        /// The earlier batch (none for an overlap inside this batch).
+        batch: Option<ImportBatchId>,
+        /// First overlapping day.
+        from: Option<CalendarDate>,
+        /// Last overlapping day.
+        to: Option<CalendarDate>,
+    },
+    /// 409 `IMPORT_BUSY`: another import job is running.
+    Busy,
+    /// 409 `IMPORT_UNDO_BLOCKED`: something now depends on what the batch
+    /// created; restore the backup instead, or remove the blockers.
+    UndoBlocked {
+        /// What blocks it.
+        blockers: Vec<UndoBlocker>,
+    },
+    /// 409 `TIEOUT_NOT_ZERO`: verify refused.
+    TieOutNotZero {
+        /// How many differences the engine listed first.
+        differences: usize,
+    },
+    /// 409 `IMPORT_COMPANY_NOT_EMPTY`: a QBD conversion needs an empty
+    /// company.
+    CompanyNotEmpty,
+    /// 409 `IMPORT_SESSION_IN_BATCH`: the file is already in a batch.
+    SessionInBatch,
+    /// 409 `IMPORT_FISCAL_YEAR_LOCKED`: the fiscal year can be set only in
+    /// an empty company.
+    FiscalYearLocked,
+    /// 403 `IMPORT_ADMIN_REQUIRED`: commit, undo and verify are the
+    /// company Admin's.
+    AdminRequired,
+    /// 422 `IMPORT_DATE_MISMATCH`: a reference file is not dated the
+    /// conversion date.
+    DateMismatch {
+        /// The file.
+        session: Option<ImportSessionId>,
+    },
+    /// 422 `IMPORT_AMOUNT_INVALID`: amounts the engine will not read
+    /// (exponents, more than 4 decimals, `1.234,56`).
+    AmountInvalid {
+        /// The file rows, in order, without repeats.
+        rows: Vec<u64>,
+    },
+    /// `IMPORT_UNBALANCED`: a spreadsheet document does not balance.
+    Unbalanced,
+    /// `IMPORT_UNKNOWN_REF`: a spreadsheet row names an unknown account,
+    /// item, name or tag.
+    UnknownRef {
+        /// The column.
+        field: Option<String>,
+    },
+    /// `IMPORT_MIXED_GROUP`: one spreadsheet group mixes document types.
+    MixedGroup,
+}
+
+fn details_id<T: std::str::FromStr>(d: Option<&crate::ConflictDetails>, key: &str) -> Option<T> {
+    d.and_then(|d| d.id(key))
+}
+
+/// The refusal for an engine code, reading `details` when there are any.
+fn refusal_from(code: &str, details: Option<&crate::ConflictDetails>) -> Option<ImportRefusal> {
+    let text = |k: &str| details.and_then(|d| d.text(k)).map(str::to_string);
+    let day = |k: &str| text(k).and_then(|d| CalendarDate::parse_wire(d.get(..10)?).ok());
+    Some(match code {
+        "IMPORT_ALREADY_COMMITTED" => ImportRefusal::AlreadyCommitted {
+            batch: details_id(details, "batchId"),
+            session: details_id(details, "sessionId"),
+            committed_at: text("committedAt"),
+        },
+        "IMPORT_PERIOD_OVERLAP" => ImportRefusal::PeriodOverlap {
+            batch: details_id(details, "batchId"),
+            from: day("from"),
+            to: day("to"),
+        },
+        "IMPORT_BUSY" => ImportRefusal::Busy,
+        "IMPORT_UNDO_BLOCKED" => ImportRefusal::UndoBlocked {
+            blockers: details
+                .and_then(|d| d.raw("blockers"))
+                .and_then(Value::as_array)
+                .map(|l| {
+                    l.iter()
+                        .map(|b| UndoBlocker {
+                            kind: b["kind"].as_str().unwrap_or_default().to_string(),
+                            id: b["id"].as_str().map(str::to_string),
+                            reason: b["reason"].as_str().map(str::to_string),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        },
+        "TIEOUT_NOT_ZERO" => ImportRefusal::TieOutNotZero {
+            differences: details.map_or(0, |d| d.list_len("firstDifferences")),
+        },
+        "IMPORT_COMPANY_NOT_EMPTY" => ImportRefusal::CompanyNotEmpty,
+        "IMPORT_SESSION_IN_BATCH" => ImportRefusal::SessionInBatch,
+        "IMPORT_FISCAL_YEAR_LOCKED" => ImportRefusal::FiscalYearLocked,
+        "IMPORT_ADMIN_REQUIRED" => ImportRefusal::AdminRequired,
+        "IMPORT_DATE_MISMATCH" => ImportRefusal::DateMismatch {
+            session: details_id(details, "sessionId"),
+        },
+        "IMPORT_AMOUNT_INVALID" => {
+            let mut rows: Vec<u64> = details
+                .and_then(|d| d.raw("rows"))
+                .and_then(Value::as_array)
+                .map(|l| {
+                    l.iter()
+                        .filter_map(|r| r.as_u64().or_else(|| r.get("rowNumber")?.as_u64()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            rows.sort_unstable();
+            rows.dedup();
+            ImportRefusal::AmountInvalid { rows }
+        }
+        "IMPORT_UNBALANCED" => ImportRefusal::Unbalanced,
+        "IMPORT_UNKNOWN_REF" => ImportRefusal::UnknownRef {
+            field: text("field"),
+        },
+        "IMPORT_MIXED_GROUP" => ImportRefusal::MixedGroup,
+        _ => return None,
+    })
+}
+
+/// Classifies `e` (`None` for anything else: closed periods, passwords,
+/// hidden accounts, network, plain validation).
+#[must_use]
+pub fn import_refusal(e: &ApiError) -> Option<ImportRefusal> {
+    let code = error_code(e)?;
+    let details = match e {
+        ApiError::Conflict { details, .. } => Some(details),
+        ApiError::Validation(v) => Some(v.details()),
+        _ => None,
+    };
+    refusal_from(code, details)
+}
+
+// ── Wire readers ──
+
+fn money(v: &Value) -> Result<Money, ApiError> {
+    // Exact decimal strings only: a JSON number may have been rounded.
+    let s = v.as_str().ok_or(ApiError::InexactMoney { what: WHAT })?;
+    Money::parse_wire(s).map_err(|_| decode_err())
+}
+
+fn opt_money(v: &Value) -> Result<Option<Money>, ApiError> {
+    if v.is_null() {
+        Ok(None)
+    } else {
+        money(v).map(Some)
+    }
+}
+
+fn date(v: &Value) -> Option<CalendarDate> {
+    let s = v.as_str()?;
+    CalendarDate::parse_wire(s.get(..10).unwrap_or(s)).ok()
+}
+
+fn opt_id<T: std::str::FromStr>(v: &Value) -> Option<T> {
+    v.as_str().and_then(|s| s.parse().ok())
+}
+
+fn count(v: &Value) -> u64 {
+    v.as_u64().unwrap_or(0)
+}
+
+fn text(v: &Value) -> Option<String> {
+    v.as_str().filter(|s| !s.is_empty()).map(str::to_string)
+}
+
+fn parse_json(body: &[u8]) -> Result<Value, ApiError> {
+    serde_json::from_slice(body).map_err(|_| decode_err())
+}
+
+fn wire<T>(v: &Value, f: fn(&str) -> Option<T>) -> Result<T, ApiError> {
+    v.as_str().and_then(f).ok_or_else(decode_err)
+}
+
+fn session_from(s: &Value) -> Result<ImportSession, ApiError> {
+    Ok(ImportSession {
+        id: ImportSessionId::parse(s["id"].as_str().ok_or_else(decode_err)?)?,
+        kind: wire(&s["kind"], ImportKind::from_wire)?,
+        source: wire(&s["sourceSystem"], SourceSystem::from_wire)?,
+        role: s["role"].as_str().and_then(FileRole::from_wire),
+        status: wire(&s["status"], SessionStatus::from_wire)?,
+        row_count: count(&s["rowCount"]),
+        error_count: count(&s["errorCount"]),
+        report_date: date(&s["reportDate"]),
+        batch: opt_id(&s["batchId"]),
+    })
+}
+
+/// Reads `{session, preview, validationErrors}` (upload and session read).
+pub(crate) fn upload_from(body: &[u8]) -> Result<UploadOutcome, ApiError> {
+    let v = parse_json(body)?;
+    let session = session_from(&v["session"])?;
+    let p = &v["preview"];
+    let preview = FilePreview {
+        total_rows: count(&p["totalRows"]),
+        error_count: count(&p["errorCount"]),
+        entry_count: p["jeGroupCount"].as_u64(),
+        report_date: date(&p["reportDate"]),
+        total_debit: opt_money(&p["totalDebit"])?,
+        total_credit: opt_money(&p["totalCredit"])?,
+    };
+    let problems = v["validationErrors"]
+        .as_array()
+        .map(|l| {
+            l.iter()
+                .map(|e| RowProblem {
+                    row_number: count(&e["rowNumber"]),
+                    field: text(&e["field"]),
+                    // `message` is never read: it can quote cells.
+                    code: e["code"].as_str().unwrap_or_default().to_string(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(UploadOutcome {
+        session,
+        preview,
+        problems,
+    })
+}
+
+fn spot_check_from(v: &Value) -> Vec<SpotCheckItem> {
+    let list = v
+        .as_array()
+        .or_else(|| v["items"].as_array())
+        .cloned()
+        .unwrap_or_default();
+    list.iter()
+        .filter_map(|i| {
+            Some(SpotCheckItem {
+                key: i["key"].as_str()?.to_string(),
+                label: i["label"].as_str().unwrap_or_default().to_string(),
+                done: i["done"].as_bool().unwrap_or(false),
+                note: i["note"].as_str().unwrap_or_default().to_string(),
+            })
+        })
+        .collect()
+}
+
+fn batch_from(b: &Value) -> Result<ImportBatch, ApiError> {
+    Ok(ImportBatch {
+        id: ImportBatchId::parse(b["id"].as_str().ok_or_else(decode_err)?)?,
+        source: wire(&b["sourceSystem"], SourceSystem::from_wire)?,
+        kind: wire(&b["kind"], BatchKind::from_wire)?,
+        status: wire(&b["status"], BatchStatus::from_wire)?,
+        sessions: b["sessionIds"]
+            .as_array()
+            .map(|l| l.iter().filter_map(opt_id).collect())
+            .unwrap_or_default(),
+        backup_ref: text(&b["backupRef"]),
+        company_was_empty: b["companyWasEmpty"].as_bool(),
+        conversion_date: date(&b["conversionDate"]),
+        history_from: date(&b["historyFrom"]),
+        verified_at: text(&b["verifiedAt"]),
+        verified_by: text(&b["verifiedBy"]),
+        spot_check: spot_check_from(&b["spotCheck"]),
+        created_at: text(&b["createdAt"]),
+        committed_at: text(&b["committedAt"]),
+    })
+}
+
+/// Reads `{batch}` (create, verify) or a bare batch.
+pub(crate) fn one_batch_from(body: &[u8]) -> Result<ImportBatch, ApiError> {
+    let v = parse_json(body)?;
+    if v["batch"].is_object() {
+        batch_from(&v["batch"])
+    } else {
+        batch_from(&v)
+    }
+}
+
+/// Reads `{batch, progress, error?}`.
+pub(crate) fn state_from(body: &[u8]) -> Result<BatchState, ApiError> {
+    let v = parse_json(body)?;
+    let batch = batch_from(&v["batch"])?;
+    let p = &v["progress"];
+    let progress = p.is_object().then(|| Progress {
+        step: p["step"].as_str().unwrap_or_default().to_string(),
+        done: count(&p["done"]),
+        total: count(&p["total"]),
+    });
+    let e = if v["error"].is_object() {
+        &v["error"]
+    } else {
+        &v["batch"]["error"]
+    };
+    let error = e.is_object().then(|| BatchFailure {
+        code: e["code"].as_str().unwrap_or_default().to_string(),
+        row_number: e["rowNumber"].as_u64(),
+        session: opt_id(&e["sessionId"]),
+    });
+    Ok(BatchState {
+        batch,
+        progress,
+        error,
+    })
+}
+
+/// Reads a History page (`data` or `batches`, and `nextCursor`).
+pub(crate) fn page_from(body: &[u8]) -> Result<BatchPage, ApiError> {
+    let v = parse_json(body)?;
+    let list = v["data"]
+        .as_array()
+        .or_else(|| v["batches"].as_array())
+        .ok_or_else(decode_err)?;
+    Ok(BatchPage {
+        batches: list.iter().map(batch_from).collect::<Result<_, _>>()?,
+        next_cursor: text(&v["nextCursor"]),
+    })
+}
+
+fn accepted_from(body: &[u8], replayed: bool) -> Result<JobAccepted, ApiError> {
+    let v = parse_json(body)?;
+    let id = v["batchId"]
+        .as_str()
+        .or_else(|| v["batch"]["id"].as_str())
+        .ok_or_else(decode_err)?;
+    Ok(JobAccepted {
+        batch: ImportBatchId::parse(id)?,
+        replayed,
+    })
+}
+
+fn item_from(i: &Value, name_key: &str) -> Result<TieOutItem, ApiError> {
+    Ok(TieOutItem {
+        source_row: i["sourceRow"].as_u64().ok_or_else(decode_err)?,
+        name: i[name_key].as_str().unwrap_or_default().to_string(),
+        number: text(&i["number"]),
+        source: money(&i["sourceExact"])?,
+        books: money(&i["booksExact"])?,
+        diff: money(&i["diffExact"])?,
+    })
+}
+
+fn items_from(v: &Value, name_key: &str) -> Result<Vec<TieOutItem>, ApiError> {
+    v.as_array()
+        .map(|l| l.iter().map(|i| item_from(i, name_key)).collect())
+        .unwrap_or_else(|| Ok(Vec::new()))
+}
+
+/// Reads the tie-out (E3).
+pub(crate) fn tieout_from(body: &[u8]) -> Result<TieOut, ApiError> {
+    let v = parse_json(body)?;
+    let v = if v["tieout"].is_object() {
+        &v["tieout"]
+    } else {
+        &v
+    };
+    let accounts = v["accounts"]
+        .as_array()
+        .ok_or_else(decode_err)?
+        .iter()
+        .map(|a| {
+            Ok(TieOutAccount {
+                account: opt_id(&a["accountId"]),
+                name: a["name"].as_str().unwrap_or_default().to_string(),
+                source_row: a["sourceRow"].as_u64(),
+                source_keys: a["sourceKeys"]
+                    .as_array()
+                    .map(|l| {
+                        l.iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                source: money(&a["sourceExact"])?,
+                books: money(&a["booksExact"])?,
+                diff: money(&a["diffExact"])?,
+            })
+        })
+        .collect::<Result<_, ApiError>>()?;
+    let balance_rows = v["balanceRows"]
+        .as_array()
+        .map(|l| {
+            l.iter()
+                .filter_map(|r| {
+                    // An unknown check from a newer engine is skipped, but
+                    // `all_zero` still covers it.
+                    let key = r["key"].as_str().and_then(BalanceKey::from_wire)?;
+                    Some(money(&r["diffExact"]).map(|diff| BalanceRow { key, diff }))
+                })
+                .collect::<Result<_, _>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    let t = &v["totals"];
+    Ok(TieOut {
+        as_of: date(&v["asOf"]).ok_or_else(decode_err)?,
+        accounts,
+        ar_items: items_from(&v["arItems"], "contactName")?,
+        ap_items: items_from(&v["apItems"], "contactName")?,
+        inventory_items: items_from(&v["inventoryItems"], "itemName")?,
+        balance_rows,
+        totals: TieOutTotals {
+            source: opt_money(&t["sourceExact"])?,
+            books: opt_money(&t["booksExact"])?,
+            diff: opt_money(&t["diffExact"])?,
+        },
+        all_zero: v["allZero"].as_bool().ok_or_else(decode_err)?,
+    })
+}
+
+// ── Operations ──
+
+/// Import operations of a session (`session.imports()`).
+#[derive(Clone, Copy, Debug)]
+pub struct Imports<'a>(pub(crate) &'a Session);
+
+impl Session {
+    /// QBD and other-system imports in the open company.
+    #[must_use]
+    pub fn imports(&self) -> Imports<'_> {
+        Imports(self)
+    }
+}
+
+fn at(op: &Operation, id: &str) -> Call {
+    Call::new(op.method(), op.route(), op.route().replace("{id}", id))
+}
+
+fn require_all(s: &Session, caps: &[&str]) -> Result<(), ApiError> {
+    for c in caps {
+        require(s, c)?;
+    }
+    Ok(())
+}
+
+impl Imports<'_> {
+    /// Uploads one file (checked first; nothing is sent when it is
+    /// refused).
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without the capabilities the file needs;
+    /// `Local(AttachmentTooLarge | AttachmentType | InvalidValue)` from
+    /// [`UploadRequest::check`]; 409 `IMPORT_ALREADY_COMMITTED`
+    /// ([`import_refusal`]); any [`ApiError`].
+    pub async fn upload(&self, req: &UploadRequest) -> Result<UploadOutcome, ApiError> {
+        require_all(self.0, &req.capabilities())?;
+        let ext = req.check().map_err(local)?;
+        let (boundary, body) = req.multipart(&ext);
+        let call = Call::at(Method::Post, IMPORTS_UPLOAD.route()).multipart_body(&boundary, body);
+        let reply = self.0.send(&IMPORTS_UPLOAD, call, None).await?;
+        upload_from(&reply.body)
+    }
+
+    /// One uploaded file, as the engine read it.
+    ///
+    /// # Errors
+    /// `NotFound`; any [`ApiError`].
+    pub async fn session(&self, id: ImportSessionId) -> Result<UploadOutcome, ApiError> {
+        require(self.0, Capabilities::IMPORTS_AMOUNTS)?;
+        let call = at(&IMPORTS_SESSION, &id.to_string());
+        let reply = self.0.send(&IMPORTS_SESSION, call, None).await?;
+        upload_from(&reply.body)
+    }
+
+    /// Discards an uploaded file that is not in a committed batch.
+    ///
+    /// # Errors
+    /// `NotFound`; any [`ApiError`].
+    pub async fn discard(&self, id: ImportSessionId) -> Result<(), ApiError> {
+        require(self.0, Capabilities::IMPORTS_AMOUNTS)?;
+        let call = at(&IMPORTS_DISCARD, &id.to_string());
+        self.0.send(&IMPORTS_DISCARD, call, None).await?;
+        Ok(())
+    }
+
+    /// Groups uploaded files into a batch.
+    ///
+    /// # Errors
+    /// `Local(InvalidValue)` for no files, a repeated file or bad options;
+    /// 409 `IMPORT_SESSION_IN_BATCH`, `IMPORT_PERIOD_OVERLAP`,
+    /// `IMPORT_FISCAL_YEAR_LOCKED`; any [`ApiError`].
+    pub async fn create_batch(&self, new: &NewBatch) -> Result<ImportBatch, ApiError> {
+        require_all(self.0, &new.options.capabilities())?;
+        let mut seen = std::collections::BTreeSet::new();
+        if new.sessions.is_empty() || !new.sessions.iter().all(|s| seen.insert(*s)) {
+            return Err(local(LocalValidation::InvalidValue));
+        }
+        let body = json!({
+            "sourceSystem": new.source.as_wire(),
+            "kind": new.kind.as_wire(),
+            "sessionIds": new.sessions.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            "options": new.options.body().map_err(local)?,
+        });
+        let bytes = crate::session::json_body(&body)?;
+        let call = Call::at(Method::Post, IMPORT_BATCH_CREATE.route()).json_body(bytes);
+        let reply = self.0.send(&IMPORT_BATCH_CREATE, call, None).await?;
+        one_batch_from(&reply.body)
+    }
+
+    /// Commits a batch under `key` (made when the owner clicked Import; a
+    /// changed body — password, confirmation — gets a new key). Answers
+    /// when the job is accepted; poll [`Imports::batch`].
+    ///
+    /// # Errors
+    /// `Local(BackupRequired)` without a backup reference; the refusals
+    /// [`import_refusal`] reads; `ClosedPeriod`, `ClosingPasswordRejected`,
+    /// `ClosingPasswordRateLimited`; `Sensitive`; `OutcomeUnknown` when the
+    /// answer was lost (Check status, or send again with the same key).
+    pub async fn commit(
+        &self,
+        id: ImportBatchId,
+        req: &CommitRequest,
+        key: IdempotencyKey,
+    ) -> Result<JobAccepted, ApiError> {
+        require(self.0, Capabilities::IMPORTS_BATCH)?;
+        let backup = req.backup_ref.trim();
+        if backup.is_empty() {
+            return Err(local(LocalValidation::BackupRequired));
+        }
+        let mut body = Map::new();
+        body.insert("backupRef".into(), json!(backup));
+        if req.confirm_closed_period {
+            body.insert("confirmClosedPeriod".into(), json!(true));
+        }
+        self.job(
+            &IMPORT_BATCH_COMMIT,
+            id,
+            Value::Object(body),
+            req.closed_period.clone(),
+            key,
+        )
+        .await
+    }
+
+    /// Undoes a committed batch under `key`, after a verified backup.
+    ///
+    /// # Errors
+    /// As for [`Imports::commit`], and 409 `IMPORT_UNDO_BLOCKED`.
+    pub async fn undo(
+        &self,
+        id: ImportBatchId,
+        backup_ref: &str,
+        closed_period: Option<ClosedPeriodAuthorization>,
+        key: IdempotencyKey,
+    ) -> Result<JobAccepted, ApiError> {
+        require(self.0, Capabilities::IMPORTS_BATCH)?;
+        let backup = backup_ref.trim();
+        if backup.is_empty() {
+            return Err(local(LocalValidation::BackupRequired));
+        }
+        self.job(
+            &IMPORT_BATCH_UNDO,
+            id,
+            json!({ "backupRef": backup }),
+            closed_period,
+            key,
+        )
+        .await
+    }
+
+    async fn job(
+        &self,
+        op: &Operation,
+        id: ImportBatchId,
+        body: Value,
+        closed_period: Option<ClosedPeriodAuthorization>,
+        key: IdempotencyKey,
+    ) -> Result<JobAccepted, ApiError> {
+        let bytes = posting_body(self.0, body, &PostingOptions { closed_period })?;
+        let mut call = at(op, &id.to_string()).json_body(bytes);
+        call.idempotency_key = Some(key);
+        call.once = true;
+        let reply = self.0.send(op, call, None).await?;
+        accepted_from(&reply.body, reply.replayed)
+    }
+
+    /// One batch with its job progress and failure (Check status).
+    ///
+    /// # Errors
+    /// `NotFound`; any [`ApiError`].
+    pub async fn batch(&self, id: ImportBatchId) -> Result<BatchState, ApiError> {
+        require(self.0, Capabilities::IMPORTS_BATCH)?;
+        let call = at(&IMPORT_BATCH, &id.to_string());
+        let reply = self.0.send(&IMPORT_BATCH, call, None).await?;
+        state_from(&reply.body)
+    }
+
+    /// One page of History, newest first.
+    ///
+    /// # Errors
+    /// Any [`ApiError`].
+    pub async fn batches(&self, cursor: Option<&str>) -> Result<BatchPage, ApiError> {
+        require(self.0, Capabilities::IMPORTS_BATCH)?;
+        let mut call = Call::at(Method::Get, IMPORT_BATCHES.route());
+        call.query.push(("limit".into(), HISTORY_PAGE.to_string()));
+        if let Some(c) = cursor {
+            call.query.push(("cursor".into(), c.to_string()));
+        }
+        let reply = self.0.send(&IMPORT_BATCHES, call, None).await?;
+        page_from(&reply.body)
+    }
+
+    /// Every page of History, newest first, up to [`HISTORY_MAX_PAGES`].
+    ///
+    /// # Errors
+    /// Any [`ApiError`].
+    pub async fn batches_all(&self) -> Result<Vec<ImportBatch>, ApiError> {
+        let mut all = Vec::new();
+        let mut cursor: Option<String> = None;
+        for _ in 0..HISTORY_MAX_PAGES {
+            let page = self.batches(cursor.as_deref()).await?;
+            let got = page.batches.len();
+            all.extend(page.batches);
+            match page.next_cursor {
+                Some(c) if got > 0 => cursor = Some(c),
+                _ => break,
+            }
+        }
+        Ok(all)
+    }
+
+    /// The batch's tie-out, computed by the engine.
+    ///
+    /// # Errors
+    /// `InexactMoney` when an amount is not an exact string; any
+    /// [`ApiError`].
+    pub async fn tieout(&self, id: ImportBatchId) -> Result<TieOut, ApiError> {
+        require(self.0, Capabilities::IMPORTS_TIEOUT)?;
+        let call = at(&IMPORT_BATCH_TIEOUT, &id.to_string()).json_body(b"{}".to_vec());
+        let reply = self.0.send(&IMPORT_BATCH_TIEOUT, call, None).await?;
+        tieout_from(&reply.body)
+    }
+
+    /// Marks the batch verified: the engine recomputes the tie-out and
+    /// refuses unless every difference is zero.
+    ///
+    /// # Errors
+    /// 409 `TIEOUT_NOT_ZERO`; 403 `IMPORT_ADMIN_REQUIRED`; any
+    /// [`ApiError`].
+    pub async fn verify(&self, id: ImportBatchId) -> Result<ImportBatch, ApiError> {
+        require(self.0, Capabilities::IMPORTS_TIEOUT)?;
+        let call = at(&IMPORT_BATCH_VERIFY, &id.to_string()).json_body(b"{}".to_vec());
+        let reply = self.0.send(&IMPORT_BATCH_VERIFY, call, None).await?;
+        one_batch_from(&reply.body)
+    }
+
+    /// Saves the spot-check list on the batch.
+    ///
+    /// # Errors
+    /// `Local(InvalidValue)` for a blank or repeated key or a note over
+    /// [`MAX_NOTE_CHARS`]; any [`ApiError`].
+    pub async fn save_spot_check(
+        &self,
+        id: ImportBatchId,
+        items: &[SpotCheckItem],
+    ) -> Result<(), ApiError> {
+        require(self.0, Capabilities::IMPORTS_TIEOUT)?;
+        let mut seen = std::collections::BTreeSet::new();
+        if items.iter().any(|i| {
+            i.key.trim().is_empty()
+                || !seen.insert(i.key.as_str())
+                || i.note.chars().count() > MAX_NOTE_CHARS
+        }) {
+            return Err(local(LocalValidation::InvalidValue));
+        }
+        let list: Vec<Value> = items
+            .iter()
+            .map(|i| json!({"key": i.key, "label": i.label, "done": i.done, "note": i.note}))
+            .collect();
+        let bytes = crate::session::json_body(&json!({ "items": list }))?;
+        let call = at(&IMPORT_BATCH_SPOT_CHECK, &id.to_string()).json_body(bytes);
+        self.0.send(&IMPORT_BATCH_SPOT_CHECK, call, None).await?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[path = "imports_tests.rs"]
+mod tests;

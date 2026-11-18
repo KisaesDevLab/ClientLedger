@@ -32,6 +32,8 @@ pub mod feed_rules;
 pub mod finance_charges;
 pub mod form1099;
 pub mod home_queries;
+// P31: QBD and other-system imports (U-260 to U-268).
+pub mod imports;
 pub mod intake;
 pub mod inventory;
 pub mod invoice_layouts;
