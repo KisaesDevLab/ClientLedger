@@ -201,6 +201,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("imports.tieout.items", "{n} items"),
     ("imports.tieout.items.one", "1 item"),
     ("imports.tieout.rows_differ", "{n} differ"),
+    ("imports.tieout.rows_differ.one", "1 differs"),
     ("imports.tieout.compare", "Compare"),
     ("imports.tieout.tab.accounts", "Trial balance"),
     ("imports.tieout.tab.receivables", "A/R aging"),

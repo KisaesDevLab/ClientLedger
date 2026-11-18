@@ -1133,6 +1133,10 @@ impl Screen for ImportScreen {
             "files_refused": self.uploads.values().flatten().filter(|f| f.problem.is_some() || f.refusal.is_some()).count(),
             "matches": self.matches().len(),
             "unmapped": self.unmapped(),
+            // U-272: account-list rows merged into a system account, and
+            // the ones the owner sent to an account of theirs instead.
+            "merged": self.matches().iter().filter(|m| m.status == MatchStatus::Create && m.system_role.is_some()).count(),
+            "redirected": self.matches().iter().filter(|m| m.status == MatchStatus::Create && self.account_map.contains_key(&m.source_key)).count(),
             "depth": self.wizard.depth.key(),
             "conversion_date_set": self.wizard.conversion_date.is_some(),
             "batch": self.batch.is_some(),

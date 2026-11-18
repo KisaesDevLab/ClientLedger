@@ -328,13 +328,14 @@ impl TieState {
         let differing = self.differences(tab);
         let total = tab.total(tie);
         let figure = if tab == Tab::TrialBalance {
-            // No difference total from the engine: 0.00 when no account
-            // differs, else how many do (nothing is subtracted here).
-            let d = self.of(Section::Accounts).filter(|r| !r.zero).count();
-            if d == 0 {
+            // No difference total from the engine: 0.00 when nothing on
+            // the tab differs, else how many things do. The same count as
+            // the line under it (accounts, the tab's check rows and its
+            // totals), so the two never disagree.
+            if differing == 0 {
                 Money::ZERO.format(MoneyStyle::default())
             } else {
-                t_count("imports.tieout.accounts_differ", d, &[])
+                t_count("imports.tieout.accounts_differ", differing, &[])
             }
         } else {
             // The aging total's difference, unless it is 0.00 and the
@@ -1079,6 +1080,27 @@ mod tests {
         let tile = TieState::new(&t).tile(Tab::TrialBalance, &t);
         assert!(!tile.tick);
         assert_eq!(tile.figure, "0.00");
+    }
+
+    /// The trial balance tile's "N differ" and the line under it count the
+    /// same things: an account difference and a check-row difference are 2
+    /// in both (it read "1 differs" over "· 2 differ" before).
+    #[test]
+    fn the_trial_balance_tile_figure_and_line_count_the_same() {
+        let mut t = tie(vec![account("1000", "5.00"), account("1200", "0")], false);
+        t.balance_rows = vec![
+            balance(BalanceKey::HistoryAr, "3.00"),
+            balance(BalanceKey::HistoryAp, "0.00"),
+        ];
+        let st = TieState::new(&t);
+        let tile = st.tile(Tab::TrialBalance, &t);
+        assert_eq!(st.differences(Tab::TrialBalance), 2);
+        assert_eq!(tile.figure, "2 differ");
+        assert!(tile.under.ends_with("· 2 differ"), "{}", tile.under);
+        let t = tie(vec![account("1000", "5.00")], false);
+        let tile = TieState::new(&t).tile(Tab::TrialBalance, &t);
+        assert_eq!(tile.figure, "1 differs");
+        assert!(tile.under.ends_with("· 1 differs"), "{}", tile.under);
     }
 
     #[test]

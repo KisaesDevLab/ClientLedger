@@ -117,13 +117,18 @@ pub fn sort_newest_first(entries: &mut [Entry]) {
     entries.sort_by(|a, b| b.created.cmp(&a.created).then_with(|| b.id.cmp(&a.id)));
 }
 
-/// The backups retention must keep: those of batches still undoable
-/// (committed, verified or not), running, or failed (the backup is kept
-/// after a failure, plan §4). Undone batches and drafts need none.
+/// The backups retention must keep: those of batches not yet verified that
+/// are committed, running, or failed (the backup is kept after a failure,
+/// plan §4). Undone batches and drafts need none; a verified batch's
+/// backup goes back to normal retention (Q-P31aa: protection ends at
+/// verify, so the protected set can't grow without limit for conversions).
+/// Spreadsheet batches have no verify step and stay protected while they
+/// stand (Q-P31aa).
 #[must_use]
 pub fn protected_backups(entries: &[Entry]) -> BTreeSet<String> {
     entries
         .iter()
+        .filter(|e| !e.verified)
         .filter(|e| !matches!(e.status, BatchStatus::Undone | BatchStatus::Draft))
         .filter_map(|e| e.backup_ref.clone())
         .collect()
@@ -203,16 +208,18 @@ mod tests {
     }
 
     #[test]
-    fn backups_of_unverified_or_undoable_batches_are_kept() {
+    fn backups_of_unverified_batches_are_kept_until_verify() {
         let l = vec![
-            entry("committed", BatchStatus::Committed, true, "2026-11-01"),
+            // Q-P31aa: verified, so normal retention applies again.
+            entry("verified", BatchStatus::Committed, true, "2026-11-01"),
             entry("unverified", BatchStatus::Committed, false, "2026-11-01"),
             entry("failed", BatchStatus::Failed, false, "2026-11-01"),
+            entry("running", BatchStatus::Committing, false, "2026-11-01"),
             entry("done", BatchStatus::Undone, true, "2026-11-01"),
             entry("draft", BatchStatus::Draft, false, "2026-11-01"),
         ];
         let kept = protected_backups(&l);
-        let want: BTreeSet<String> = ["committed", "unverified", "failed"]
+        let want: BTreeSet<String> = ["unverified", "failed", "running"]
             .iter()
             .map(|s| format!("{s}.clbackup"))
             .collect();
