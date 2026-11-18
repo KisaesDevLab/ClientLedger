@@ -65,6 +65,14 @@ fn each_program_imports_and_ties_out() {
         );
         assert_eq!(s.state()["screen"], KIND);
         assert!(!source.requires_empty_company());
+        // The shared view: only the trial balance (no open items, no
+        // "before conversion" checks for other programs).
+        assert_eq!(
+            s.state()["tieout_tabs"],
+            serde_json::json!(["accounts"]),
+            "{source:?}"
+        );
+        assert!(s.tieout_pdf().is_some_and(|b| b.starts_with(b"%PDF")));
     }
 }
 

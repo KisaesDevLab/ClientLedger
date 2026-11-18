@@ -370,6 +370,7 @@ impl ImportScreen {
         let password = held.password.clone();
         let confirm = held.confirm_closed;
         let what = held.what;
+        self.last_key = Some(key.clone());
         self.held = Some(held);
         self.jobs_sent += 1;
         self.unsettled = false;
@@ -868,6 +869,36 @@ impl ImportScreen {
                 d.imports.backup_mode = crate::company::demo::imports::DemoBackup::HoldOnce;
             }
             "not_empty" => d.imports.company_empty = false,
+            "fail_commit" => d.imports.fail_next_commit = Some("IMPORT_INTERRUPTED"),
+            "no_closing_password" => d.imports.closing_password_set = false,
+            "differences_only" => {
+                drop(d);
+                if let Some(x) = self.tie.as_mut() {
+                    x.view.differences_only = !x.view.differences_only;
+                }
+            }
+            "confirm_closed" => {
+                drop(d);
+                self.confirm_closed();
+            }
+            "spot_tick_all" => {
+                drop(d);
+                for i in &mut self.spot.items {
+                    i.done = true;
+                }
+                self.spot.changed_at = Some(std::time::Instant::now());
+            }
+            tab if tab.starts_with("tab_") => {
+                drop(d);
+                let want = &tab[4..];
+                let Some(x) = self.tie.as_mut() else {
+                    return false;
+                };
+                let Some(t) = x.tabs().into_iter().find(|t| t.key() == want) else {
+                    return false;
+                };
+                x.tab = t;
+            }
             "unmatched" => d.imports.unmatched = vec!["Old suspense".into()],
             "close_books" => {
                 if let Some(open) = d.open

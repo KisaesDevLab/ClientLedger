@@ -333,6 +333,8 @@ pub struct ImportScreen {
     waiting: Option<(Running, ImportBatchId)>,
     job_out: Option<Job<JobAccepted>>,
     pub(crate) held: Option<Held>,
+    /// The key of the last commit or undo sent (control channel, tests).
+    pub(crate) last_key: Option<IdempotencyKey>,
     /// The commit's or undo's answer was lost (B1: nothing discards,
     /// Cancel and Back are off until Check status settles it).
     pub(crate) unsettled: bool,
@@ -422,6 +424,7 @@ impl ImportScreen {
             waiting: None,
             job_out: None,
             held: None,
+            last_key: None,
             unsettled: false,
             running: None,
             batch_job: None,

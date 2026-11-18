@@ -776,7 +776,7 @@ mod tests {
         assert_eq!(rows[0].diff_text, "0.0040");
         assert!(!rows[0].zero);
         let tile = st.tile(Tab::TrialBalance, &t);
-        assert_eq!(tile.figure, "10.0040", "the engine's total, exact");
+        assert_eq!(tile.figure, "10.004", "the engine's total, never rounded");
         assert!(!tile.tick && !tile.matches);
         assert_eq!(tile.head, "Trial balance at 10/27/2026");
         // ✓ only on the engine's word, whatever the rows say.
