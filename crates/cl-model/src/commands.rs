@@ -237,6 +237,10 @@ pub const COMMANDS: &[Command] = &[
     cmd("file.restore", "Restore a Backup", Some(Menu::File), 1, None, Scope::Global),
     built("file.export_all", "Export All Data", Some(Menu::File), 1, None),
     screen("file.full_backup", "Full Database Backup (Utilities)", Some(Menu::File), 1, None, "P34"),
+    // P31: bring the books over from another program (Admins only; no
+    // submenus, so a group of its own under File).
+    built("file.import_qbd", "Import from QuickBooks Desktop", Some(Menu::File), 6, None),
+    built("file.import_system", "Import from Another Accounting Program", Some(Menu::File), 6, None),
     built("file.delete_company", "Delete Company", Some(Menu::File), 2, None),
     cmd("file.print", "Print", Some(Menu::File), 3, ctrl('P'), Scope::Global),
     // P19: the print queues and the printer's alignment (no shortcut)
@@ -924,6 +928,9 @@ mod tests {
             "reports.closing_date_exceptions",
             // P30
             "payroll.import",
+            // P31
+            "file.import_qbd",
+            "file.import_system",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

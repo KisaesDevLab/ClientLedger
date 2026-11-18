@@ -521,6 +521,59 @@ pub struct FilePreview {
     pub total_debit: Option<Money>,
     /// Credits, as the engine summed them (trial balances).
     pub total_credit: Option<Money>,
+    /// How each account the file names was matched (E2b
+    /// `accountMatches[]`, every row; empty before E2b).
+    pub account_matches: Vec<AccountMatch>,
+}
+
+/// How the engine matched an account a file names (E2b, `qbd-mapping-v1`).
+/// ASSUMED shape until E2b lands: `{sourceKey, number?, name?, match:
+/// "existing"|"create"|"unmatched", accountId?}`. Unmatched accounts never
+/// go to suspense (Q-P31c): the owner picks one (`accountMap`).
+#[derive(Clone, PartialEq, Eq)]
+pub struct AccountMatch {
+    /// The key the batch's `accountMap` uses (the source number, else name).
+    pub source_key: String,
+    /// The source account number, when it has one.
+    pub number: Option<String>,
+    /// The source account name (owner data; never logged).
+    pub name: String,
+    /// What the engine will do with it.
+    pub status: MatchStatus,
+    /// The company account it matched (`Existing`).
+    pub account: Option<AccountId>,
+}
+
+impl fmt::Debug for AccountMatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AccountMatch")
+            .field("status", &self.status)
+            .finish_non_exhaustive()
+    }
+}
+
+/// [`AccountMatch::status`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MatchStatus {
+    /// An account already in the company (by number, then name).
+    Existing,
+    /// Made from the file's chart of accounts.
+    Create,
+    /// Neither: the owner must pick an account.
+    Unmatched,
+}
+
+impl MatchStatus {
+    /// Reads the engine's `match`.
+    #[must_use]
+    pub fn from_wire(s: &str) -> Option<MatchStatus> {
+        match s {
+            "existing" => Some(MatchStatus::Existing),
+            "create" => Some(MatchStatus::Create),
+            "unmatched" => Some(MatchStatus::Unmatched),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Debug for FilePreview {
@@ -530,6 +583,7 @@ impl fmt::Debug for FilePreview {
             .field("error_count", &self.error_count)
             .field("entry_count", &self.entry_count)
             .field("report_date", &self.report_date)
+            .field("account_matches", &self.account_matches.len())
             .finish_non_exhaustive()
     }
 }
@@ -1170,6 +1224,7 @@ pub(crate) fn upload_from(body: &[u8]) -> Result<UploadOutcome, ApiError> {
         report_date: date(&p["reportDate"]),
         total_debit: opt_money(&p["totalDebit"])?,
         total_credit: opt_money(&p["totalCredit"])?,
+        account_matches: account_matches_from(&p["accountMatches"]),
     };
     let problems = v["validationErrors"]
         .as_array()
@@ -1189,6 +1244,31 @@ pub(crate) fn upload_from(body: &[u8]) -> Result<UploadOutcome, ApiError> {
         preview,
         problems,
     })
+}
+
+/// `preview.accountMatches[]`; rows of an unknown kind are skipped (and
+/// so never counted as matched).
+fn account_matches_from(v: &Value) -> Vec<AccountMatch> {
+    v.as_array()
+        .map(|l| {
+            l.iter()
+                .filter_map(|m| {
+                    let number = text(&m["number"]);
+                    let name = text(&m["name"]).unwrap_or_default();
+                    let source_key = text(&m["sourceKey"])
+                        .or_else(|| number.clone())
+                        .or_else(|| (!name.is_empty()).then(|| name.clone()))?;
+                    Some(AccountMatch {
+                        source_key,
+                        number,
+                        name,
+                        status: m["match"].as_str().and_then(MatchStatus::from_wire)?,
+                        account: opt_id(&m["accountId"]),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn spot_check_from(v: &Value) -> Vec<SpotCheckItem> {

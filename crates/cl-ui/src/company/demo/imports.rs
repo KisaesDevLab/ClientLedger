@@ -30,9 +30,9 @@
 use std::collections::BTreeMap;
 
 use cl_api::imports::{
-    BalanceKey, BalanceRow, BatchFailure, BatchPage, BatchState, BatchStatus, CommitRequest,
+    AccountMatch, BalanceKey, BalanceRow, BatchFailure, BatchPage, BatchState, BatchStatus, CommitRequest,
     FilePreview, FileRole, ImportBatch, ImportBatchId, ImportKind, ImportSession, ImportSessionId,
-    JobAccepted, NewBatch, Progress, RowProblem, SessionStatus, SourceSystem, SpotCheckItem,
+    JobAccepted, MatchStatus, NewBatch, Progress, RowProblem, SessionStatus, SourceSystem, SpotCheckItem,
     TieOut, TieOutAccount, TieOutTotals, UndoBlocker, UploadOutcome, UploadRequest,
 };
 use cl_api::{
@@ -342,6 +342,27 @@ pub struct DemoImports {
     pub company_empty: bool,
     /// Commits and undos received (control channel: never sent twice).
     pub jobs_received: u32,
+    /// Source accounts the journal files name that match nothing (the
+    /// mapping step's "pick an account"; scenarios add one).
+    pub unmatched: Vec<String>,
+    /// How the next backup before an import or undo answers.
+    pub backup_mode: DemoBackup,
+    /// The before-import backups the demo "made" (no files).
+    pub backups_taken: u32,
+}
+
+/// How the demo answers the next backup before an import or an undo
+/// (mirrors Import Payroll's). The one-shot modes go back to
+/// [`DemoBackup::Succeed`] once used.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DemoBackup {
+    /// Made at once.
+    #[default]
+    Succeed,
+    /// The next backup fails (as a missing passphrase would).
+    FailOnce,
+    /// The next backup stays running until released.
+    HoldOnce,
 }
 
 impl Default for DemoImports {
@@ -352,6 +373,9 @@ impl Default for DemoImports {
             next: 0,
             company_empty: true,
             jobs_received: 0,
+            unmatched: Vec::new(),
+            backup_mode: DemoBackup::Succeed,
+            backups_taken: 0,
         }
     }
 }
@@ -453,6 +477,51 @@ impl DemoImports {
     /// Forgets every file and batch (scenario reset).
     pub fn reset(&mut self) {
         *self = DemoImports::default();
+    }
+
+    /// The backup before an import or an undo, simulated (no file):
+    /// `Some(Ok(name))` made, `Some(Err)` failed, `None` still running.
+    pub fn backup(&mut self) -> Option<Result<String, ()>> {
+        match std::mem::take(&mut self.backup_mode) {
+            DemoBackup::Succeed => {
+                self.backups_taken += 1;
+                Some(Ok(format!(
+                    "demo-{}-before-import.clbackup",
+                    self.backups_taken
+                )))
+            }
+            DemoBackup::FailOnce => Some(Err(())),
+            DemoBackup::HoldOnce => None,
+        }
+    }
+
+    /// The accounts a file names, as the engine would match them: every
+    /// account of the set's reference trial balance comes from the account
+    /// list (`create`); a journal also names the scenario's unmatched ones.
+    fn account_matches(&self, set: &Set, kind: ImportKind) -> Vec<AccountMatch> {
+        if !matches!(kind, ImportKind::GlTransactions | ImportKind::TrialBalance) {
+            return Vec::new();
+        }
+        let mut out: Vec<AccountMatch> = section(set.base, "reference_tb")
+            .into_keys()
+            .map(|k| AccountMatch {
+                source_key: k.clone(),
+                number: Some(k.clone()),
+                name: k,
+                status: MatchStatus::Create,
+                account: None,
+            })
+            .collect();
+        if kind == ImportKind::GlTransactions {
+            out.extend(self.unmatched.iter().map(|k| AccountMatch {
+                source_key: k.clone(),
+                number: None,
+                name: k.clone(),
+                status: MatchStatus::Unmatched,
+                account: None,
+            }));
+        }
+        out
     }
 
     /// Something that keeps `batch` from being undone (a payment applied
@@ -602,6 +671,7 @@ impl DemoImports {
                 // A trial balance balances: debits equal credits.
                 total_debit: totals,
                 total_credit: totals,
+                account_matches: self.account_matches(set, s.kind),
             },
             problems: s.problems.clone(),
         })

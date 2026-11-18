@@ -47,6 +47,8 @@ pub enum PickUse {
     SaveReport,
     /// A payroll file to import (P30).
     PayrollFile,
+    /// A report exported from another accounting program (P31).
+    ImportFile,
 }
 
 impl PickUse {
@@ -60,9 +62,16 @@ impl PickUse {
             PickUse::BankFile => "picker.title.bank_file",
             PickUse::SaveReport => "picker.title.save_report",
             PickUse::PayrollFile => "picker.title.payroll_file",
+            PickUse::ImportFile => "picker.title.import_file",
         }
     }
 }
+
+/// Reports exported from another accounting program (P31).
+pub const IMPORT_FILES: Filter = Filter {
+    name_key: "picker.filter.import_files",
+    extensions: &["csv", "tsv", "txt", "xlsx", "xls"],
+};
 
 /// A file-type choice in the dialog.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

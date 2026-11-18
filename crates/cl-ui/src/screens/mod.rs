@@ -69,6 +69,9 @@ pub mod inventory;
 pub mod import_bank_file;
 // P30: Import Payroll.
 pub mod payroll_import;
+// P31: QuickBooks Desktop and other accounting programs.
+pub mod qbd_import;
+pub mod system_import;
 // P26: Bank Feed review.
 pub mod bank_feed;
 // P27: Reconcile.
@@ -154,6 +157,8 @@ pub(crate) const P29_SCREENS: [crate::shell::MakeScreen; 3] =
 
 /// P30 screens.
 pub(crate) const P30_SCREENS: [crate::shell::MakeScreen; 1] = [payroll_import::make];
+/// P31: Import from QuickBooks Desktop and from another accounting program.
+pub(crate) const P31_SCREENS: [crate::shell::MakeScreen; 2] = [qbd_import::make, system_import::make];
 
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
 

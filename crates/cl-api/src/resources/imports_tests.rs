@@ -178,6 +178,37 @@ fn a_json_number_total_is_refused_never_rounded() {
     ));
 }
 
+/// E2b (assumed shape): every account a file names, with how it matched;
+/// an unknown `match` is skipped, never counted as matched.
+#[test]
+fn account_matches_are_read_with_their_keys() {
+    let body = UPLOADED.replace(
+        r#""preview":{"#,
+        r#""preview":{"accountMatches":[
+            {"sourceKey":"1000","number":"1000","name":"Checking","match":"existing","accountId":"7b3f6f0e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"},
+            {"number":"6100","name":"Feed","match":"create"},
+            {"name":"Mystery","match":"unmatched"},
+            {"name":"Odd","match":"later"}],"#,
+    );
+    let u = upload_from(body.as_bytes()).expect("read");
+    let m = &u.preview.account_matches;
+    assert_eq!(m.len(), 3, "{m:?}");
+    assert_eq!(m[0].status, MatchStatus::Existing);
+    assert!(m[0].account.is_some());
+    assert_eq!(m[1].source_key, "6100", "the number when no key");
+    assert_eq!(m[2].source_key, "Mystery", "else the name");
+    assert_eq!(m[2].status, MatchStatus::Unmatched);
+    let dbg = format!("{m:?}");
+    assert!(!dbg.contains("Mystery") && !dbg.contains("Feed"), "{dbg}");
+    assert!(
+        upload_from(UPLOADED.as_bytes())
+            .expect("read")
+            .preview
+            .account_matches
+            .is_empty()
+    );
+}
+
 #[test]
 fn wire_names_round_trip() {
     for k in ImportKind::ALL {
