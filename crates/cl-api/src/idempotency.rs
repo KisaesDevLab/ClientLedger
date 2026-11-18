@@ -700,6 +700,13 @@ impl Executor {
                 Err(e) => self.on_transport(&ctx, e, &mut r).await,
             };
             match step {
+                // P30 QA-15: an earlier attempt of a keyed write may have
+                // committed; an engine that is down (or not answering as
+                // the engine) on a later attempt leaves that unknown, not
+                // "nothing was sent" (the same key may be sent again).
+                Step::Done(Err(e @ ApiError::EngineUnavailable { .. })) => {
+                    return Err(keyed_give_up(&ctx, &r, e));
+                }
                 Step::Done(result) => return result,
                 Step::Again => {
                     if r.same_key_retried && Instant::now() >= ctx.deadline {
@@ -2184,6 +2191,47 @@ pub(crate) mod tests {
                 "{e:?}"
             );
         }
+    }
+
+    /// P30 QA-15: a keyed write whose first attempt may have reached the
+    /// engine, retried while the engine is down, is `OutcomeUnknown` with
+    /// its key (never "engine unavailable", which reads as nothing sent).
+    /// Down before anything was sent stays `EngineUnavailable`.
+    #[tokio::test]
+    async fn keyed_once_sent_then_engine_down_is_outcome_unknown() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(json(503, r#"{"error":{"message":"x"}}"#))
+            .mount(&server)
+            .await;
+        let port = server.address().port();
+        let down = EndpointState::Down { permanent: true };
+        let src = Arc::new(SeqEndpoint::new(vec![ready(port, TOKEN, 1), down.clone()]));
+        let ex = exec_on(src);
+        ex.set_idempotency_v1(true);
+        let key = IdempotencyKey::new();
+        let mut call = post_call();
+        call.idempotency_key = Some(key.clone());
+        let e = ex
+            .run(&post_op(), call, &none(), None)
+            .await
+            .expect_err("gave up");
+        assert_eq!(count(&server).await, 1, "sent once, then the engine was down");
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { idempotency_key: Some(ref k), keyed: true, .. } if *k == key),
+            "{e:?}"
+        );
+        // Down from the start: nothing was sent.
+        let ex = exec_on(Arc::new(SeqEndpoint::new(vec![down])));
+        ex.set_idempotency_v1(true);
+        let mut call = post_call();
+        call.idempotency_key = Some(IdempotencyKey::new());
+        let e = ex
+            .run(&post_op(), call, &none(), None)
+            .await
+            .expect_err("down");
+        assert_eq!(e, ApiError::EngineUnavailable { permanent: true });
+        assert_eq!(count(&server).await, 1, "nothing more was sent");
     }
 
     fn post_to(route: &'static str) -> (Operation, Call) {
