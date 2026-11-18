@@ -661,6 +661,71 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.txn_import_demo_backup_fails",
         "Fail the Next Demo Import Backup (developer)",
     ),
+    // P31 D6: the import scenarios run light and dark in one app.
+    dev_action(
+        "dev.imports_demo_reset",
+        "Reset Demo Import (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_file_all",
+        "Demo Import: Add the Whole Base Set (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_backup_fail",
+        "Fail the Next Demo Import Backup (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_not_empty",
+        "Demo Import: Company Has Transactions (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_unmatched",
+        "Demo Import: One Account Matches Nothing (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_close_books",
+        "Close Demo Books for Import (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_block_undo",
+        "Demo Import: Something Blocks Undo (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_no_closing_password",
+        "Demo Import: No Closing-Date Password (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_confirm_closed",
+        "Demo Import: Confirm the Closed Period (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_differences_only",
+        "Demo Import: Toggle Only Differences (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_spot_tick_all",
+        "Demo Import: Tick Every Spot-Check Item (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_fail_commit",
+        "Demo Import: Fail the Next Commit (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_tab_accounts",
+        "Demo Import: Trial Balance Tab (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_tab_receivables",
+        "Demo Import: A/R Tab (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_tab_payables",
+        "Demo Import: A/P Tab (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_tab_inventory",
+        "Demo Import: Inventory Tab (developer)",
+    ),
     // P30: the payroll scenarios run light and dark in one app.
     dev_action("dev.payroll_demo_reset", "Reset Demo Payroll (developer)"),
     dev_action(

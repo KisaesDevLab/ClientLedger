@@ -1,0 +1,81 @@
+# Switch from QuickBooks Desktop (P31) against `clientledger --demo`: the
+# Shoal Creek set (synthetic, fixtures/qbd/shoal-creek) goes through every
+# step: export, files, matches, dates (Two years, from the trial balance's
+# date), the backup and the import with progress, the check that it matches
+# (every difference 0.00, four tabs), Mark verified, the spot-check list and
+# Finish. Then History shows the import. The demo reads each file by its
+# bytes and answers from the set's EXPECTED.toml; the state carries counts and
+# flags only (no names, amounts or file names).
+name: qbd_import
+description: Shoal Creek end to end - files, matches, dates, import, tie-out all 0.00, verify, spot-check, History.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: file.import_qbd
+  - command: dev.imports_demo_reset
+  - assert_state: {key: screen.screen, equals: file.import_qbd}
+  - assert_state: {key: screen.step, equals: source}
+  - assert_state: {key: screen.can_next, equals: true}
+  - assert_exists: {role: label, label: "Export reports from QuickBooks"}
+  - screenshot: export
+  # --- Files ------------------------------------------------------------------
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: files}
+  - assert_state: {key: screen.can_next, equals: false}
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files, equals: 12}
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  - assert_state: {key: screen.files_refused, equals: 0}
+  - assert_state: {key: screen.can_next, equals: true}
+  - screenshot: files
+  # --- Matches ----------------------------------------------------------------
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: mapping}
+  - assert_state: {key: screen.unmapped, equals: 0}
+  - screenshot: matches
+  # --- History and start date -------------------------------------------------
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: dates}
+  - assert_state: {key: screen.conversion_date_set, equals: true}
+  - assert_state: {key: screen.depth, equals: two_years}
+  - screenshot: dates
+  # --- Import -----------------------------------------------------------------
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: import}
+  - screenshot: import
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
+  - assert_state: {key: screen.imported, equals: true}
+  - assert_state: {key: screen.jobs_sent, equals: 1}
+  # --- Check that it matches ----------------------------------------------------
+  - assert_state: {key: screen.tieout_all_zero, equals: true, within_ms: 4000}
+  - assert_state: {key: screen.tieout_differences, equals: 0}
+  - screenshot: tieout
+  - command: dev.imports_demo_tab_receivables
+  - assert_state: {key: screen.tieout_tab, equals: receivables}
+  - screenshot: tieout-receivables
+  - command: dev.imports_demo_tab_inventory
+  - assert_state: {key: screen.tieout_tab, equals: inventory}
+  - command: dev.imports_demo_tab_accounts
+  - assert_state: {key: screen.tieout_tab, equals: accounts}
+  - command: dev.imports_demo_differences_only
+  - assert_state: {key: screen.tieout_rows_shown, equals: 0}
+  - screenshot: tieout-no-differences
+  - command: dev.imports_demo_differences_only
+  - assert_state: {key: screen.can_next, equals: true}
+  # --- Mark verified, spot-check ------------------------------------------------
+  - key: Alt+N
+  - assert_state: {key: screen.verified, equals: true, within_ms: 4000}
+  - assert_state: {key: screen.step, equals: spot_check}
+  - screenshot: spot-check
+  - command: dev.imports_demo_spot_tick_all
+  - assert_state: {key: screen.spot_complete, equals: true}
+  - assert_state: {key: screen.spot_unsaved, equals: false, within_ms: 4000}
+  # --- History ----------------------------------------------------------------
+  - click: {role: button, label: History}
+  - assert_state: {key: screen.view, equals: history}
+  - assert_state: {key: screen.history.committed, equals: 1, within_ms: 4000}
+  - screenshot: history
+  - command: dev.imports_demo_reset
+  - command: file.close_window
+  - wait: {ms: 300}
