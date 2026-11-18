@@ -1000,6 +1000,17 @@ fn same_cell(field: TxnField, first: &str, other: &str) -> bool {
     }
 }
 
+/// The owner's cell that holds a line's amount (B1: sent as typed).
+fn amount_cell(r: &RowCells<'_>, amount: LineAmount) -> String {
+    r.get(match amount {
+        LineAmount::Amount(_) => TxnField::LineAmount,
+        LineAmount::Debit(_) => TxnField::LineDebit,
+        LineAmount::Credit(_) => TxnField::LineCredit,
+    })
+    .unwrap_or_default()
+    .to_string()
+}
+
 fn read_line(r: &RowCells<'_>, doc_type: DocType) -> Result<TxnLine, Vec<RowProblem>> {
     let mut problems = Vec::new();
     let mut push = |field, kind| {
@@ -1094,14 +1105,7 @@ fn read_line(r: &RowCells<'_>, doc_type: DocType) -> Result<TxnLine, Vec<RowProb
             account,
             item,
             description: r.get(TxnField::LineDescription).map(str::to_string),
-            amount_text: r
-                .get(match amount {
-                    LineAmount::Amount(_) => TxnField::LineAmount,
-                    LineAmount::Debit(_) => TxnField::LineDebit,
-                    LineAmount::Credit(_) => TxnField::LineCredit,
-                })
-                .unwrap_or_default()
-                .to_string(),
+            amount_text: amount_cell(r, amount),
             amount,
             tag: r.get(TxnField::LineTag).map(str::to_string),
         }),
