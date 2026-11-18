@@ -169,6 +169,23 @@ pub struct DemoPayroll {
     pub posts_received: u32,
     /// Discards received (B1: none while a post is out or unconfirmed).
     pub discards_received: u32,
+    /// The before-post backups the demo "made" (Q-P30h; no files).
+    pub backups_taken: u32,
+    /// How the next before-post backup answers (scenarios and tests).
+    pub backup_mode: DemoBackup,
+}
+
+/// How the demo answers the next before-post backup (Q-P30h). The
+/// one-shot modes go back to [`DemoBackup::Succeed`] once used.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DemoBackup {
+    /// Made at once.
+    #[default]
+    Succeed,
+    /// The next backup fails (as a missing passphrase would).
+    FailOnce,
+    /// The next backup stays running until released.
+    HoldOnce,
 }
 
 fn conflict(code: &str, details: Value) -> ApiError {
@@ -224,6 +241,19 @@ impl DemoPayroll {
     /// Forgets every import, layout and map (scenario reset).
     pub fn reset(&mut self) {
         *self = DemoPayroll::default();
+    }
+
+    /// The before-post backup (Q-P30h), simulated: no file is written.
+    /// `Some(Ok)` made, `Some(Err)` failed, `None` still running.
+    pub fn backup(&mut self) -> Option<Result<(), ()>> {
+        match std::mem::take(&mut self.backup_mode) {
+            DemoBackup::Succeed => {
+                self.backups_taken += 1;
+                Some(Ok(()))
+            }
+            DemoBackup::FailOnce => Some(Err(())),
+            DemoBackup::HoldOnce => None,
+        }
     }
 
     /// Uploads: the file must be one of the fixtures.

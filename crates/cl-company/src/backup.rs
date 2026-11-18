@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::error::CompanyError;
-use crate::retention::{KEEP_LAST, KEEP_MONTHS, prune_plan};
+use crate::retention::{KEEP_BEFORE_IMPORT, KEEP_LAST, KEEP_MONTHS, prune_plan};
 
 /// What the app writes into `manifest.host` (never interpreted by the
 /// engine; read back by Restore for the colour and flags).
@@ -66,6 +66,7 @@ impl HostMetadata {
                 BackupKind::Backup => "backup",
                 BackupKind::LegacyPortable => "portable",
                 BackupKind::BeforeDelete => "before-delete",
+                BackupKind::BeforeImport => "before-import",
             }
             .into(),
             name: name.into(),
@@ -115,8 +116,9 @@ pub struct BackupRequest {
     pub kind: BackupKind,
     /// Destination folder (created when missing).
     pub dest_dir: PathBuf,
-    /// Prune old backups of this company in `dest_dir` (regular
-    /// backups only).
+    /// Prune old backups of this company and kind in `dest_dir`: regular
+    /// backups by [`prune_company_backups`], before-import ones by
+    /// [`prune_before_import`]; before-delete copies never.
     pub apply_retention: bool,
 }
 
@@ -158,6 +160,7 @@ pub fn backup_file_name(company: &str, at: Timestamp, kind: BackupKind) -> Strin
         BackupKind::Backup => "",
         BackupKind::LegacyPortable => "-portable",
         BackupKind::BeforeDelete => "-before-delete",
+        BackupKind::BeforeImport => "-before-import",
     };
     format!("{stem}-{when}{suffix}.clbackup")
 }
@@ -292,7 +295,7 @@ pub(crate) async fn place_archive(
 /// so older history entries keep loading.
 fn writable(kind: BackupKind) -> Result<(), CompanyError> {
     match kind {
-        BackupKind::Backup | BackupKind::BeforeDelete => Ok(()),
+        BackupKind::Backup | BackupKind::BeforeDelete | BackupKind::BeforeImport => Ok(()),
         BackupKind::LegacyPortable => Err(CompanyError::Metadata),
     }
 }
@@ -358,12 +361,14 @@ pub async fn backup(
         created_at: now,
         kind: req.kind,
     };
-    let apply = req.apply_retention && req.kind == BackupKind::Backup;
     let dest_dir = req.dest_dir.clone();
+    let (apply, kind) = (req.apply_retention, req.kind);
     let pruned = store.update(|l| {
         l.record_backup(req.tenant_id, record.clone());
-        match (apply, l.get_mut(req.tenant_id)) {
-            (true, Some(r)) => prune_company_backups(r, &dest_dir, now),
+        match (apply, kind, l.get_mut(req.tenant_id)) {
+            (true, BackupKind::Backup, Some(r)) => prune_company_backups(r, &dest_dir, now),
+            (true, BackupKind::BeforeImport, Some(r)) => prune_before_import(r, &dest_dir, now),
+            // Before-delete and old portable copies are never pruned.
             _ => Vec::new(),
         }
     })?;
@@ -388,13 +393,44 @@ pub fn prune_company_backups(
     dir: &Path,
     now: Timestamp,
 ) -> Vec<PathBuf> {
+    prune_kind(rec, dir, now, BackupKind::Backup, KEEP_LAST, KEEP_MONTHS)
+}
+
+/// Retention for the automatic backups taken before an import posts
+/// (Q-P30h): the newest [`KEEP_BEFORE_IMPORT`] before-import files of this
+/// company recorded under `dir`; no monthly copies. Regular, before-delete
+/// and portable files are never candidates.
+#[must_use]
+pub fn prune_before_import(
+    rec: &mut cl_settings::CompanyRecord,
+    dir: &Path,
+    now: Timestamp,
+) -> Vec<PathBuf> {
+    prune_kind(
+        rec,
+        dir,
+        now,
+        BackupKind::BeforeImport,
+        KEEP_BEFORE_IMPORT,
+        0,
+    )
+}
+
+fn prune_kind(
+    rec: &mut cl_settings::CompanyRecord,
+    dir: &Path,
+    now: Timestamp,
+    kind: BackupKind,
+    keep_last: usize,
+    keep_months: u32,
+) -> Vec<PathBuf> {
     let candidates: Vec<(PathBuf, Timestamp)> = rec
         .backups
         .iter()
-        .filter(|b| b.kind == BackupKind::Backup && b.path.parent() == Some(dir))
+        .filter(|b| b.kind == kind && b.path.parent() == Some(dir))
         .map(|b| (b.path.clone(), b.created_at))
         .collect();
-    let delete = prune_plan(&candidates, now, KEEP_LAST, KEEP_MONTHS);
+    let delete = prune_plan(&candidates, now, keep_last, keep_months);
     let mut removed = Vec::new();
     for path in delete {
         match std::fs::remove_file(&path) {
@@ -500,10 +536,78 @@ mod tests {
         }
     }
 
+    /// Q-P30h: before-import backups keep only their newest 10 per
+    /// company and folder; regular and before-delete files are untouched,
+    /// and regular retention never deletes a before-import file.
+    #[test]
+    fn before_import_backups_keep_the_newest_ten_q_p30h() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let now = Timestamp::parse_wire("2026-11-17T08:12:00.000Z").expect("ts");
+        let mut rec = cl_settings::CompanyRecord::new(
+            cl_core::ids::TenantId::parse("1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
+            "Ozark",
+            cl_settings::ACCENT_PALETTE[0],
+        );
+        let add = |rec: &mut cl_settings::CompanyRecord, at: Timestamp, kind: BackupKind| {
+            let path = dir.path().join(backup_file_name("Ozark", at, kind));
+            std::fs::write(&path, b"x").expect("write");
+            rec.backups.push(BackupRecord {
+                path,
+                sha256: "0".repeat(64),
+                archive_id: at.to_wire(),
+                created_at: at,
+                kind,
+            });
+        };
+        // 14 before-import files, one a month apart in 2025 and 2026 (a
+        // monthly rule would keep some of the old ones; this one doesn't).
+        for i in 0..14u32 {
+            let (y, m) = if i < 10 { (2026, i + 1) } else { (2025, i - 9) };
+            let at = Timestamp::parse_wire(&format!("{y}-{m:02}-05T08:00:00.000Z")).expect("ts");
+            add(&mut rec, at, BackupKind::BeforeImport);
+        }
+        let old = Timestamp::parse_wire("2020-01-01T08:00:00.000Z").expect("ts");
+        add(&mut rec, old, BackupKind::Backup);
+        add(&mut rec, old, BackupKind::BeforeDelete);
+        assert!(
+            prune_company_backups(&mut rec, dir.path(), now).is_empty(),
+            "regular retention never touches before-import files (one regular file)"
+        );
+        let pruned = prune_before_import(&mut rec, dir.path(), now);
+        assert_eq!(pruned.len(), 4, "{pruned:?}");
+        assert!(
+            pruned
+                .iter()
+                .all(|p| p.to_string_lossy().contains("Ozark-2025")),
+            "the four oldest go: {pruned:?}"
+        );
+        let kept_imports = rec
+            .backups
+            .iter()
+            .filter(|b| b.kind == BackupKind::BeforeImport)
+            .count();
+        assert_eq!(kept_imports, KEEP_BEFORE_IMPORT);
+        assert_eq!(rec.backups.len(), 12, "10 + regular + before-delete");
+        assert_eq!(std::fs::read_dir(dir.path()).expect("dir").count(), 12);
+        assert!(
+            backup_file_name("x", now, BackupKind::BeforeImport)
+                .ends_with("-before-import.clbackup")
+        );
+        let h = HostMetadata::new(
+            BackupKind::BeforeImport,
+            "x",
+            cl_settings::ACCENT_PALETTE[0],
+            CompanyFlags::default(),
+            cl_settings::CompanyPrefs::default(),
+        );
+        assert_eq!(h.kind, "before-import");
+    }
+
     #[test]
     fn portable_copies_are_never_written_q268() {
         assert!(writable(BackupKind::Backup).is_ok());
         assert!(writable(BackupKind::BeforeDelete).is_ok());
+        assert!(writable(BackupKind::BeforeImport).is_ok());
         assert!(matches!(
             writable(BackupKind::LegacyPortable),
             Err(CompanyError::Metadata)

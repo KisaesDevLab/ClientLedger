@@ -11,6 +11,12 @@ use cl_core::Timestamp;
 pub const KEEP_LAST: usize = 10;
 /// Default: one per month for 12 months.
 pub const KEEP_MONTHS: u32 = 12;
+/// Automatic backups taken before an import posts (Q-P30h): only the
+/// newest 10 per company and folder are kept, with no monthly copies.
+/// They are made often (every post) and exist to undo a recent import;
+/// regular backups carry the long history. Before-delete copies are
+/// never pruned (the company they hold is gone).
+pub const KEEP_BEFORE_IMPORT: usize = 10;
 
 fn month_index(t: Timestamp) -> i64 {
     let d = t.as_utc();
