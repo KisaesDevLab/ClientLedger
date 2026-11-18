@@ -1890,31 +1890,21 @@ impl Shell {
             .get(prompt.window)
             .map(crate::windows::Window::title)
             .unwrap_or_default();
-        // A save whose outcome is unknown may already be in the books.
-        let unconfirmed = self
-            .windows
-            .get(prompt.window)
-            .is_some_and(crate::windows::Window::save_unconfirmed);
         let can_save = self
             .windows
             .get(prompt.window)
             .is_none_or(crate::windows::Window::can_save);
+        // A save whose outcome is unknown may already be in the books; a
+        // wizard may have its own words (P30 QA-13).
+        let (message, close_label, keep_label) =
+            crate::windows::close_prompt_text(self.windows.get(prompt.window), &title);
         let mut answer: Option<PromptAnswer> = None;
         egui::Window::new(t("window.prompt.title"))
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
-                ui.label(if !can_save && unconfirmed {
-                    // An import whose post is out or lost: closing keeps it.
-                    crate::i18n::t_with("window.prompt.message_unsettled", &[("title", &title)])
-                } else if !can_save {
-                    crate::i18n::t_with("window.prompt.message_unsent", &[("title", &title)])
-                } else if unconfirmed {
-                    crate::windows::prompt_message_unconfirmed(&title)
-                } else {
-                    crate::windows::prompt_message(&title)
-                });
+                ui.label(message);
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     if can_save {
@@ -1926,15 +1916,10 @@ impl Shell {
                             answer = Some(PromptAnswer::Save);
                         }
                     }
-                    let discard = if can_save {
-                        "window.prompt.discard"
-                    } else {
-                        "window.prompt.close_anyway"
-                    };
-                    if ui.button(t(discard)).clicked() {
+                    if ui.button(close_label).clicked() {
                         answer = Some(PromptAnswer::Discard);
                     }
-                    if ui.button(t("window.prompt.keep")).clicked() {
+                    if ui.button(keep_label).clicked() {
                         answer = Some(PromptAnswer::Keep);
                     }
                 });
