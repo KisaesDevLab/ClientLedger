@@ -1145,7 +1145,14 @@ fn a_posted_duplicate_says_when_it_was_posted() {
     let mut s = screen(&f);
     cmd(&mut s, "dev.payroll_demo_file_onpay_gl_summary");
     next_to(&mut s, Step::Done);
-    let first = f.link.demo_state().expect("demo").payroll.sessions(None).sessions[0].clone();
+    let first = f
+        .link
+        .demo_state()
+        .expect("demo")
+        .payroll
+        .sessions(None)
+        .sessions[0]
+        .clone();
     let day = super::draw::posted_day(first.posted_at.as_deref().expect("posted at"))
         .map(show_date)
         .expect("a date");
@@ -1161,7 +1168,10 @@ fn a_posted_duplicate_says_when_it_was_posted() {
         u.is_duplicate_by_key = true;
     }
     let text = s.duplicate_text().expect("warned");
-    assert!(text.contains(&day) && text.contains("already posted on"), "{text}");
+    assert!(
+        text.contains(&day) && text.contains("already posted on"),
+        "{text}"
+    );
     // Two posted imports of the run: no guess, the undated text.
     let mut twin = first.clone();
     twin.id = PayrollSessionId::parse("00000000-0000-4000-8000-0000000000aa").expect("id");
@@ -1176,8 +1186,7 @@ fn a_posted_duplicate_says_when_it_was_posted() {
     assert_eq!(s.prior_posted_at(), first.posted_at);
     // History: "Posted <date>" on the posted row (the demo's posted time).
     assert!(
-        crate::i18n::t_with("payroll.status.posted_on", &[("date", &day)])
-            .starts_with("Posted ")
+        crate::i18n::t_with("payroll.status.posted_on", &[("date", &day)]).starts_with("Posted ")
     );
 }
 
@@ -1214,10 +1223,18 @@ fn a_default_tag_set_while_review_is_open_applies_at_once() {
     f.link.bus().publish(crate::data_bus::Change::Tags);
     s.poll();
     assert_eq!(s.step, Step::Preview, "still on Review");
-    assert_eq!(s.plan.default_tag, Some(default), "applied without Back/Next");
+    assert_eq!(
+        s.plan.default_tag,
+        Some(default),
+        "applied without Back/Next"
+    );
     assert!(s.untagged.is_none(), "the refusal is worked out again");
     let first = s.plan.lines[0].clone();
-    assert_eq!(s.plan.final_tag(&first), Some(picked), "the hand-picked tag stays");
+    assert_eq!(
+        s.plan.final_tag(&first),
+        Some(picked),
+        "the hand-picked tag stays"
+    );
     let other = s.plan.lines[1].clone();
     assert_eq!(s.plan.final_tag(&other), Some(default));
     assert!(!s.tags_still_needed());
@@ -1274,7 +1291,11 @@ fn engine_down_after_the_post_is_sent_is_outcome_unknown() {
     s.after_post(Err(lost()));
     assert_eq!(s.state()["trouble"], "unknown");
     s.poll();
-    assert_eq!(s.state()["trouble"], "unknown", "not replaced by 'running again'");
+    assert_eq!(
+        s.state()["trouble"],
+        "unknown",
+        "not replaced by 'running again'"
+    );
     let id = s.upload.as_ref().map(|u| u.session).expect("upload");
     assert!(s.is_unsettled(id));
     s.back();
@@ -1292,7 +1313,13 @@ fn engine_down_after_the_post_is_sent_is_outcome_unknown() {
     assert_eq!(s.status_answer, Some(true));
     assert!(!s.post_unsettled && !s.is_unsettled(id));
     assert_eq!(f.link.demo_state().expect("demo").payroll.posts_received, 1);
-    let entries = f.link.demo_state().expect("demo").payroll.sessions(None).sessions;
+    let entries = f
+        .link
+        .demo_state()
+        .expect("demo")
+        .payroll
+        .sessions(None)
+        .sessions;
     assert_eq!(entries.len(), 1, "posted once");
 }
 
@@ -1318,5 +1345,8 @@ fn the_close_prompt_speaks_of_payroll() {
     s.after_post(Err(lost()));
     let id = windows.open_new(CommandId::new(KIND), Box::new(s));
     let (msg, _, _) = crate::windows::close_prompt_text(windows.get(id), "Import Payroll");
-    assert!(msg.contains("History") && !msg.contains("Discard it"), "{msg}");
+    assert!(
+        msg.contains("History") && !msg.contains("Discard it"),
+        "{msg}"
+    );
 }

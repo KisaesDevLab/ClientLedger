@@ -2216,7 +2216,11 @@ pub(crate) mod tests {
             .run(&post_op(), call, &none(), None)
             .await
             .expect_err("gave up");
-        assert_eq!(count(&server).await, 1, "sent once, then the engine was down");
+        assert_eq!(
+            count(&server).await,
+            1,
+            "sent once, then the engine was down"
+        );
         assert!(
             matches!(e, ApiError::OutcomeUnknown { idempotency_key: Some(ref k), keyed: true, .. } if *k == key),
             "{e:?}"

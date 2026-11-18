@@ -1078,22 +1078,20 @@ impl PayrollImportScreen {
             _ => None,
         };
         if u.is_duplicate_by_key && u.run_key.is_some() && u.detected_provider.is_some() {
-            return one(
-                self.prior
-                    .iter()
-                    .filter(posted)
-                    .filter(|s| s.run_key == u.run_key && s.provider == u.detected_provider)
-                    .collect(),
-            );
+            return one(self
+                .prior
+                .iter()
+                .filter(posted)
+                .filter(|s| s.run_key == u.run_key && s.provider == u.detected_provider)
+                .collect());
         }
         if u.is_duplicate && u.file_hash.is_some() {
-            return one(
-                self.prior
-                    .iter()
-                    .filter(posted)
-                    .filter(|s| s.file_hash == u.file_hash)
-                    .collect(),
-            );
+            return one(self
+                .prior
+                .iter()
+                .filter(posted)
+                .filter(|s| s.file_hash == u.file_hash)
+                .collect());
         }
         None
     }
@@ -2532,11 +2530,12 @@ impl Screen for PayrollImportScreen {
         // QA-12, QA-14, QA-15 (flags and counts only).
         s["prior_posted_known"] = json!(self.prior_posted_at().is_some());
         s["tags_still_needed"] = json!(self.tags_still_needed());
-        s["unconfirmed_drafts"] = json!(
-            self.history
-                .as_ref()
-                .map_or(0, |h| h.sessions.iter().filter(|x| self.is_unsettled(x.id)).count())
-        );
+        s["unconfirmed_drafts"] = json!(self.history.as_ref().map_or(0, |h| {
+            h.sessions
+                .iter()
+                .filter(|x| self.is_unsettled(x.id))
+                .count()
+        }));
         s
     }
 }

@@ -1175,7 +1175,10 @@ fn match_ui(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow) -
             Some(p.line),
             t_with(
                 "bank_feed.match.payroll",
-                &[("date", &date), ("amount", &amount_text(ui, p.amount.abs()))],
+                &[
+                    ("date", &date),
+                    ("amount", &amount_text(ui, p.amount.abs())),
+                ],
             ),
         ));
     }

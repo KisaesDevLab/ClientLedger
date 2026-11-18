@@ -581,11 +581,12 @@ fn history_never_reads_the_file_name() {
     assert_eq!(s.posted_at.as_deref(), Some("2025-01-25T02:16:00.000Z"));
     assert_eq!(s.run_key.as_deref(), Some("gusto:abc"));
     assert_eq!(s.file_hash.as_deref(), Some("f00d"));
-    let draft = sessions_from(
-        body.replace("\"posted\"", "\"validated\"").as_bytes(),
-    )
-    .expect("page");
-    assert_eq!(draft.sessions[0].posted_at, None, "only a posted import has one");
+    let draft =
+        sessions_from(body.replace("\"posted\"", "\"validated\"").as_bytes()).expect("page");
+    assert_eq!(
+        draft.sessions[0].posted_at, None,
+        "only a posted import has one"
+    );
     assert_eq!(s.entries.len(), 1);
     assert!(!format!("{page:?}").contains("Test Worker"));
 }
