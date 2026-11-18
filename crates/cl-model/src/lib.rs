@@ -27,6 +27,7 @@ pub mod date_rules;
 pub mod doc_draft;
 pub mod forms;
 pub mod home;
+pub mod imports;
 pub mod inventory;
 pub mod keymap;
 pub mod lists;

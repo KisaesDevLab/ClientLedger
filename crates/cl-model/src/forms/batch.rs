@@ -40,6 +40,7 @@ pub use paste::{
     ImportedRow, MAX_REMEMBERED, Mapping, MappingMemory, ParsedCells, RememberedMapping,
     default_mapping, looks_like_header, mappable_fields, positional_mapping, rows_from_parsed,
 };
+pub(crate) use paste::{normalize_header, signature};
 pub use state::{
     Blocker, EngineChecks, EngineProblem, EngineProblemKind, EngineState, EngineVerdict, OutGroup,
     OutRow, Outgoing, SaveCaps, SectionTotals, SentRow, problems_by_row,

@@ -75,7 +75,7 @@ pub fn looks_like_header(cells: &[&str]) -> bool {
 
 /// A header as compared: lowercase, single spaces, no trailing `.` or `:`,
 /// `#` read as "no".
-fn normalize_header(h: &str) -> String {
+pub(crate) fn normalize_header(h: &str) -> String {
     let lower = h.trim().to_lowercase().replace('#', " no");
     let words: Vec<&str> = lower.split_whitespace().collect();
     words
@@ -179,7 +179,7 @@ impl fmt::Debug for MappingMemory {
     }
 }
 
-fn signature(headers: &[&str]) -> Vec<String> {
+pub(crate) fn signature(headers: &[&str]) -> Vec<String> {
     let mut s: Vec<String> = headers
         .iter()
         .map(|h| normalize_header(h))
