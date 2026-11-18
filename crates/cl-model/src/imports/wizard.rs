@@ -752,8 +752,7 @@ impl Wizard {
             .slots()
             .iter()
             .filter(|s| s.role == Role::Reference)
-            .filter_map(|s| self.files.get(s.key)?.first()?.report_date)
-            .next()
+            .find_map(|s| self.files.get(s.key)?.first()?.report_date)
     }
 
     /// Adds a dropped file to a slot (a single-file slot's file is replaced).

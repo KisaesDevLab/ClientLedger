@@ -35,7 +35,11 @@ fn shortcut_hint(id: &str) -> String {
 /// A step's name in the list (the first step says what the source is).
 pub(crate) fn step_name(source: Source, s: Step) -> String {
     if s == Step::Source {
-        let which = if source.is_conversion() { "qbd" } else { "other" };
+        let which = if source.is_conversion() {
+            "qbd"
+        } else {
+            "other"
+        };
         return t(&format!("imports.step.source.{which}"));
     }
     t(&format!("imports.step.{}", s.key()))
@@ -161,7 +165,11 @@ impl ImportScreen {
                         .and_then(|s| cl_core::CalendarDate::parse_wire(s.get(..10)?).ok())
                         .map(show_date)
                         .unwrap_or_default();
-                    note(ui, tokens, &t_with("imports.backup_taken", &[("date", &when)]));
+                    note(
+                        ui,
+                        tokens,
+                        &t_with("imports.backup_taken", &[("date", &when)]),
+                    );
                 });
             }
         });
@@ -401,9 +409,8 @@ impl ImportScreen {
                     .labelled_by(l.id);
                 ui.end_row();
                 let l = ui.label(t("imports.dates.fiscal_month"));
-                let months: Vec<String> = (1..=12)
-                    .map(|m| t(&format!("imports.month.{m}")))
-                    .collect();
+                let months: Vec<String> =
+                    (1..=12).map(|m| t(&format!("imports.month.{m}"))).collect();
                 let cur = usize::try_from(self.wizard.fy_start_month.clamp(1, 12) - 1).unwrap_or(0);
                 egui::ComboBox::from_id_salt("imports/fy")
                     .selected_text(&months[cur])
@@ -472,7 +479,10 @@ impl ImportScreen {
                 |p| {
                     t_with(
                         "imports.import.progress",
-                        &[("done", &p.done.to_string()), ("total", &p.total.to_string())],
+                        &[
+                            ("done", &p.done.to_string()),
+                            ("total", &p.total.to_string()),
+                        ],
                     )
                 },
             );
@@ -561,9 +571,12 @@ impl ImportScreen {
                 note(ui, tokens, &t("imports.undo.body"));
                 ui.horizontal(|ui| {
                     if ui
-                        .add(egui::Button::new(
-                            RichText::new(t("imports.undo.confirm")).color(tokens.on_warn),
-                        ).fill(tokens.warn))
+                        .add(
+                            egui::Button::new(
+                                RichText::new(t("imports.undo.confirm")).color(tokens.on_warn),
+                            )
+                            .fill(tokens.warn),
+                        )
                         .clicked()
                     {
                         self.undo();
@@ -671,7 +684,10 @@ impl ImportScreen {
                 && self.batch.is_some()
                 && !self.wizard.imported
                 && ui
-                    .add_enabled(!self.locked(), egui::Button::new(t("imports.button.start_over")))
+                    .add_enabled(
+                        !self.locked(),
+                        egui::Button::new(t("imports.button.start_over")),
+                    )
                     .clicked()
             {
                 self.start_over();

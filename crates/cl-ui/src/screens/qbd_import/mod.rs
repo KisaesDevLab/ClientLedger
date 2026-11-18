@@ -39,7 +39,9 @@ use cl_api::imports::{
     AccountMatch, BatchState, BatchStatus, ImportBatch, ImportBatchId, ImportRefusal,
     ImportSessionId, JobAccepted, MatchStatus, TieOut, UploadOutcome, import_refusal,
 };
-use cl_api::{Account, AccountFilter, ApiError, IdempotencyKey, OrphanLabel, RequestGroup, Session};
+use cl_api::{
+    Account, AccountFilter, ApiError, IdempotencyKey, OrphanLabel, RequestGroup, Session,
+};
 use cl_core::ids::AccountId;
 use cl_core::{CalendarDate, Secret};
 use cl_model::CommandId;
@@ -54,10 +56,10 @@ use crate::windows::Screen;
 mod draw;
 pub mod mapping;
 pub mod spot_check;
-pub mod tieout;
-mod wizard;
 #[cfg(test)]
 mod tests;
+pub mod tieout;
+mod wizard;
 
 /// The command and window kind.
 pub const KIND: &str = "file.import_qbd";
@@ -247,8 +249,12 @@ impl SlotFile {
             name: self.name.clone(),
             uploaded: self.outcome.is_some(),
             problems: self.outcome.as_ref().map_or(0, |o| {
-                u32::try_from(o.problems.len().max(usize::try_from(o.session.error_count).unwrap_or(0)))
-                    .unwrap_or(u32::MAX)
+                u32::try_from(
+                    o.problems
+                        .len()
+                        .max(usize::try_from(o.session.error_count).unwrap_or(0)),
+                )
+                .unwrap_or(u32::MAX)
             }),
             report_date: self
                 .outcome
@@ -749,7 +755,6 @@ impl ImportScreen {
             .and_then(|o| d.companies.iter().find(|c| c.tenant_id == o))
             .and_then(|c| c.closed_through)
     }
-
 }
 
 impl Drop for ImportScreen {

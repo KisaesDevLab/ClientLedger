@@ -77,8 +77,15 @@ fn to_import(s: &mut ImportScreen) {
     assert!(s.can_next(), "{}", s.state());
     s.next();
     assert_eq!(s.wizard.step, Step::Dates);
-    assert_eq!(s.date_text, "10/27/2026", "from the reference trial balance");
-    assert_eq!(s.wizard.depth, cl_model::imports::wizard::HistoryDepth::TwoYears, "Q-142");
+    assert_eq!(
+        s.date_text, "10/27/2026",
+        "from the reference trial balance"
+    );
+    assert_eq!(
+        s.wizard.depth,
+        cl_model::imports::wizard::HistoryDepth::TwoYears,
+        "Q-142"
+    );
     assert!(s.can_next(), "{}", s.state());
     s.next();
     assert_eq!(s.wizard.step, Step::Import);
@@ -216,8 +223,9 @@ fn a_closed_period_asks_for_the_password_and_retries_with_it() {
     s.poll();
     assert!(s.closing.dialog_open());
     assert!(s.running.is_none());
-    s.closing.password =
-        crate::screens::company::form::SecretText::from(crate::company::demo::imports::PRACTICE_PASSWORD);
+    s.closing.password = crate::screens::company::form::SecretText::from(
+        crate::company::demo::imports::PRACTICE_PASSWORD,
+    );
     s.submit_password();
     s.poll();
     assert!(!s.closing.dialog_open(), "{}", s.state());

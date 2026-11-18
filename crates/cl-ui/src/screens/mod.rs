@@ -158,7 +158,8 @@ pub(crate) const P29_SCREENS: [crate::shell::MakeScreen; 3] =
 /// P30 screens.
 pub(crate) const P30_SCREENS: [crate::shell::MakeScreen; 1] = [payroll_import::make];
 /// P31: Import from QuickBooks Desktop and from another accounting program.
-pub(crate) const P31_SCREENS: [crate::shell::MakeScreen; 2] = [qbd_import::make, system_import::make];
+pub(crate) const P31_SCREENS: [crate::shell::MakeScreen; 2] =
+    [qbd_import::make, system_import::make];
 
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
 

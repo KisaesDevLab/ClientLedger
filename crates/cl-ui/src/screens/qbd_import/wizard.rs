@@ -170,10 +170,7 @@ impl ImportScreen {
                         std::mem::swap(&mut f, &mut v[i]);
                     }
                 }
-                let answer = self
-                    .uploads
-                    .get_mut(slot)
-                    .and_then(|v| poll(&mut v[i].job));
+                let answer = self.uploads.get_mut(slot).and_then(|v| poll(&mut v[i].job));
                 if let Some(r) = answer {
                     changed = true;
                     self.after_upload(slot, i, r);
@@ -288,9 +285,8 @@ impl ImportScreen {
             self.backup_job = Some(Job::Done(r));
             return;
         }
-        let unavailable = || {
-            cl_company::CompanyError::Api(ApiError::EngineUnavailable { permanent: false })
-        };
+        let unavailable =
+            || cl_company::CompanyError::Api(ApiError::EngineUnavailable { permanent: false });
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             self.backup_failed(&unavailable());
             return;
@@ -397,7 +393,8 @@ impl ImportScreen {
                             closing,
                         ),
                         Running::Undo => {
-                            d.imports.undo(id, &backup, &key, password.as_ref(), closing)
+                            d.imports
+                                .undo(id, &backup, &key, password.as_ref(), closing)
                         }
                     }
                 }
@@ -453,11 +450,13 @@ impl ImportScreen {
             (Running::Undo, Some(id)) => Locked::Undo(id),
             _ => Locked::Commit,
         };
-        let closing = self.link.demo_state().and_then(|d| ImportScreen::demo_closing(&d));
+        let closing = self
+            .link
+            .demo_state()
+            .and_then(|d| ImportScreen::demo_closing(&d));
         if self.closing.failed(e, locked, true, closing) {
             if matches!(locked, Locked::Undo(_)) {
-                self.closing
-                    .set_ask("imports.closing.ask_undo", 1);
+                self.closing.set_ask("imports.closing.ask_undo", 1);
             } else {
                 self.closing.set_ask("imports.closing.ask_import", 1);
             }
@@ -756,8 +755,12 @@ impl ImportScreen {
                 self.start_over();
                 self.uploads.clear();
             }
-            "backup_fail" => d.imports.backup_mode = crate::company::demo::imports::DemoBackup::FailOnce,
-            "backup_hold" => d.imports.backup_mode = crate::company::demo::imports::DemoBackup::HoldOnce,
+            "backup_fail" => {
+                d.imports.backup_mode = crate::company::demo::imports::DemoBackup::FailOnce
+            }
+            "backup_hold" => {
+                d.imports.backup_mode = crate::company::demo::imports::DemoBackup::HoldOnce
+            }
             "not_empty" => d.imports.company_empty = false,
             "unmatched" => d.imports.unmatched = vec!["Old suspense".into()],
             "close_books" => {
@@ -828,13 +831,19 @@ impl ImportScreen {
                 ("qbd_vendor_list", "qbd/shoal-creek/vendor-list.csv"),
                 ("qbd_other_names", "qbd/shoal-creek/other-names.csv"),
                 ("qbd_item_list", "qbd/shoal-creek/item-list.csv"),
-                ("qbd_tb_opening", "qbd/shoal-creek/tb-opening-2023-12-31.csv"),
+                (
+                    "qbd_tb_opening",
+                    "qbd/shoal-creek/tb-opening-2023-12-31.csv",
+                ),
                 ("qbd_journal", "qbd/shoal-creek/journal-2024.csv"),
                 ("qbd_journal", "qbd/shoal-creek/journal-2025-2026.csv"),
                 ("qbd_tb_reference", "qbd/shoal-creek/tb-2026-10-27.csv"),
                 ("qbd_open_invoices", "qbd/shoal-creek/open-invoices.csv"),
                 ("qbd_unpaid_bills", "qbd/shoal-creek/unpaid-bills.csv"),
-                ("qbd_inventory_valuation", "qbd/shoal-creek/inventory-valuation.csv"),
+                (
+                    "qbd_inventory_valuation",
+                    "qbd/shoal-creek/inventory-valuation.csv",
+                ),
             ],
             Source::AccountingPower => vec![
                 ("ap_coa", "imports/accounting-power/coa.csv"),
@@ -842,7 +851,10 @@ impl ImportScreen {
                 ("ap_vendors", "imports/accounting-power/vendors.csv"),
                 ("ap_tb_opening", "imports/accounting-power/tb-opening.csv"),
                 ("ap_gl", "imports/accounting-power/gl.csv"),
-                ("ap_tb_reference", "imports/accounting-power/tb-reference.csv"),
+                (
+                    "ap_tb_reference",
+                    "imports/accounting-power/tb-reference.csv",
+                ),
             ],
             Source::Qbo => vec![
                 ("qbo_coa", "imports/quickbooks-online/coa.csv"),
@@ -850,7 +862,10 @@ impl ImportScreen {
                 ("qbo_vendors", "imports/quickbooks-online/vendors.csv"),
                 ("qbo_tb_opening", "imports/quickbooks-online/tb-opening.csv"),
                 ("qbo_journal", "imports/quickbooks-online/gl.csv"),
-                ("qbo_tb_reference", "imports/quickbooks-online/tb-reference.csv"),
+                (
+                    "qbo_tb_reference",
+                    "imports/quickbooks-online/tb-reference.csv",
+                ),
             ],
             Source::QbdGl => vec![
                 ("qbd_account_list", "imports/qbd-gl/account-list.csv"),

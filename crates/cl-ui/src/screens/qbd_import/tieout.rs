@@ -72,7 +72,11 @@ pub fn tieout_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
                 RichText::new(format!("{}{mark}", sum.difference))
                     .monospace()
                     .size(20.0)
-                    .color(if sum.all_zero { tokens.accent } else { tokens.warn_text }),
+                    .color(if sum.all_zero {
+                        tokens.accent
+                    } else {
+                        tokens.warn_text
+                    }),
             );
             ui.label(
                 RichText::new(t_with(

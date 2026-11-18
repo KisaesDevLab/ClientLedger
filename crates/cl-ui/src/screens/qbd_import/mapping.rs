@@ -68,7 +68,10 @@ fn source_text(m: &AccountMatch) -> String {
 pub fn mapping_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
     let matches: Vec<AccountMatch> = s.matches().into_iter().cloned().collect();
     let c = counts(&matches, |k| s.account_map.contains_key(k));
-    ui.add(egui::Label::new(RichText::new(t("imports.mapping.intro")).color(tokens.text_secondary)).wrap());
+    ui.add(
+        egui::Label::new(RichText::new(t("imports.mapping.intro")).color(tokens.text_secondary))
+            .wrap(),
+    );
     ui.add_space(8.0);
     if matches.is_empty() {
         ui.label(t("imports.mapping.none"));
@@ -85,8 +88,11 @@ pub fn mapping_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
     if c.open > 0 {
         ui.add(
             egui::Label::new(
-                RichText::new(t_with("imports.mapping.open", &[("n", &c.open.to_string())]))
-                    .color(tokens.warn_text),
+                RichText::new(t_with(
+                    "imports.mapping.open",
+                    &[("n", &c.open.to_string())],
+                ))
+                .color(tokens.warn_text),
             )
             .wrap(),
         );

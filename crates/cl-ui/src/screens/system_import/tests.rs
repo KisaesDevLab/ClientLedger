@@ -85,7 +85,11 @@ fn a_reimport_of_the_same_files_is_refused() {
     assert!(again.command(CommandId::new("dev.imports_demo_file_all")));
     again.poll();
     assert!(
-        again.uploads.values().flatten().any(|f| f.refusal.is_some()),
+        again
+            .uploads
+            .values()
+            .flatten()
+            .any(|f| f.refusal.is_some()),
         "{}",
         again.state()
     );

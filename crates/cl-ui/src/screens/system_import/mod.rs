@@ -38,9 +38,8 @@ pub fn make(
     _open: Option<(cl_core::ids::TenantId, String)>,
     today: CalendarDate,
 ) -> Option<Box<dyn Screen>> {
-    (kind.as_str() == KIND).then(|| {
-        Box::new(ImportScreen::new(Arc::clone(link), today, SOURCES[0])) as Box<_>
-    })
+    (kind.as_str() == KIND)
+        .then(|| Box::new(ImportScreen::new(Arc::clone(link), today, SOURCES[0])) as Box<_>)
 }
 
 #[cfg(test)]
