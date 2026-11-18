@@ -123,9 +123,9 @@ is, so nothing is lost. Backups taken before imports are kept (the newest 10).
 
 ## What to know about taxes
 
-- **1099s.** For the year you switch, file your 1099s from QuickBooks. The
-  1099 amounts are not carried over; ClientLedger's 1099 reports are right
-  for payments made from the switch date on, and for the year after.
+- **1099s.** For the year you switch, file your 1099s from QuickBooks.
+  Payments from before the switch came over as history, but the conversion
+  year's 1099s are not prepared here.
 - **Sales tax on cash basis.** If you report sales tax when customers pay
   (cash basis), a payment received in ClientLedger on an invoice that was
   imported is **not** included in the sales tax report. Report those
