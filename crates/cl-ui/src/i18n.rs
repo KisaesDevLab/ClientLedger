@@ -147,6 +147,8 @@ mod inventory;
 // P25: Import Bank File.
 mod bank_import;
 mod payroll;
+// P31: QuickBooks Desktop and other-program imports.
+mod imports;
 mod reconcile;
 // P28: the report window.
 mod report_builder;
@@ -164,7 +166,7 @@ mod auth;
 mod sensitive;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 59] = [
+const TABLES: [&[(&str, &str)]; 60] = [
     audit::ENGLISH,
     auth::ENGLISH,
     sensitive::ENGLISH,
@@ -218,6 +220,7 @@ const TABLES: [&[(&str, &str)]; 59] = [
     inventory::ENGLISH,
     bank_import::ENGLISH,
     payroll::ENGLISH,
+    imports::ENGLISH,
     reconcile::ENGLISH,
     reports::ENGLISH,
     report_builder::ENGLISH,
