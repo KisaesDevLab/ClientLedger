@@ -79,3 +79,19 @@ steps:
   - command: dev.imports_demo_reset
   - command: file.close_window
   - wait: {ms: 300}
+
+# `ui-check qbd_import --compare`: the mockup (QBDImport) is the check step.
+compare:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: file.import_qbd
+  - command: dev.imports_demo_reset
+  - key: Alt+N
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
+  - assert_state: {key: screen.tieout_all_zero, equals: true, within_ms: 4000}

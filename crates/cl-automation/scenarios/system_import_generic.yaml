@@ -53,6 +53,8 @@ steps:
   - key: Alt+N
   - assert_state: {key: screen.step, equals: files}
   - command: dev.imports_demo_file_all
+  - click: {role: button, label: Remove, index: 3}
+  - assert_state: {key: screen.files, equals: 4, within_ms: 4000}
   - dialog_answer: {paths: ["{scenario_dir}/../../../fixtures/imports/generic-altered/gl.csv"]}
   - click: {role: button, label: Add file for General Ledger}
   - assert_state: {key: screen.files_uploaded, equals: 5, within_ms: 6000}

@@ -46,8 +46,8 @@ steps:
   - key: Alt+N
   - assert_state: {key: screen.step, equals: files}
   - command: dev.imports_demo_file_all
-  - assert_state: {key: screen.files_refused, equals: 6, within_ms: 6000}
-  - assert_exists: {label_contains: "imported before"}
+  - assert_state: {key: screen.files_refused, equals: 5, within_ms: 6000}
+  - assert_exists: {label_contains: "imported before", index: 0}
   - assert_state: {key: screen.can_next, equals: false}
   - screenshot: refused
   - command: dev.imports_demo_reset

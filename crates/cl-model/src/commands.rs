@@ -662,10 +662,7 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Fail the Next Demo Import Backup (developer)",
     ),
     // P31 D6: the import scenarios run light and dark in one app.
-    dev_action(
-        "dev.imports_demo_reset",
-        "Reset Demo Import (developer)",
-    ),
+    dev_action("dev.imports_demo_reset", "Reset Demo Import (developer)"),
     dev_action(
         "dev.imports_demo_file_all",
         "Demo Import: Add the Whole Base Set (developer)",
