@@ -45,6 +45,7 @@ mod contract_finance_charges;
 mod contract_harness;
 mod contract_home;
 mod contract_idempotency;
+mod contract_imports;
 mod contract_inventory;
 mod contract_invoices;
 mod contract_items;
@@ -86,6 +87,8 @@ mod contract_tags;
 mod contract_team;
 mod contract_templates;
 mod contract_thresholds_1099;
+#[path = "../support/imports_expect.rs"]
+mod imports_expect;
 #[path = "../support/payroll_expect.rs"]
 mod payroll_expect;
 // A09: `.clreport` transfer (U-220, WP-A) and the tenant-archive round
@@ -1065,6 +1068,64 @@ fn main() -> std::process::ExitCode {
         (
             "lifecycle::ten_switches_under_two_seconds",
             contract_lifecycle::ten_switches_under_two_seconds,
+        ),
+        // P31 QBD and other-system imports (U-260 to U-268): PENDING until
+        // the pin has the import capabilities.
+        (
+            "imports::qbd_conversion_ties_out",
+            contract_imports::qbd_conversion_ties_out,
+        ),
+        (
+            "imports::altered_repointed_two_accounts",
+            contract_imports::altered_repointed_two_accounts,
+        ),
+        (
+            "imports::altered_open_item_ar_and_history",
+            contract_imports::altered_open_item_ar_and_history,
+        ),
+        (
+            "imports::undo_restores_snapshot",
+            contract_imports::undo_restores_snapshot,
+        ),
+        (
+            "imports::recommit_after_undo",
+            contract_imports::recommit_after_undo,
+        ),
+        (
+            "imports::kill_mid_commit",
+            contract_imports::kill_mid_commit,
+        ),
+        (
+            "imports::system_accounting_power_ties_out",
+            contract_imports::system_accounting_power_ties_out,
+        ),
+        (
+            "imports::system_qbo_ties_out",
+            contract_imports::system_qbo_ties_out,
+        ),
+        (
+            "imports::system_qbd_gl_ties_out",
+            contract_imports::system_qbd_gl_ties_out,
+        ),
+        (
+            "imports::system_generic_ties_out",
+            contract_imports::system_generic_ties_out,
+        ),
+        (
+            "imports::generic_altered",
+            contract_imports::generic_altered,
+        ),
+        (
+            "imports::reimport_refused_409",
+            contract_imports::reimport_refused_409,
+        ),
+        (
+            "imports::overlap_refused_409",
+            contract_imports::overlap_refused_409,
+        ),
+        (
+            "imports::reimport_after_undo_allowed",
+            contract_imports::reimport_after_undo_allowed,
         ),
         // P30 payroll import (U-242 to U-251): PENDING until the pin has
         // the three payroll capabilities.
