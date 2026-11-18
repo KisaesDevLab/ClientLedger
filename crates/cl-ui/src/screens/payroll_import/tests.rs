@@ -939,7 +939,10 @@ fn click_node(
     use eframe::egui::{Event, Modifiers, PointerButton, pos2};
     let b = node.bounds().expect("bounds");
     #[allow(clippy::cast_possible_truncation)] // pixel positions
-    let at = pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32);
+    let at = pos2(
+        f64::midpoint(b.x0, b.x1) as f32,
+        f64::midpoint(b.y0, b.y1) as f32,
+    );
     let press = |pressed| Event::PointerButton {
         pos: at,
         button: PointerButton::Primary,
@@ -985,8 +988,8 @@ fn every_payroll_service_can_be_picked_from_the_list() {
                 !matches!(n.role(), Role::Label | Role::ComboBox)
                     && (n.label() == Some(name.as_str()) || n.value() == Some(name.as_str()))
             })
-            .map(|(_, n)| n.clone())
-            .unwrap_or_else(|| panic!("{name} in the open list"));
+            .map_or_else(|| panic!("{name} in the open list"), |(_, n)| n.clone());
+
         nodes = click_node(&mut s, &ctx, &item);
         assert_eq!(s.provider, p, "{name} picked");
     }

@@ -1147,9 +1147,6 @@ impl PayrollImportScreen {
     }
 }
 
-/// The height of a column list: every column (plus "none") when it fits in
-/// most of the window, else the most that do (the list scrolls).
-#[allow(clippy::float_arithmetic)] // pixels for egui, never money (M10)
 /// `key` with `{n}`, or its `.one` form for exactly one.
 pub(crate) fn t_count(key: &str, n: usize) -> String {
     let one = format!("{key}.one");
@@ -1165,12 +1162,11 @@ pub(crate) fn t_count(key: &str, n: usize) -> String {
 pub(crate) fn note_groups(messages: &[cl_api::payroll::ValidationMessage]) -> Vec<(String, usize)> {
     let mut out: Vec<(String, usize)> = Vec::new();
     for m in messages.iter().filter(|m| !m.is_error) {
-        let i = match out.iter().position(|(c, _)| *c == m.code) {
-            Some(i) => i,
-            None => {
-                out.push((m.code.clone(), 0));
-                out.len() - 1
-            }
+        let i = if let Some(i) = out.iter().position(|(c, _)| *c == m.code) {
+            i
+        } else {
+            out.push((m.code.clone(), 0));
+            out.len() - 1
         };
         if m.row_number.is_some() {
             out[i].1 += 1;
@@ -1188,6 +1184,7 @@ fn note_reason(code: &str) -> String {
         t("payroll.note.other")
     }
 }
+
 /// An amount in a preview column, right-aligned so the figures line up
 /// (QA-11); the column is at least as wide as a large amount.
 fn amount_cell(ui: &mut Ui, text: RichText) {
@@ -1200,11 +1197,15 @@ fn amount_cell(ui: &mut Ui, text: RichText) {
         },
     );
 }
+
+/// The height of a column list: every column (plus "none") when it fits in
+/// most of the window, else the most that do (the list scrolls).
 fn column_list_height(ui: &Ui, columns: usize) -> f32 {
     list_height(ui, columns.saturating_add(1))
 }
 
 /// A drop-down list tall enough for `items` rows, capped to the window.
+#[allow(clippy::float_arithmetic)] // pixels for egui, never money (M10)
 fn list_height(ui: &Ui, items: usize) -> f32 {
     let row = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
     let rows = u16::try_from(items).unwrap_or(u16::MAX);
