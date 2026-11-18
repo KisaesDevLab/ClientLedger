@@ -1072,14 +1072,19 @@ mod tests {
         assert_eq!(rows[0].diff_text, "0.0040");
         assert!(!rows[0].zero);
         let tile = st.tile(Tab::TrialBalance, &t);
-        assert_eq!(tile.figure, "2 differ", "no total is derived");
+        // No total is derived: the count of what differs (both accounts and
+        // the history A/R check), as the line under it says.
+        assert_eq!(tile.figure, "3 differ");
+        assert!(tile.under.ends_with("· 3 differ"), "{}", tile.under);
         assert!(!tile.tick && !tile.matches);
         assert_eq!(tile.head, "Trial balance at 10/27/2026");
         // ✓ only on the engine's word, whatever the rows say.
         let t = tie(vec![account("1000", "0")], false);
         let tile = TieState::new(&t).tile(Tab::TrialBalance, &t);
         assert!(!tile.tick);
-        assert_eq!(tile.figure, "0.00");
+        // The accounts tie but the history A/R check does not: the tile
+        // says so, as its line does.
+        assert_eq!(tile.figure, "1 differs");
     }
 
     /// The trial balance tile's "N differ" and the line under it count the
@@ -1094,13 +1099,16 @@ mod tests {
         ];
         let st = TieState::new(&t);
         let tile = st.tile(Tab::TrialBalance, &t);
+        // The account and the check row.
         assert_eq!(st.differences(Tab::TrialBalance), 2);
         assert_eq!(tile.figure, "2 differ");
         assert!(tile.under.ends_with("· 2 differ"), "{}", tile.under);
         let t = tie(vec![account("1000", "5.00")], false);
-        let tile = TieState::new(&t).tile(Tab::TrialBalance, &t);
-        assert_eq!(tile.figure, "1 differs");
-        assert!(tile.under.ends_with("· 1 differs"), "{}", tile.under);
+        let st = TieState::new(&t);
+        let tile = st.tile(Tab::TrialBalance, &t);
+        assert_eq!(st.differences(Tab::TrialBalance), 2);
+        assert_eq!(tile.figure, "2 differ");
+        assert!(tile.under.ends_with("· 2 differ"), "{}", tile.under);
     }
 
     #[test]
