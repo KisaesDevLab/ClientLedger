@@ -87,15 +87,20 @@ impl Source {
         matches!(self, Source::AccountingPower | Source::Generic)
     }
 
-    /// The steps the wizard shows for this source.
+    /// The steps the wizard shows for this source. A QBD conversion follows
+    /// the mockup (export, files, matches, then history and start date; the
+    /// conversion date comes from the reference trial balance the engine
+    /// read, and the date checks of the files run on the dates step). The
+    /// other sources' files carry no date, so the date is asked first and
+    /// sent with each upload.
     #[must_use]
     pub fn steps(self) -> &'static [Step] {
         match self {
             Source::Qbd => &[
                 Step::Source,
-                Step::Dates,
                 Step::Files,
                 Step::Mapping,
+                Step::Dates,
                 Step::Import,
                 Step::TieOut,
                 Step::SpotCheck,
@@ -634,6 +639,18 @@ impl Blocker {
     }
 }
 
+/// Which file checks a step runs (a QBD conversion splits them: the files
+/// step checks what the files are, the dates step what they are dated).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FileCheck {
+    /// Every check (sources whose date is asked before the files).
+    All,
+    /// Missing, unread and repeated files, not their dates.
+    Undated,
+    /// The dates and the depth's opening trial balance only.
+    Dated,
+}
+
 /// The wizard's state. Every engine fact (uploads, mapping, commit,
 /// tie-out) is set by the screen from the engine's answers.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -727,6 +744,18 @@ impl Wizard {
         }
     }
 
+    /// The date the engine read from the reference trial balance (a QBD
+    /// conversion's date is prefilled from it).
+    #[must_use]
+    pub fn reference_date(&self) -> Option<CalendarDate> {
+        self.source
+            .slots()
+            .iter()
+            .filter(|s| s.role == Role::Reference)
+            .filter_map(|s| self.files.get(s.key)?.first()?.report_date)
+            .next()
+    }
+
     /// Adds a dropped file to a slot (a single-file slot's file is replaced).
     pub fn drop_file(&mut self, slot: &'static str, file: DroppedFile) {
         let multiple = self
@@ -759,9 +788,21 @@ impl Wizard {
                     if self.source.requires_empty_company() && self.company_has_activity {
                         out.push(Blocker::CompanyNotEmpty);
                     }
+                    // QBD: the files came first; the checks that depend on
+                    // the dates and depth run here.
+                    if self.source.is_conversion() {
+                        self.file_blockers(&mut out, FileCheck::Dated);
+                    }
                 }
             },
-            Step::Files => self.file_blockers(&mut out),
+            Step::Files => {
+                let which = if self.source.is_conversion() {
+                    FileCheck::Undated
+                } else {
+                    FileCheck::All
+                };
+                self.file_blockers(&mut out, which);
+            }
             Step::Mapping => {
                 if !self.mapping_complete {
                     out.push(Blocker::MappingIncomplete);
@@ -781,25 +822,35 @@ impl Wizard {
         out
     }
 
-    fn file_blockers(&self, out: &mut Vec<Blocker>) {
+    fn file_blockers(&self, out: &mut Vec<Blocker>, which: FileCheck) {
+        let undated = which != FileCheck::Dated;
+        let dated = which != FileCheck::Undated;
         for slot in self.source.slots() {
             let files = self.files.get(slot.key).map_or(&[][..], Vec::as_slice);
+            // The opening trial balance is required by the depth, which a
+            // QBD conversion chooses after the files.
+            let by_depth = slot.need == Need::TwoYearsOnly;
             if files.is_empty() {
-                if self.is_required(slot) {
+                if self.is_required(slot) && (if by_depth { dated } else { undated }) {
                     out.push(Blocker::MissingFile { slot: slot.key });
                 }
                 continue;
             }
+            if !dated {
+                if !slot.multiple && files.len() > 1 {
+                    out.push(Blocker::OneFileOnly { slot: slot.key });
+                }
+                if files.iter().any(|f| !f.uploaded) {
+                    out.push(Blocker::NotUploaded { slot: slot.key });
+                } else if files.iter().any(|f| f.problems > 0) {
+                    out.push(Blocker::RowProblems { slot: slot.key });
+                }
+                if which == FileCheck::Undated {
+                    continue;
+                }
+            }
             if slot.date == DateRule::Opening && self.expected_date(slot).is_none() {
                 out.push(Blocker::NoOpeningDate);
-            }
-            if !slot.multiple && files.len() > 1 {
-                out.push(Blocker::OneFileOnly { slot: slot.key });
-            }
-            if files.iter().any(|f| !f.uploaded) {
-                out.push(Blocker::NotUploaded { slot: slot.key });
-            } else if files.iter().any(|f| f.problems > 0) {
-                out.push(Blocker::RowProblems { slot: slot.key });
             }
             // Sources whose files carry no date get the wizard's date sent
             // with the upload, so only a date the engine read can differ.
@@ -1071,32 +1122,24 @@ mod tests {
         w
     }
 
+    /// The mockup's order: export, files, matches, history and start date,
+    /// import, check, spot-check.
     #[test]
     fn walking_the_qbd_wizard() {
         let today = day(TODAY);
         let mut w = Wizard::new(Source::Qbd, 1);
         assert!(w.next(today), "source step has no blocker");
-        assert_eq!(w.step, Step::Dates);
-        assert_eq!(w.blockers(today), vec![Blocker::NoConversionDate]);
-        assert!(!w.next(today));
-        w.conversion_date = Some(day("2026-12-01"));
-        assert_eq!(
-            w.blockers(today),
-            vec![Blocker::Dates(DateProblem::ConversionInFuture)]
-        );
-        w.conversion_date = Some(day("2026-10-27"));
-        w.company_has_activity = true;
-        assert_eq!(w.blockers(today), vec![Blocker::CompanyNotEmpty]);
-        w.company_has_activity = false;
-        assert!(w.next(today));
         assert_eq!(w.step, Step::Files);
         let missing = w.blockers(today);
         assert!(missing.contains(&Blocker::MissingFile {
             slot: "qbd_open_invoices"
         }));
-        assert!(missing.contains(&Blocker::MissingFile {
-            slot: "qbd_tb_opening"
-        }));
+        assert!(
+            !missing.contains(&Blocker::MissingFile {
+                slot: "qbd_tb_opening"
+            }),
+            "the depth is chosen later"
+        );
         assert!(!missing.contains(&Blocker::MissingFile {
             slot: "qbd_other_names"
         }));
@@ -1107,13 +1150,38 @@ mod tests {
             "no inventory balance"
         );
         let mut w2 = qbd_ready();
+        w2.conversion_date = None;
         w2.step = Step::Files;
         assert!(w2.can_continue(today));
+        assert_eq!(w2.reference_date(), Some(day("2026-10-27")));
         w2.next(today);
         assert_eq!(w2.step, Step::Mapping);
         assert_eq!(w2.blockers(today), vec![Blocker::MappingIncomplete]);
         w2.mapping_complete = true;
         assert!(w2.next(today));
+        assert_eq!(w2.step, Step::Dates);
+        assert_eq!(w2.blockers(today), vec![Blocker::NoConversionDate]);
+        assert!(!w2.next(today));
+        w2.conversion_date = Some(day("2026-12-01"));
+        assert!(
+            w2.blockers(today)
+                .contains(&Blocker::Dates(DateProblem::ConversionInFuture))
+        );
+        w2.conversion_date = w2.reference_date();
+        w2.company_has_activity = true;
+        assert_eq!(w2.blockers(today), vec![Blocker::CompanyNotEmpty]);
+        w2.company_has_activity = false;
+        w2.files.remove("qbd_tb_opening");
+        assert_eq!(
+            w2.blockers(today),
+            vec![Blocker::MissingFile {
+                slot: "qbd_tb_opening"
+            }],
+            "two years needs the opening balances"
+        );
+        w2.depth = HistoryDepth::All;
+        assert!(w2.next(today));
+        assert_eq!(w2.step, Step::Import);
         assert_eq!(w2.blockers(today), vec![Blocker::NotImported]);
         w2.imported = true;
         assert!(w2.next(today));
@@ -1134,7 +1202,7 @@ mod tests {
     fn all_history_needs_no_opening_tb_but_inventory_needs_the_valuation() {
         let today = day(TODAY);
         let mut w = qbd_ready();
-        w.step = Step::Files;
+        w.step = Step::Dates;
         w.files.remove("qbd_tb_opening");
         assert_eq!(
             w.blockers(today),
@@ -1144,6 +1212,7 @@ mod tests {
         );
         w.depth = HistoryDepth::All;
         assert!(w.can_continue(today));
+        w.step = Step::Files;
         w.files.remove("qbd_inventory_valuation");
         assert!(w.can_continue(today));
         w.has_inventory = true;
@@ -1181,6 +1250,8 @@ mod tests {
         let mut w = qbd_ready();
         w.step = Step::Files;
         w.drop_file("qbd_open_invoices", file(Some("2026-10-26")));
+        assert!(w.can_continue(today), "dates are checked on the dates step");
+        w.step = Step::Dates;
         w.drop_file("qbd_tb_opening", file(Some("2024-12-31")));
         let b = w.blockers(today);
         assert!(b.contains(&Blocker::WrongDate {
