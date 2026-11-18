@@ -150,7 +150,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bank_feed.match.forbidden", "Matching isn't available for your role."),
     ("bank_feed.match.reading", "Looking for entries in your books..."),
     ("bank_feed.match.none", "No entry in your books fits this bank line."),
-    ("bank_feed.match.payroll", "Payroll bank line"),
+    ("bank_feed.match.payroll", "Payroll \u{2014} pay date {date} \u{b7} {amount}"),
     ("bank_feed.txn.check", "Check"),
     ("bank_feed.txn.expense", "Expense"),
     ("bank_feed.txn.bill_payment", "Bill payment"),
