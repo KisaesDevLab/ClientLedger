@@ -156,7 +156,9 @@ pub fn bad_row_posts_nothing(h: &Harness) {
         .unwrap_or_else(|| panic!("{:?}", up.problems));
     assert_eq!(p.row_number, 5, "the entry's first row (header = 1)");
     assert_eq!(up.total_rows, 5, "data rows");
-    assert_eq!(up.documents, Some(3));
+    // The engine counts the documents it could read: the unbalanced entry
+    // is not one of them.
+    assert_eq!(up.documents, Some(2));
     let id = h
         .run(it.create_batch(up.session))
         .unwrap_or_else(|e| panic!("batch: {e}"));
