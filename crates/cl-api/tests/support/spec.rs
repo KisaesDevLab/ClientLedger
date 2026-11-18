@@ -49,7 +49,9 @@ use sha2::{Digest, Sha256};
 /// the pinned spec until PR-F merges and the pin moves; remove them then.
 /// Since pin b73cdc36 (U-23, `recovery-key-v1`) the recovery-key rotate
 /// route is in the spec.
-pub const OUTSIDE_SPEC: [(&str, &str); 15] = [
+/// Since pin a3d9a509 (engine PRs #73, #75-#77, U-261 to U-266) the import
+/// batch create, list, read, commit and undo routes are.
+pub const OUTSIDE_SPEC: [(&str, &str); 10] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -58,13 +60,8 @@ pub const OUTSIDE_SPEC: [(&str, &str); 15] = [
     ("PUT", "/api/v1/desktop/session-secrets"),
     ("GET", "/api/v1/desktop/session-secrets"),
     ("DELETE", "/api/v1/desktop/session-secrets/{name}"),
-    // P31 (U-261, U-267): the import batch routes, outside the pinned spec
-    // until engine E1 and E3 merge and the pin moves; remove them then.
-    ("POST", "/api/v1/imports/batches"),
-    ("GET", "/api/v1/imports/batches"),
-    ("GET", "/api/v1/imports/batches/{id}"),
-    ("POST", "/api/v1/imports/batches/{id}/commit"),
-    ("POST", "/api/v1/imports/batches/{id}/undo"),
+    // P31 (U-267): the tie-out routes, outside the pinned spec until engine
+    // E3 merges and the pin moves; remove them then.
     ("POST", "/api/v1/imports/batches/{id}/tieout"),
     ("POST", "/api/v1/imports/batches/{id}/verify"),
     ("PUT", "/api/v1/imports/batches/{id}/spot-check"),
