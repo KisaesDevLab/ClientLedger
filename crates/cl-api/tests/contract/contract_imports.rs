@@ -727,7 +727,16 @@ fn system_ties_out(h: &Harness, set: &str) {
     if !tieout(h) {
         return;
     }
-    assert_ties_out(&h.run(s.imports().tieout(id)).expect("tieout"), set);
+    let t = h.run(s.imports().tieout(id)).expect("tieout");
+    assert_ties_out(&t, set);
+    // Verify (E3, live): verified, the tie-out kept, again answers the same.
+    let v = h.run(s.imports().verify(id)).expect("verify");
+    assert!(v.batch.is_verified(), "{set}");
+    assert!(v.tieout.all_zero && v.tieout.verified_at.is_some(), "{set}");
+    let again = h.run(s.imports().verify(id)).expect("verify again");
+    assert_eq!(again.batch.verified_at, v.batch.verified_at, "{set}");
+    let kept = h.run(s.imports().tieout(id)).expect("kept tie-out");
+    assert_eq!(kept.verified_at, v.tieout.verified_at, "{set}");
 }
 
 /// Acceptance 4: Accounting Power ties out.

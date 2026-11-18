@@ -154,9 +154,19 @@ fn batch_seed(id: ImportBatchId) -> u128 {
 }
 
 fn saved(i: &spot_check::Item) -> SpotCheckItem {
+    // The engine takes labels up to 300 characters: a long name is cut so
+    // the list still saves.
+    let mut label = label(i);
+    if let Some((at, _)) = label
+        .char_indices()
+        .nth(cl_api::imports::MAX_SPOT_LABEL_CHARS - 1)
+    {
+        label.truncate(at);
+        label.push('…');
+    }
     SpotCheckItem {
         key: i.key.clone(),
-        label: label(i),
+        label,
         done: i.done,
         note: i.note.clone(),
     }
@@ -415,6 +425,23 @@ pub fn spot_check_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_long_label_is_cut_to_what_the_engine_takes() {
+        let item = spot_check::Item {
+            key: "sample:invoice:x".into(),
+            kind: spot_check::Kind::Sample,
+            subject: Some("N".repeat(400)),
+            done: false,
+            note: String::new(),
+        };
+        let s = saved(&item);
+        assert_eq!(
+            s.label.chars().count(),
+            cl_api::imports::MAX_SPOT_LABEL_CHARS
+        );
+        assert!(s.label.ends_with('…'));
+    }
 
     #[test]
     fn every_spot_check_kind_has_words() {
