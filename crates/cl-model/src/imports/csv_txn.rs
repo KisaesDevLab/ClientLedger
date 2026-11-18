@@ -278,80 +278,92 @@ pub enum AmountProblem {
 /// Accepted: `$`, `,` thousands separators, `(x)` for negative, a leading
 /// or trailing `-`, `$-5`, U+2212 for minus, non-breaking and other spaces
 /// (stripped); in a signed column (`signed`), a trailing `CR` (negative) or
-/// `DR` (positive). Rejected: exponents, more than four decimal places,
-/// `-(5)`, a comma after the decimal point (`1.234,56`).
+/// `DR` (positive). Blank, `-`, `$`, `$-` and `-$` are no amount
+/// (`Ok(None)`). Rejected, exactly as the engine refuses them (review B1;
+/// nothing is reinterpreted): exponents, more than four decimal places once
+/// trailing zeros are dropped, two signs (`-(5)`, `(5)CR`, `-5CR`),
+/// thousands groups that aren't three digits (`1,23`, `12,34`, `1,2,3`),
+/// a comma decimal (`1.234,56`).
 ///
-/// The entered scale is kept (`1,234.50` → `1234.50`).
+/// The entered scale is kept (`1,234.50` → `1234.50`). The screen sends
+/// the owner's own cell text to the engine (see [`TxnLine::amount_text`]),
+/// so the engine's parser has the last word on every amount.
 ///
 /// # Errors
 /// [`AmountProblem`] when the cell isn't an amount.
 pub fn parse_amount(text: &str, signed: bool) -> Result<Option<Decimal>, AmountProblem> {
+    // The engine strips JS `\s` plus U+2007 and U+202F; U+0085 (NEL) is not
+    // in `\s`, so it stays and the cell is refused, as there.
     let mut s: String = text
         .chars()
-        .filter(|c| !c.is_whitespace() && *c != '\u{a0}' && *c != '\u{202f}')
+        .filter(|c| !(c.is_whitespace() && *c != '\u{85}') && *c != '\u{feff}')
         .map(|c| if c == '\u{2212}' { '-' } else { c })
         .collect();
-    if s.is_empty() {
+    // Blank, or the accounting zero `-` (with or without `$`): no amount.
+    if matches!(s.as_str(), "" | "-" | "$" | "$-" | "-$") {
         return Ok(None);
     }
     let mut negative = false;
     if signed {
         let upper = s.to_ascii_uppercase();
-        if upper.ends_with("CR") {
-            negative = true;
+        if upper.ends_with("CR") || upper.ends_with("DR") {
+            negative = upper.ends_with("CR");
             s.truncate(s.len() - 2);
-        } else if upper.ends_with("DR") {
-            s.truncate(s.len() - 2);
+            if s.is_empty() {
+                return Err(AmountProblem::Invalid);
+            }
         }
     }
-    let mut signs = 0;
-    if s.starts_with('(') && s.ends_with(')') && s.len() >= 2 {
-        negative = !negative;
+    // A trailing CR is a sign (so `(5)CR` and `-5CR` have two); DR is not.
+    let mut signs = u8::from(negative);
+    if s.len() >= 2 && s.starts_with('(') && s.ends_with(')') {
+        negative = true;
         signs += 1;
         s = s[1..s.len() - 1].to_string();
+        // No sign of any kind inside the parentheses: `(-5)`, `(5-)`.
+        if s.contains(['-', '(', ')']) {
+            return Err(AmountProblem::Invalid);
+        }
     }
-    // `$` and one minus, in either order, in front; or one minus behind.
+    // A sign before the parentheses (`-(5)`) is caught here.
+    if s.contains(['(', ')']) {
+        return Err(AmountProblem::Invalid);
+    }
+    // One `$` in front, before or after a leading minus; or a minus behind.
     let mut body = s.as_str();
-    let mut dollar = false;
-    loop {
-        if let Some(rest) = body.strip_prefix('$').filter(|_| !dollar) {
-            dollar = true;
+    if let Some(rest) = body.strip_prefix("-$").or_else(|| body.strip_prefix("$-")) {
+        body = rest;
+        negative = true;
+        signs += 1;
+    } else {
+        body = body.strip_prefix('$').unwrap_or(body);
+        if let Some(rest) = body.strip_prefix('-') {
             body = rest;
-        } else if let Some(rest) = body.strip_prefix('-') {
-            negative = !negative;
+            negative = true;
             signs += 1;
-            body = rest;
-        } else {
-            break;
         }
     }
     if let Some(rest) = body.strip_suffix('-') {
-        negative = !negative;
-        signs += 1;
         body = rest;
+        negative = true;
+        signs += 1;
     }
     if signs > 1 {
         return Err(AmountProblem::Invalid);
     }
-    let (whole, frac) = match body.split_once('.') {
-        Some((w, f)) => (w, Some(f)),
-        None => (body, None),
-    };
+    let (whole, frac) = split_body(body).ok_or(AmountProblem::Invalid)?;
     let whole_digits: String = whole.chars().filter(|c| *c != ',').collect();
-    let frac_ok = frac.is_none_or(|f| f.chars().all(|c| c.is_ascii_digit()));
-    if whole.starts_with(',')
-        || whole.ends_with(',')
-        || whole.contains(",,")
-        || !whole_digits.chars().all(|c| c.is_ascii_digit())
-        || !frac_ok
-        || (whole_digits.is_empty() && frac.is_none_or(str::is_empty))
-    {
-        return Err(AmountProblem::Invalid);
-    }
-    let frac = frac.unwrap_or("");
-    if frac.len() > MAX_PLACES as usize {
+    // Places are counted with trailing zeros dropped (`1.23450` is 4); the
+    // entered scale is kept when it fits the books' four places.
+    let trimmed = frac.trim_end_matches('0');
+    if trimmed.len() > MAX_PLACES as usize {
         return Err(AmountProblem::TooManyPlaces);
     }
+    let frac = if frac.len() > MAX_PLACES as usize {
+        trimmed
+    } else {
+        frac
+    };
     let whole_digits = whole_digits.trim_start_matches('0');
     if whole_digits.len() > MAX_WHOLE_DIGITS {
         return Err(AmountProblem::TooLarge);
@@ -370,6 +382,33 @@ pub fn parse_amount(text: &str, signed: bool) -> Result<Option<Decimal>, AmountP
     let d: Decimal = canonical.parse().map_err(|_| AmountProblem::Invalid)?;
     // `-0.00` reads as 0.00.
     Ok(Some(if d.is_zero() { d.abs() } else { d }))
+}
+
+/// The engine's `BODY_RE`: digits (or `,` thousands groups of exactly
+/// three) with an optional `.` and fraction, or a bare `.5`. The whole and
+/// the fraction parts, or `None`.
+fn split_body(body: &str) -> Option<(&str, &str)> {
+    let digits = |s: &str| s.bytes().all(|b| b.is_ascii_digit());
+    let (whole, frac) = match body.split_once('.') {
+        Some((w, f)) => (w, Some(f)),
+        None => (body, None),
+    };
+    if !frac.is_none_or(digits) {
+        return None;
+    }
+    if whole.is_empty() {
+        // `.5`: a fraction of at least one digit.
+        return frac.filter(|f| !f.is_empty()).map(|f| (whole, f));
+    }
+    let grouped = whole.contains(',');
+    let mut groups = whole.split(',');
+    let first = groups.next()?;
+    let whole_ok = if grouped {
+        (1..=3).contains(&first.len()) && digits(first) && groups.all(|g| g.len() == 3 && digits(g))
+    } else {
+        digits(whole)
+    };
+    whole_ok.then_some((whole, frac.unwrap_or("")))
 }
 
 /// Canonical amount text: `-1234.50` (the entered scale kept).
@@ -481,6 +520,9 @@ pub struct TxnLine {
     pub description: Option<String>,
     /// The amount.
     pub amount: LineAmount,
+    /// The owner's cell that holds the amount, as typed (trimmed): sent to
+    /// the engine unchanged so its exact parser reads the same text (B1).
+    pub amount_text: String,
     /// Tag.
     pub tag: Option<String>,
 }
@@ -1052,6 +1094,14 @@ fn read_line(r: &RowCells<'_>, doc_type: DocType) -> Result<TxnLine, Vec<RowProb
             account,
             item,
             description: r.get(TxnField::LineDescription).map(str::to_string),
+            amount_text: r
+                .get(match amount {
+                    LineAmount::Amount(_) => TxnField::LineAmount,
+                    LineAmount::Debit(_) => TxnField::LineDebit,
+                    LineAmount::Credit(_) => TxnField::LineCredit,
+                })
+                .unwrap_or_default()
+                .to_string(),
             amount,
             tag: r.get(TxnField::LineTag).map(str::to_string),
         }),
@@ -1081,10 +1131,12 @@ impl TxnPlan {
     }
 
     /// The rows of the canonical file, header first (E4 column order):
-    /// ISO dates, canonical amounts; invoice and bill lines in
-    /// `line_amount`, journal lines in `line_debit` or `line_credit` (a
-    /// signed journal amount goes to the side its sign says). Every line
-    /// has one amount cell filled.
+    /// ISO dates; every amount is the owner's own cell text, in the column
+    /// it came from (`line_amount`, signed, for invoice and bill lines and
+    /// a signed journal column; `line_debit` or `line_credit` otherwise),
+    /// so the engine's exact parser decides it (review B1). A `0` partner
+    /// of a debit or credit is left out. Every line has one amount cell
+    /// filled.
     #[must_use]
     pub fn canonical_rows(&self) -> Vec<Vec<String>> {
         let mut out = vec![
@@ -1095,18 +1147,11 @@ impl TxnPlan {
         ];
         for d in &self.documents {
             for l in &d.lines {
-                let (amount, debit, credit) = match (d.doc_type, l.amount) {
-                    (DocType::Invoice | DocType::Bill, a) => {
-                        (canonical_amount(a.signed()), String::new(), String::new())
-                    }
-                    (DocType::JournalEntry, a) => {
-                        let s = a.signed();
-                        if s.is_sign_negative() && !s.is_zero() {
-                            (String::new(), String::new(), canonical_amount(-s))
-                        } else {
-                            (String::new(), canonical_amount(s), String::new())
-                        }
-                    }
+                let text = l.amount_text.clone();
+                let (amount, debit, credit) = match l.amount {
+                    LineAmount::Amount(_) => (text, String::new(), String::new()),
+                    LineAmount::Debit(_) => (String::new(), text, String::new()),
+                    LineAmount::Credit(_) => (String::new(), String::new(), text),
                 };
                 let o = |v: &Option<String>| v.clone().unwrap_or_default();
                 out.push(vec![

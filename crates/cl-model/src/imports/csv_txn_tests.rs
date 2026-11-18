@@ -22,25 +22,36 @@ fn mapping() -> TxnMapping {
 /// The engine's E0 table (plan §2a lines 69–70), kept equal to it here.
 #[test]
 fn csv_txn_amount_table_matches_e0() {
-    let ok: [(&str, bool, &str); 18] = [
+    let ok: [(&str, bool, &str); 27] = [
         ("1234.50", false, "1234.50"),
         ("$1,234.50", false, "1234.50"),
         ("(1,234.00)", false, "-1234.00"),
+        ("($5)", false, "-5"),
         ("-5", false, "-5"),
         ("5-", false, "-5"),
         ("$-5", false, "-5"),
         ("-$5.25", false, "-5.25"),
+        ("$5-", false, "-5"),
         ("\u{2212}7.10", false, "-7.10"),
         ("1\u{a0}000.00", false, "1000.00"),
+        ("1\u{202f}000\u{2007}", false, "1000"),
         (" 12 ", false, "12"),
         ("100.00CR", true, "-100.00"),
         ("100.00 DR", true, "100.00"),
-        ("(100.00)CR", true, "100.00"),
+        ("100.00cr", true, "-100.00"),
+        // DR is not a sign: the parentheses are the only one.
+        ("(5)DR", true, "-5"),
         ("0.0040", false, "0.0040"),
         (".5", false, "0.5"),
+        ("5.", false, "5"),
+        ("1,000.", false, "1000"),
         ("-0.00", false, "0.00"),
         ("1,000,000", false, "1000000"),
+        ("123,456", false, "123456"),
         ("999999999999999.9999", false, "999999999999999.9999"),
+        // Trailing zeros don't count toward the four places (as E0).
+        ("1.23450", false, "1.2345"),
+        ("2.500000000", false, "2.5"),
     ];
     for (text, signed, want) in ok {
         let got = parse_amount(text, signed)
@@ -48,26 +59,157 @@ fn csv_txn_amount_table_matches_e0() {
             .expect("not blank");
         assert_eq!(canonical_amount(got), want, "{text:?}");
     }
-    let bad: [(&str, bool, AmountProblem); 13] = [
+    // Review B1: everything E0 refuses is refused here too, never read as
+    // something else (`12,34` is not 1234; `(100.00)CR` is not +100).
+    let bad: [(&str, bool, AmountProblem); 28] = [
         ("1e5", false, AmountProblem::Invalid),
         ("1E-2", false, AmountProblem::Invalid),
         ("1.23456", false, AmountProblem::TooManyPlaces),
         ("-(5)", false, AmountProblem::Invalid),
         ("(-5)", false, AmountProblem::Invalid),
+        ("(5-)", false, AmountProblem::Invalid),
+        ("((5))", false, AmountProblem::Invalid),
         ("1.234,56", false, AmountProblem::Invalid),
         ("1.234,5", false, AmountProblem::Invalid),
+        ("1,23", false, AmountProblem::Invalid),
+        ("12,34", false, AmountProblem::Invalid),
+        ("1,2,3", false, AmountProblem::Invalid),
+        ("1234,567", false, AmountProblem::Invalid),
+        (",123", false, AmountProblem::Invalid),
         ("--5", false, AmountProblem::Invalid),
+        ("-5-", false, AmountProblem::Invalid),
+        ("$$5", false, AmountProblem::Invalid),
+        ("5$", false, AmountProblem::Invalid),
         ("5CR", false, AmountProblem::Invalid),
+        ("(5)CR", true, AmountProblem::Invalid),
+        ("(100.00)CR", true, AmountProblem::Invalid),
+        ("-5CR", true, AmountProblem::Invalid),
+        ("5-CR", true, AmountProblem::Invalid),
+        ("CR", true, AmountProblem::Invalid),
         ("abc", false, AmountProblem::Invalid),
-        ("$", false, AmountProblem::Invalid),
         ("1,,000", false, AmountProblem::Invalid),
+        (".", false, AmountProblem::Invalid),
         ("1000000000000000", false, AmountProblem::TooLarge),
     ];
     for (text, signed, want) in bad {
         assert_eq!(parse_amount(text, signed), Err(want), "{text:?}");
     }
-    assert_eq!(parse_amount("", false), Ok(None));
-    assert_eq!(parse_amount(" \u{a0} ", true), Ok(None));
+    // Blank, or the accounting zero: no amount (the line decides).
+    for blank in ["", " \u{a0} ", "-", "$", "$-", "-$", " - "] {
+        assert_eq!(parse_amount(blank, true), Ok(None), "{blank:?}");
+    }
+    // U+0085 is not whitespace to the engine (`\s`): refused there, so here.
+    assert_eq!(parse_amount("5\u{85}", false), Err(AmountProblem::Invalid));
+}
+
+/// Review B1 / plan-review S7: the owner's cell text goes to the engine
+/// unchanged (its exact parser decides), in the column it came from; a
+/// cell the engine would refuse is a row problem here, never re-read.
+#[test]
+fn csv_txn_sends_the_owners_amount_text() {
+    let r = rows(&[
+        &[
+            "A",
+            "Invoice",
+            "2026-03-02",
+            "1",
+            "Pine",
+            "Sales",
+            "$1,234.50",
+            "",
+            "",
+        ],
+        &["B", "JE", "2026-03-31", "", "", "Rent", "\u{2212}5", "", ""],
+        &["B", "JE", "2026-03-31", "", "", "Cash", "5", "", ""],
+        &[
+            "C",
+            "JE",
+            "2026-03-31",
+            "",
+            "",
+            "Rent",
+            "",
+            "1\u{a0}000.00",
+            "-",
+        ],
+        &["C", "JE", "2026-03-31", "", "", "Cash", "", "0", "1,000.00"],
+    ]);
+    let plan = build(&r, 2, &mapping());
+    assert!(plan.can_import(), "{plan:?}");
+    let canon = plan.canonical_rows();
+    assert_eq!(canon[1][10], "$1,234.50");
+    assert_eq!(canon[2][10], "\u{2212}5");
+    assert_eq!(canon[3][10], "5");
+    assert_eq!(
+        (canon[4][11].as_str(), canon[4][12].as_str()),
+        ("1\u{a0}000.00", "")
+    );
+    assert_eq!(
+        (canon[5][11].as_str(), canon[5][12].as_str()),
+        ("", "1,000.00")
+    );
+    // The values the preview shows are the engine's.
+    assert_eq!(plan.documents[0].total(), dec("1234.50"));
+    assert_eq!(plan.documents[1].imbalance(), Decimal::ZERO);
+    assert_eq!(plan.documents[2].total(), dec("1000"));
+    // The quoted cell survives the CSV.
+    assert!(plan.canonical_csv().contains(",\"$1,234.50\","));
+
+    // Each S7 case the engine refuses is a row problem; nothing posts.
+    for (cell, want) in [
+        ("12,34", "amount_invalid"),
+        ("1,23", "amount_invalid"),
+        ("-(5)", "amount_invalid"),
+        ("1.234,56", "amount_invalid"),
+        ("(100.00)CR", "amount_invalid"),
+        ("1.23456", "amount_too_precise"),
+        ("", "amount_missing"),
+    ] {
+        let r = rows(&[&[
+            "A",
+            "Invoice",
+            "2026-03-02",
+            "1",
+            "Pine",
+            "Sales",
+            cell,
+            "",
+            "",
+        ]]);
+        let plan = build(&r, 2, &mapping());
+        assert!(!plan.can_import(), "{cell:?}");
+        let got: Vec<&str> = plan.problems.iter().map(|p| p.kind.code()).collect();
+        assert_eq!(got, [want], "{cell:?}");
+    }
+    // `$-5` on an invoice line is a credit line the engine reads as -5.
+    let r = rows(&[
+        &[
+            "A",
+            "Bill",
+            "2026-03-02",
+            "1",
+            "Pine",
+            "Supplies",
+            "$10",
+            "",
+            "",
+        ],
+        &[
+            "A",
+            "Bill",
+            "2026-03-02",
+            "1",
+            "Pine",
+            "Supplies",
+            "$-5",
+            "",
+            "",
+        ],
+    ]);
+    let plan = build(&r, 2, &mapping());
+    assert!(plan.can_import(), "{plan:?}");
+    assert_eq!(plan.documents[0].total(), dec("5"));
+    assert_eq!(plan.canonical_rows()[2][10], "$-5");
 }
 
 #[test]
@@ -427,12 +569,12 @@ fn csv_txn_canonical_csv_is_exact_and_maps_rows_back() {
     );
     assert_eq!(
         lines[1],
-        "A,invoice,2026-03-02,1001,\"Pine, Co \"\"West\"\"\",,,Sales,,,1000.5,,,"
+        "A,invoice,2026-03-02,1001,\"Pine, Co \"\"West\"\"\",,,Sales,,,\"1,000.5\",,,"
     );
-    assert_eq!(lines[2], "B,journal_entry,2026-03-31,,,,,Rent,,,,250,,");
+    assert_eq!(lines[2], "B,journal_entry,2026-03-31,,,,,Rent,,,250,,,");
     assert_eq!(
         lines[3],
-        "B,journal_entry,2026-03-31,,,,,Checking,,,,,250.00,"
+        "B,journal_entry,2026-03-31,,,,,Checking,,,-250.00,,,"
     );
     assert_eq!(lines[4], "C,journal_entry,2026-03-31,,,,,Rent,,,,0.0040,,");
     // Every line has one amount cell (E4 refuses a blank amount).
