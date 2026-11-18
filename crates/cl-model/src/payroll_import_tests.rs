@@ -428,6 +428,7 @@ fn seeded_chart() -> Vec<ChartRow<u32>> {
         (6200, "Legal and Professional Fees", Expense, false),
         (6400, "Telephone and Internet", Expense, false),
         (6550, "Wages", Expense, false),
+        (6552, "QA Payroll - Wages", Expense, false),
         (6560, "Payroll Taxes", Expense, false),
         (6700, "Vehicle Expenses", Expense, false),
     ]
@@ -562,7 +563,10 @@ fn a_remembered_account_wins_and_two_equal_matches_pick_none() {
         kind: ChartKind::Bank,
         checking: true,
     });
-    // Wages and Salaries tie: the owner picks.
+    // Wages and Salaries tie (same words): that tier is skipped; the
+    // payroll-named expense account is the next tier's one match.
+    assert_eq!(confident_account("gross_wages_expense", &chart), Some(6552));
+    chart.retain(|r| r.id != 6552);
     assert_eq!(confident_account("gross_wages_expense", &chart), None);
     // A bank account named for payroll beats two checking accounts.
     assert_eq!(confident_account(NET_PAY_LINE, &chart), Some(1030));

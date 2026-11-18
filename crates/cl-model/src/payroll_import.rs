@@ -990,22 +990,33 @@ pub fn account_fits<T>(line_type: &str, row: &ChartRow<T>) -> bool {
 
 /// The one account the name rules pick for `line_type`, or `None` when no
 /// account (or more than one equally good) matches: the owner then
-/// chooses. Tiers are tried most specific first; a tier with several
-/// matches is skipped for the next one.
+/// chooses. Tiers are tried most specific first; of several matches the
+/// one with the fewest words in its name wins, and a tie skips the tier.
 ///
 /// Net pay: a bank account named for payroll, else the only checking
 /// account, else the only bank account; never the first of several.
 #[must_use]
 pub fn confident_account<T: Copy>(line_type: &str, rows: &[ChartRow<T>]) -> Option<T> {
+    // The one match; of several, the one with the plainest name (fewest
+    // words: "Wages" over "QA Payroll - Wages"), when only one is plainest.
     let only = |it: &mut dyn Iterator<Item = &ChartRow<T>>| {
-        let first = it.next()?;
-        it.next().is_none().then_some(first.id)
+        let all: Vec<&ChartRow<T>> = it.collect();
+        let words = |r: &ChartRow<T>| r.name.split_whitespace().count();
+        let fewest = all.iter().map(|r| words(r)).min()?;
+        let mut plain = all.iter().filter(|r| words(r) == fewest);
+        let first = plain.next()?;
+        plain.next().is_none().then_some(first.id)
     };
     if line_type == NET_PAY_LINE {
+        // Strictly one: never the plainest of several bank accounts.
+        let one = |it: &mut dyn Iterator<Item = &ChartRow<T>>| {
+            let first = it.next()?;
+            it.next().is_none().then_some(first.id)
+        };
         let banks = || rows.iter().filter(|r| r.kind == ChartKind::Bank);
-        return only(&mut banks().filter(|r| tier_matches(&r.name, (&["payroll"], &[]))))
-            .or_else(|| only(&mut banks().filter(|r| r.checking)))
-            .or_else(|| only(&mut banks()));
+        return one(&mut banks().filter(|r| tier_matches(&r.name, (&["payroll"], &[]))))
+            .or_else(|| one(&mut banks().filter(|r| r.checking)))
+            .or_else(|| one(&mut banks()));
     }
     let (kind, tiers) = line_rule(line_type)?;
     tiers.iter().find_map(|t| {
