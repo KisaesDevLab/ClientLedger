@@ -326,6 +326,7 @@ pub(crate) struct Executor {
     feed_accept_v1: AtomicBool,
     feed_undo_v1: AtomicBool,
     payroll_v1: AtomicBool,
+    imports_v1: AtomicBool,
 }
 
 /// Per-request bookkeeping of the retry loop.
@@ -401,6 +402,7 @@ impl Executor {
             feed_accept_v1: AtomicBool::new(false),
             feed_undo_v1: AtomicBool::new(false),
             payroll_v1: AtomicBool::new(false),
+            imports_v1: AtomicBool::new(false),
         }
     }
 
@@ -544,6 +546,12 @@ impl Executor {
         self.payroll_v1.store(on, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises `imports-batch-v1` (import
+    /// batch commit and undo; U-261, P31).
+    pub(crate) fn set_imports_v1(&self, on: bool) {
+        self.imports_v1.store(on, Ordering::Relaxed);
+    }
+
     /// Record whether the engine advertises
     /// `idempotency-receive-payment-v1` (U-132).
     pub(crate) fn set_idempotency_receive_payment_v1(&self, on: bool) {
@@ -584,6 +592,7 @@ impl Executor {
             KeySet::FeedAcceptV1 => self.feed_accept_v1.load(Ordering::Relaxed),
             KeySet::FeedUndoV1 => self.feed_undo_v1.load(Ordering::Relaxed),
             KeySet::PayrollV1 => self.payroll_v1.load(Ordering::Relaxed),
+            KeySet::ImportsV1 => self.imports_v1.load(Ordering::Relaxed),
         }
     }
 

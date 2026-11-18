@@ -548,3 +548,15 @@ DELETE  /api/v1/payroll-import/templates/{id}   pre-handler-only
 GET     /api/v1/payroll-import/account-mappings/{companyId} idempotent
 PUT     /api/v1/payroll-import/account-mappings/{companyId} pre-handler-only
 POST    /api/v1/payroll-import/account-mappings/{companyId}/auto-map pre-handler-only
+# P31: QBD and other-system imports (U-260 to U-268; imports-batch-v1, imports-tieout-v1, ...)
+POST    /api/v1/imports/upload                  pre-handler-only
+GET     /api/v1/imports/{id}                    idempotent
+DELETE  /api/v1/imports/{id}                    pre-handler-only
+POST    /api/v1/imports/batches                 pre-handler-only
+GET     /api/v1/imports/batches                 idempotent
+GET     /api/v1/imports/batches/{id}            idempotent
+POST    /api/v1/imports/batches/{id}/commit     keyable-imports
+POST    /api/v1/imports/batches/{id}/undo       keyable-imports
+POST    /api/v1/imports/batches/{id}/tieout     pre-handler-only
+POST    /api/v1/imports/batches/{id}/verify     pre-handler-only
+PUT     /api/v1/imports/batches/{id}/spot-check pre-handler-only

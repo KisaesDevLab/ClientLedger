@@ -1,0 +1,5 @@
+# The engine's imports-batch-v1 keyed route set (U-261, P31 E1): import batch commit and undo (Idempotency-Key
+# required), x-idempotency: true in its openapi.json. Append-only for this capability name: KeySet::ImportsV1
+# in operations.rs.
+POST /api/v1/imports/batches/{id}/commit
+POST /api/v1/imports/batches/{id}/undo

@@ -455,5 +455,16 @@
   {"method":"DELETE","path":"/api/v1/payroll-import/templates/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"GET","path":"/api/v1/payroll-import/account-mappings/{companyId}","inSpec":true,"fragmentHash":"35565f9cfe401b0a5aa23e067dbcfb881ff971b756f08da7601e0d708acdb893"},
   {"method":"PUT","path":"/api/v1/payroll-import/account-mappings/{companyId}","inSpec":true,"fragmentHash":"11e5c89e69125ca4f79469a460761cdd5177b0930ac45e58be4f6bd1befd7e97"},
-  {"method":"POST","path":"/api/v1/payroll-import/account-mappings/{companyId}/auto-map","inSpec":true,"fragmentHash":"35565f9cfe401b0a5aa23e067dbcfb881ff971b756f08da7601e0d708acdb893"}
+  {"method":"POST","path":"/api/v1/payroll-import/account-mappings/{companyId}/auto-map","inSpec":true,"fragmentHash":"35565f9cfe401b0a5aa23e067dbcfb881ff971b756f08da7601e0d708acdb893"},
+  {"method":"POST","path":"/api/v1/imports/upload","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/imports/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
+  {"method":"DELETE","path":"/api/v1/imports/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
+  {"method":"POST","path":"/api/v1/imports/batches","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/imports/batches","inSpec":false,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/imports/batches/{id}","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/imports/batches/{id}/commit","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/imports/batches/{id}/undo","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/imports/batches/{id}/tieout","inSpec":false,"fragmentHash":null},
+  {"method":"POST","path":"/api/v1/imports/batches/{id}/verify","inSpec":false,"fragmentHash":null},
+  {"method":"PUT","path":"/api/v1/imports/batches/{id}/spot-check","inSpec":false,"fragmentHash":null}
 ]

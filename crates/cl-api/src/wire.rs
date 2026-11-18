@@ -524,6 +524,27 @@ impl Capabilities {
     /// Mode A check (`departments`, `departmentsTruncated`), Mode B signed
     /// amounts. Optional: the screen works without it (sample departments).
     pub const PAYROLL_IMPORT_REVIEW: &'static str = "payroll-import-review-v1";
+    /// U-260 (P31 E0): one exact amount parser in every import adapter
+    /// (`IMPORT_AMOUNT_INVALID`; the trial balance check is exactly 0).
+    pub const IMPORTS_AMOUNTS: &'static str = "imports-amounts-v1";
+    /// U-261 to U-263 (P31 E1): import batches committed and undone in one
+    /// transaction as a job, keyed commit and undo, the closing-date
+    /// password, Admin-only commit/undo/verify, re-import refused.
+    pub const IMPORTS_BATCH: &'static str = "imports-batch-v1";
+    /// U-264 (P31 E2a): QBD open invoices and unpaid bills as documents,
+    /// the "before conversion" history accounts.
+    pub const QBD_OPEN_ITEMS: &'static str = "qbd-open-items-v1";
+    /// U-265 (P31 E2b): names merged across lists, Customer:Job, account
+    /// and class maps, items and the inventory valuation.
+    pub const QBD_MAPPING: &'static str = "qbd-mapping-v1";
+    /// U-266 (P31 E2c): conversion-date checks, `historyFrom`, several
+    /// journal files per batch.
+    pub const QBD_DATES: &'static str = "qbd-dates-v1";
+    /// U-267 (P31 E3): the batch tie-out, verify and the spot-check list.
+    pub const IMPORTS_TIEOUT: &'static str = "imports-tieout-v1";
+    /// U-268 (P31 E4): kind `transactions` (invoices, bills and journal
+    /// entries from a spreadsheet) posted inside the batch.
+    pub const IMPORTS_TRANSACTIONS: &'static str = "imports-transactions-v1";
     /// U-175 (P26 QA-6): a bank file goes into any bank register account
     /// (`bank`, `checking`, `savings`, `cash`, `petty_cash`) or a card.
     pub const BANK_IMPORT_ACCOUNT_TYPES: &'static str = "bank-import-account-types-v1";
