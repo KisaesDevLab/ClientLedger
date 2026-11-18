@@ -254,6 +254,21 @@ fn batch_of(
         .collect();
     let sessions: Vec<ImportSessionId> = outcomes.iter().map(|o| o.session.id).collect();
     let qbd = set.starts_with("qbd/");
+    // U-272: a QBD or QBO account list's Retained Earnings row carries the
+    // role (it still says `create`); other programs' files never do.
+    if h.require_cap(Capabilities::QBD_RETAINED_EARNINGS, "U-272") {
+        let re: Vec<_> = outcomes
+            .iter()
+            .filter(|o| o.session.kind == ImportKind::Coa)
+            .flat_map(|o| o.preview.account_matches.iter())
+            .filter(|m| m.system_role == Some(cl_api::imports::SystemRole::RetainedEarnings))
+            .collect();
+        let expect = matches!(
+            source,
+            SourceSystem::QuickBooksDesktop | SourceSystem::QuickBooksOnline
+        );
+        assert_eq!(re.len(), usize::from(expect), "{set}: {re:?}");
+    }
     let new = NewBatch {
         source,
         kind: BatchKind::Conversion,
@@ -313,41 +328,12 @@ fn undo(h: &Harness, s: &Session, id: ImportBatchId) {
     assert_eq!(st.batch.status, BatchStatus::Undone, "{:?}", st.error);
 }
 
-/// PENDING(engine: QBD Retained Earnings merge): until the engine merges a
-/// numbered QBD "Retained Earnings" row into the system retained earnings
-/// account (as it does A/R), that row is its own account and prior years'
-/// income shows as +X on it and -X on the engine's. The desktop maps
-/// nothing for it; these two rows are set aside until the pin has the
-/// change.
-fn is_retained_earnings_pair(t: &TieOut, a: &cl_api::imports::TieOutAccount) -> bool {
-    let re: Vec<_> = t
-        .accounts
-        .iter()
-        .filter(|x| !x.diff.is_zero() && x.name.to_ascii_lowercase().contains("retained earnings"))
-        .collect();
-    re.len() == 2
-        && re[0].diff.as_decimal() + re[1].diff.as_decimal() == Decimal::ZERO
-        && re.iter().any(|x| std::ptr::eq(*x, a))
-}
-
-fn retained_earnings_pending(t: &TieOut) -> bool {
-    let pending = t.accounts.iter().any(|a| is_retained_earnings_pair(t, a));
-    if pending {
-        eprintln!(
-            "PENDING(engine QBD Retained Earnings merge): prior-year income on two equity accounts"
-        );
-    }
-    pending
-}
-
-/// The nonzero account differences, keyed by the source account key.
+/// The nonzero account differences, keyed by the source account key. Since
+/// U-272 (`qbd-retained-earnings-v1`) a numbered QBD Retained Earnings row
+/// merges into the system account, so nothing is set aside.
 fn account_diffs(t: &TieOut) -> fx::Balances {
     let mut d = fx::Balances::new();
-    for a in t
-        .accounts
-        .iter()
-        .filter(|a| !is_retained_earnings_pair(t, a))
-    {
+    for a in &t.accounts {
         // Keyed as EXPECTED.toml has it: the source key, else the number.
         let key = a
             .source_keys
@@ -368,10 +354,8 @@ fn balance(t: &TieOut, key: BalanceKey) -> Option<Decimal> {
 }
 
 fn assert_ties_out(t: &TieOut, what: &str) {
-    if !retained_earnings_pending(t) {
-        assert!(t.all_zero, "{what}: {:?}", account_diffs(t));
-        assert_eq!(t.difference_count, 0, "{what}");
-    }
+    assert!(t.all_zero, "{what}: {:?}", account_diffs(t));
+    assert_eq!(t.difference_count, 0, "{what}");
     assert_eq!(account_diffs(t), fx::Balances::new(), "{what}");
     for i in t.ar_items.iter().chain(&t.ap_items) {
         assert!(i.diff.is_zero(), "{what}: row {:?}", i.source_row);
@@ -472,23 +456,32 @@ pub fn qbd_conversion_ties_out(h: &Harness) {
             "the reference trial balance's debits"
         );
         assert!(t.reference.is_some(), "compared with the reference TB");
-        if retained_earnings_pending(&t) {
-            // Verify needs every difference 0.00: refused until the merge.
-            let e = h.run(s.imports().verify(id)).expect_err("not zero yet");
-            assert!(matches!(
-                import_refusal(&e),
-                Some(ImportRefusal::TieOutNotZero { .. })
-            ));
-        } else {
-            let v = h.run(s.imports().verify(id)).expect("verify");
-            assert!(v.batch.is_verified());
-            assert!(v.tieout.all_zero && v.tieout.verified_at.is_some());
-            // Idempotent: again answers with what it kept.
-            let again = h.run(s.imports().verify(id)).expect("verify again");
-            assert_eq!(again.batch.verified_at, v.batch.verified_at);
-            let kept = h.run(s.imports().tieout(id)).expect("kept tie-out");
-            assert_eq!(kept.verified_at, v.tieout.verified_at);
+        // U-272: the numbered Retained Earnings merged, so verify succeeds.
+        if !h.require_cap(Capabilities::QBD_RETAINED_EARNINGS, "U-272") {
+            continue;
         }
+        let v = h.run(s.imports().verify(id)).expect("verify");
+        assert!(v.batch.is_verified());
+        assert!(v.tieout.all_zero && v.tieout.verified_at.is_some());
+        // Idempotent: again answers with what it kept.
+        let again = h.run(s.imports().verify(id)).expect("verify again");
+        assert_eq!(again.batch.verified_at, v.batch.verified_at);
+        let kept = h.run(s.imports().tieout(id)).expect("kept tie-out");
+        assert_eq!(kept.verified_at, v.tieout.verified_at);
+        // No second Retained Earnings account was made from the chart.
+        let charts = h
+            .run(s.accounts().list_all(&AccountFilter::default()))
+            .expect("accounts");
+        let re = charts
+            .iter()
+            .filter(|a| {
+                a.fields
+                    .name
+                    .to_ascii_lowercase()
+                    .contains("retained earnings")
+            })
+            .count();
+        assert_eq!(re, 1, "the source's Retained Earnings merged (U-272)");
         // The spot-check sample: the batch's own transactions, paged.
         let page = h
             .run(s.imports().transactions(id, None, 200))

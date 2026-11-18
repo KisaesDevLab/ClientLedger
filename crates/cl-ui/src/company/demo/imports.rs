@@ -34,8 +34,8 @@ use cl_api::imports::{
     BatchStatus, BatchTransaction, CommitRequest, FilePreview, FileRole, ImportBatch,
     ImportBatchId, ImportKind, ImportSession, ImportSessionId, JobAccepted, MatchStatus, NewBatch,
     Progress, ReferenceTrialBalance, RowProblem, SessionStatus, SourceSystem, SpotCheckItem,
-    TieOut, TieOutAccount, TieOutBooks, TieOutItem, TieOutStock, TieOutTotal, TieOutTotals,
-    TrialBalanceTotals, UndoBlocker, UploadOutcome, UploadRequest, Verified,
+    SystemRole, TieOut, TieOutAccount, TieOutBooks, TieOutItem, TieOutStock, TieOutTotal,
+    TieOutTotals, TrialBalanceTotals, UndoBlocker, UploadOutcome, UploadRequest, Verified,
 };
 use cl_api::{
     ApiError, ConflictDetails, ConflictReason, ErrorCode, IdempotencyKey, UserText, ValidationError,
@@ -63,6 +63,9 @@ struct Set {
     altered: Option<&'static str>,
     /// A QBD conversion: the tie-out also carries the four balance rows.
     qbd: bool,
+    /// The account list's Retained Earnings row the engine recognises (QBD:
+    /// Equity named Retained Earnings; QBO: that detail type; U-272).
+    retained: Option<&'static str>,
 }
 
 macro_rules! expected {
@@ -77,56 +80,66 @@ const SETS: [Set; 10] = [
         base: expected!("qbd/shoal-creek"),
         altered: None,
         qbd: true,
+        retained: Some("3900"),
     },
     // 1: bill re-pointed from 6100 to 6200.
     Set {
         base: expected!("qbd/shoal-creek"),
         altered: Some(expected!("qbd/shoal-creek-altered/repointed")),
         qbd: true,
+        retained: Some("3900"),
     },
     // 2: open invoice 1005 raised by 10.00.
     Set {
         base: expected!("qbd/shoal-creek"),
         altered: Some(expected!("qbd/shoal-creek-altered/open-item")),
         qbd: true,
+        retained: Some("3900"),
     },
     // 3: a journal that overlaps the base journals.
     Set {
         base: expected!("qbd/shoal-creek"),
         altered: None,
         qbd: true,
+        retained: Some("3900"),
     },
     // 4..8: other systems.
     Set {
         base: expected!("imports/accounting-power"),
         altered: None,
         qbd: false,
+        retained: None,
     },
     Set {
         base: expected!("imports/generic"),
         altered: None,
         qbd: false,
+        retained: None,
     },
     Set {
         base: expected!("imports/generic"),
         altered: Some(expected!("imports/generic-altered")),
         qbd: false,
+        retained: None,
     },
     Set {
         base: expected!("imports/quickbooks-online"),
         altered: None,
         qbd: false,
+        retained: Some("3200"),
     },
     Set {
         base: expected!("imports/qbd-gl"),
         altered: None,
         qbd: false,
+        retained: Some("3200"),
     },
     // 9: spreadsheet transactions.
     Set {
         base: expected!("imports/transactions"),
         altered: None,
         qbd: false,
+        retained: None,
     },
 ];
 
@@ -524,6 +537,9 @@ impl DemoImports {
         let mut out: Vec<AccountMatch> = section(set.base, "reference_tb")
             .into_keys()
             .map(|k| AccountMatch {
+                // U-272: only the account list carries the role.
+                system_role: (kind == ImportKind::Coa && set.retained == Some(k.as_str()))
+                    .then_some(SystemRole::RetainedEarnings),
                 source_key: k.clone(),
                 number: Some(k.clone()),
                 name: k,
@@ -531,7 +547,6 @@ impl DemoImports {
                 account: None,
                 matched_by: None,
                 rows: 1,
-                system_role: None,
             })
             .collect();
         if kind == ImportKind::GlTransactions {

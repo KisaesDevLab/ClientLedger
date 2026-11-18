@@ -189,11 +189,17 @@ fn account_matches_are_read_with_their_keys() {
             {"sourceKey":"1200","number":"1200","name":"Accounts Receivable","match":"create","rows":1,"systemRole":"accounts_receivable"},
             {"number":"6100","name":"Feed","match":"create"},
             {"name":"Mystery","match":"unmatched"},
-            {"name":"Odd","match":"later"}],"#,
+            {"name":"Odd","match":"later"},
+            {"sourceKey":"32000","number":"32000","name":"Retained Earnings","match":"create","rows":3,"systemRole":"retained_earnings"},
+            {"sourceKey":"3999","number":"3999","name":"Odd role","match":"create","rows":1,"systemRole":"opening_balance"}],"#,
     );
     let u = upload_from(body.as_bytes()).expect("read");
     let m = &u.preview.account_matches;
-    assert_eq!(m.len(), 4, "{m:?}");
+    assert_eq!(m.len(), 6, "{m:?}");
+    // U-272: retained earnings says `create` but carries the role.
+    assert_eq!(m[4].system_role, Some(SystemRole::RetainedEarnings));
+    assert_eq!(m[4].status, MatchStatus::Create);
+    assert_eq!(m[5].system_role, None, "an unknown role is dropped");
     assert_eq!(m[0].status, MatchStatus::Existing);
     assert!(m[0].account.is_some());
     assert_eq!(m[0].matched_by, Some(MatchedBy::Number));

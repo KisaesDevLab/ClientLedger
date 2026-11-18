@@ -6,13 +6,13 @@
 //! Every test makes its own company so the re-import check never trips on
 //! a rerun.
 //!
-//! PENDING until the pinned engine advertises `imports-batch-v1` (U-261)
-//! and `imports-transactions-v1` (U-268).
+//! Runs on engines with `imports-batch-v1` (U-261) and
+//! `imports-transactions-v1` (U-268; pin 1f2c9bb3 on).
 
 use std::time::Duration;
 
 use cl_api::import_transactions::{
-    BatchRunRequest, BatchState, BatchStatus, ImportBatchId, TxnImportRefusal, txn_import_refusal,
+    BatchRunRequest, BatchState, BatchStatus, ImportBatchId, ImportRefusal, import_refusal,
 };
 use cl_api::{
     AccountType, Capabilities, ContactFields, ContactType, NewCompany, NewContact, Session,
@@ -105,7 +105,7 @@ fn settle(h: &Harness, s: &Session, id: ImportBatchId) -> BatchState {
         let b = h
             .run(s.import_transactions().batch(id))
             .unwrap_or_else(|e| panic!("batch: {e}"));
-        if !b.status.running() {
+        if !b.status.is_running() {
             return b;
         }
         std::thread::sleep(Duration::from_millis(250));
@@ -133,8 +133,11 @@ fn import(h: &Harness, s: &Session, csv: &[u8]) -> (ImportBatchId, BatchState) {
     (id, settle(h, s, id))
 }
 
-/// An unbalanced entry: the upload names its row, or the commit fails
-/// with nothing posted; the batch is `failed`, never `committed`.
+/// U-268 as built: an unbalanced entry is an upload row problem
+/// (`IMPORT_UNBALANCED` on the document's first row, no column); the
+/// commit is refused 409 `IMPORT_HAS_ERRORS` before anything starts; the
+/// same bytes again while that upload is open are 409
+/// `IMPORT_SESSION_ACTIVE` until it is discarded.
 pub fn bad_row_posts_nothing(h: &Harness) {
     if !caps(h) {
         return;
@@ -142,29 +145,159 @@ pub fn bad_row_posts_nothing(h: &Harness) {
     let s = fresh_company(h, "Txn Import Bad");
     let n = names(h, &s);
     let it = s.import_transactions();
+    let bad = file(&n, "499.99");
     let up = h
-        .run(it.upload(&file(&n, "499.99")))
+        .run(it.upload(&bad))
         .unwrap_or_else(|e| panic!("upload: {e}"));
-    if up.problems.is_empty() {
-        let id = h
-            .run(it.create_batch(up.session))
-            .unwrap_or_else(|e| panic!("batch: {e}"));
-        h.run(it.commit(id, &run_req(), key()))
-            .unwrap_or_else(|e| panic!("commit: {e}"));
-        let b = settle(h, &s, id);
-        assert_eq!(b.status, BatchStatus::Failed);
-        assert_eq!(
-            b.error.map(|e| e.code).as_deref(),
-            Some("IMPORT_UNBALANCED")
-        );
-    } else {
-        assert!(up.problems.iter().any(|p| p.code == "IMPORT_UNBALANCED"));
+    let p = up
+        .problems
+        .iter()
+        .find(|p| p.code == "IMPORT_UNBALANCED")
+        .unwrap_or_else(|| panic!("{:?}", up.problems));
+    assert_eq!(p.row_number, 5, "the entry's first row (header = 1)");
+    assert_eq!(up.total_rows, 5, "data rows");
+    assert_eq!(up.documents, Some(3));
+    let id = h
+        .run(it.create_batch(up.session))
+        .unwrap_or_else(|e| panic!("batch: {e}"));
+    let e = h
+        .run(it.commit(id, &run_req(), key()))
+        .expect_err("refused before the job");
+    match import_refusal(&e) {
+        Some(ImportRefusal::HasErrors { errors, .. }) => {
+            assert!(
+                errors.iter().any(|x| x.code == "IMPORT_UNBALANCED"),
+                "{errors:?}"
+            );
+        }
+        other => panic!("{other:?} {e}"),
     }
+    let e = h.run(it.upload(&bad)).expect_err("already open");
+    let open = match import_refusal(&e) {
+        Some(ImportRefusal::SessionActive {
+            session: Some(open),
+            ..
+        }) => open,
+        other => panic!("{other:?} {e}"),
+    };
+    assert_eq!(open, up.session);
+    h.run(it.discard(open))
+        .unwrap_or_else(|e| panic!("discard: {e}"));
+    assert!(h.run(it.upload(&bad)).is_ok(), "free once discarded");
     // The good file still imports: nothing of the bad one is in the way.
     let (_, b) = import(h, &s, &file(&n, "500.00"));
     assert_eq!(b.status, BatchStatus::Committed);
 }
 
+/// Nothing is created on import: a customer, item or tag the books lack
+/// is `IMPORT_UNKNOWN_REF` on its row and column at upload; one that goes
+/// away after the upload fails the batch with `field` and `details.refs`.
+pub fn unknown_refs(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = fresh_company(h, "Txn Import Refs");
+    let n = names(h, &s);
+    let it = s.import_transactions();
+    let hd = "group_id,type,date,number,name,due_date,memo,line_account,line_item,line_description,line_amount,line_debit,line_credit,line_tag";
+    let csv = format!(
+        "{hd}\r\n\
+         A,invoice,2026-03-02,2001,{nobody},,,{sales},,,10.00,,,\r\n\
+         B,invoice,2026-03-03,2002,{c},,,{sales},{noitem},,10.00,,,\r\n\
+         C,bill,2026-03-04,X-1,{v},,,{sup},,,5.00,,,{notag}\r\n",
+        nobody = unique("Nobody"),
+        noitem = unique("No Item"),
+        notag = unique("No Tag"),
+        c = n.customer,
+        v = n.vendor,
+        sales = n.sales,
+        sup = n.supplies,
+    );
+    let up = h
+        .run(it.upload(csv.as_bytes()))
+        .unwrap_or_else(|e| panic!("upload: {e}"));
+    let refs: Vec<(u64, Option<&str>)> = up
+        .problems
+        .iter()
+        .filter(|p| p.code == "IMPORT_UNKNOWN_REF")
+        .map(|p| (p.row_number, p.field.as_deref()))
+        .collect();
+    assert_eq!(
+        refs,
+        vec![
+            (2, Some("name")),
+            (3, Some("line_item")),
+            (4, Some("line_tag"))
+        ],
+        "{:?}",
+        up.problems
+    );
+    // Rechecked at commit, so the precheck lets it through and the job
+    // fails with every reference listed; nothing is posted.
+    let id = h
+        .run(it.create_batch(up.session))
+        .unwrap_or_else(|e| panic!("batch: {e}"));
+    h.run(it.commit(id, &run_req(), key()))
+        .unwrap_or_else(|e| panic!("commit: {e}"));
+    let b = settle(h, &s, id);
+    assert_eq!(b.status, BatchStatus::Failed);
+    let err = b.error.expect("error");
+    assert_eq!(err.code, "IMPORT_UNKNOWN_REF");
+    assert_eq!(err.field.as_deref(), Some("name"));
+    match err.refusal() {
+        Some(ImportRefusal::UnknownRef {
+            refs, ref_count, ..
+        }) => {
+            assert_eq!(ref_count, 3);
+            assert_eq!(refs.len(), 3);
+            assert!(refs.iter().all(|r| r.reason.is_some()), "{refs:?}");
+        }
+        other => panic!("{other:?}"),
+    }
+    // The shared batch reader decodes a failed transactions batch.
+    let st = h
+        .run(s.imports().batch(id))
+        .unwrap_or_else(|e| panic!("imports batch: {e}"));
+    assert_eq!(st.batch.status, BatchStatus::Failed);
+}
+
+/// A document dated on or before the closing date: the commit answers 423
+/// (before the job), and the closing-date password lets it through.
+pub fn closed_period(h: &Harness) {
+    if !caps(h) || !h.require_cap(Capabilities::CLOSING_PASSWORD, "U-15") {
+        return;
+    }
+    let s = fresh_company(h, "Txn Import Closed");
+    let n = names(h, &s);
+    let pw = cl_core::Secret::new(unique("closing-txn"));
+    h.run(s.raw_mapped(
+        cl_api::Method::Put,
+        "/api/v1/company/settings",
+        Some(&serde_json::json!({ "lockDate": "2026-03-31" })),
+    ))
+    .expect("closing date");
+    assert!(
+        h.run(s.set_closing_password(None, Some(&pw), key()))
+            .unwrap_or_else(|e| panic!("closing password: {e}"))
+    );
+    let it = s.import_transactions();
+    let up = h
+        .run(it.upload(&file(&n, "500.00")))
+        .unwrap_or_else(|e| panic!("upload: {e}"));
+    assert!(up.problems.is_empty(), "{:?}", up.problems);
+    let id = h
+        .run(it.create_batch(up.session))
+        .unwrap_or_else(|e| panic!("batch: {e}"));
+    let e = h.run(it.commit(id, &run_req(), key())).expect_err("closed");
+    assert!(matches!(&e, cl_api::ApiError::ClosedPeriod(_)), "{e:?}");
+    let with = BatchRunRequest {
+        closed_period: Some(cl_api::ClosedPeriodAuthorization::with_password(pw)),
+        ..run_req()
+    };
+    h.run(it.commit(id, &with, key()))
+        .unwrap_or_else(|e| panic!("commit with password: {e}"));
+    assert_eq!(settle(h, &s, id).status, BatchStatus::Committed);
+}
 /// Commit, then Undo: the batch ends `undone`; a second Undo is refused.
 pub fn undo(h: &Harness) {
     if !caps(h) {
@@ -174,6 +307,16 @@ pub fn undo(h: &Harness) {
     let n = names(h, &s);
     let (id, b) = import(h, &s, &file(&n, "500.00"));
     assert_eq!(b.status, BatchStatus::Committed);
+    // History and the backup protection read every batch with the strict
+    // shared reader: a committed transactions batch must decode.
+    let st = h
+        .run(s.imports().batch(id))
+        .unwrap_or_else(|e| panic!("imports batch: {e}"));
+    assert_eq!(st.batch.status, BatchStatus::Committed);
+    let all = h
+        .run(s.imports().batches_all())
+        .unwrap_or_else(|e| panic!("history: {e}"));
+    assert!(all.iter().any(|b| b.id == id));
     h.run(s.import_transactions().undo(id, &run_req(), key()))
         .unwrap_or_else(|e| panic!("undo: {e}"));
     assert_eq!(settle(h, &s, id).status, BatchStatus::Undone);
@@ -193,8 +336,8 @@ pub fn recommit(h: &Harness) {
         .run(s.import_transactions().upload(&csv))
         .expect_err("refused while imported");
     assert!(matches!(
-        txn_import_refusal(&e),
-        Some(TxnImportRefusal::AlreadyCommitted { batch: Some(b), .. }) if b == id
+        import_refusal(&e),
+        Some(ImportRefusal::AlreadyCommitted { batch: Some(b), .. }) if b == id
     ));
     h.run(s.import_transactions().undo(id, &run_req(), key()))
         .unwrap_or_else(|e| panic!("undo: {e}"));

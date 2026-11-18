@@ -563,7 +563,7 @@ pub struct AccountMatch {
     /// Rows (chart, trial balance, item) or journal lines naming it.
     pub rows: u64,
     /// A chart row of type A/R or A/P (merged into the company's own,
-    /// Q-P31k).
+    /// Q-P31k), or the source's retained earnings (U-272).
     pub system_role: Option<SystemRole>,
 }
 
@@ -595,6 +595,13 @@ wire_enum!(
         AccountsReceivable => "accounts_receivable",
         /// Accounts payable.
         AccountsPayable => "accounts_payable",
+        /// Retained earnings (U-272, `qbd-retained-earnings-v1`): a QBD
+        /// Equity row named "Retained Earnings" (number stripped) or a QBO
+        /// row of that detail type. In a batch it merges into the company's
+        /// retained earnings account even though `status` says `create`;
+        /// `accountMap` "create" keeps it separate, an account id sends it
+        /// there.
+        RetainedEarnings => "retained_earnings",
     }
 );
 
@@ -1023,6 +1030,8 @@ pub struct BatchFailure {
     pub row_number: Option<u64>,
     /// The file it was in.
     pub session: Option<ImportSessionId>,
+    /// The column at fault (U-268: top level, also kept in `details`).
+    pub field: Option<String>,
     /// The engine's `details` (unmapped account keys, the accounts a
     /// valuation is needed for). `Debug` names the keys only.
     pub details: crate::ConflictDetails,
@@ -1032,8 +1041,86 @@ impl BatchFailure {
     /// The failure as a refusal the screen explains, when it is one.
     #[must_use]
     pub fn refusal(&self) -> Option<ImportRefusal> {
-        refusal_from(&self.code, Some(&self.details))
+        refusal_from(&self.code, Some(&self.details)).map(|r| match r {
+            ImportRefusal::UnknownRef {
+                field: None,
+                refs,
+                ref_count,
+            } => ImportRefusal::UnknownRef {
+                field: self.field.clone(),
+                refs,
+                ref_count,
+            },
+            r => r,
+        })
     }
+}
+
+wire_enum!(
+    /// Why a spreadsheet reference was not found (U-268 `refs[].reason`).
+    RefReason {
+        /// No name, account, item or tag by that name.
+        Unknown => "unknown",
+        /// More than one matches.
+        Ambiguous => "ambiguous",
+        /// The item has no account to post to.
+        NoAccount => "no_account",
+    }
+);
+
+/// One reference a spreadsheet row makes that the books lack (U-268,
+/// `IMPORT_UNKNOWN_REF` `details.refs[]`): row, column and reason, never
+/// the name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RefProblem {
+    /// The file row (header = 1).
+    pub row_number: u64,
+    /// The column: `name`, `line_account`, `line_item` or `line_tag`.
+    pub field: Option<String>,
+    /// Why (`None` for a reason this build doesn't know).
+    pub reason: Option<RefReason>,
+}
+
+fn refs_from(details: Option<&crate::ConflictDetails>) -> (Vec<RefProblem>, u64) {
+    let refs: Vec<RefProblem> = details
+        .and_then(|d| d.raw("refs"))
+        .and_then(Value::as_array)
+        .map(|l| {
+            l.iter()
+                .filter_map(|r| {
+                    Some(RefProblem {
+                        row_number: r.get("rowNumber")?.as_u64()?,
+                        field: r.get("field").and_then(Value::as_str).map(str::to_string),
+                        reason: r
+                            .get("reason")
+                            .and_then(Value::as_str)
+                            .and_then(RefReason::from_wire),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let count = details
+        .and_then(|d| d.raw("refCount"))
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| u64::try_from(refs.len()).unwrap_or(u64::MAX));
+    (refs, count)
+}
+
+fn row_problems_from(details: Option<&crate::ConflictDetails>, key: &str) -> Vec<RowProblem> {
+    details
+        .and_then(|d| d.raw(key))
+        .and_then(Value::as_array)
+        .map(|l| l.iter().filter_map(row_problem_from).collect())
+        .unwrap_or_default()
+}
+
+pub(crate) fn row_problem_from(v: &Value) -> Option<RowProblem> {
+    Some(RowProblem {
+        row_number: v.get("rowNumber").and_then(Value::as_u64).unwrap_or(0),
+        field: v.get("field").and_then(Value::as_str).map(str::to_string),
+        code: v.get("code")?.as_str()?.to_string(),
+    })
 }
 
 /// A batch with its job state (`GET /imports/batches/{id}`).
@@ -1598,13 +1685,40 @@ pub enum ImportRefusal {
     /// `IMPORT_UNBALANCED`: a spreadsheet document does not balance.
     Unbalanced,
     /// `IMPORT_UNKNOWN_REF`: a spreadsheet row names an unknown account,
-    /// item, name or tag.
+    /// item, name or tag (U-268: at upload, or as a failed batch when a
+    /// reference went away in between).
     UnknownRef {
-        /// The column.
+        /// The column of the first one.
         field: Option<String>,
+        /// Each one (at most 500; row, column and reason only).
+        refs: Vec<RefProblem>,
+        /// How many in all.
+        ref_count: u64,
     },
     /// `IMPORT_MIXED_GROUP`: one spreadsheet group mixes document types.
     MixedGroup,
+    /// 409 `IMPORT_HAS_ERRORS`: the upload's row problems block the
+    /// commit (U-268); show them and choose a fixed file.
+    HasErrors {
+        /// The upload.
+        session: Option<ImportSessionId>,
+        /// Its problems (the first 25).
+        errors: Vec<RowProblem>,
+    },
+    /// 409 `IMPORT_SESSION_ACTIVE`: the same file is already uploaded and
+    /// not finished; discard that upload first.
+    SessionActive {
+        /// The earlier upload.
+        session: Option<ImportSessionId>,
+        /// Where it stands.
+        status: Option<SessionStatus>,
+    },
+    /// 422 `IMPORT_DOCUMENT_TOTAL` (a failed batch): an invoice or bill
+    /// total is not more than zero, or posted other than its lines' sum.
+    DocumentTotal,
+    /// `JE_AR_AP_NAME_REQUIRED` (a failed batch): a journal entry line on
+    /// accounts receivable or payable needs a customer or vendor.
+    ArApNameRequired,
     /// `IMPORT_INTERRUPTED` (a batch error): the engine stopped while the
     /// job ran (a restart settled it); nothing was posted.
     Interrupted,
@@ -1736,10 +1850,25 @@ fn refusal_from(code: &str, details: Option<&crate::ConflictDetails>) -> Option<
             ImportRefusal::AmountInvalid { rows }
         }
         "IMPORT_UNBALANCED" => ImportRefusal::Unbalanced,
-        "IMPORT_UNKNOWN_REF" => ImportRefusal::UnknownRef {
-            field: text("field"),
-        },
+        "IMPORT_UNKNOWN_REF" => {
+            let (refs, ref_count) = refs_from(details);
+            ImportRefusal::UnknownRef {
+                field: text("field"),
+                refs,
+                ref_count,
+            }
+        }
         "IMPORT_MIXED_GROUP" => ImportRefusal::MixedGroup,
+        "IMPORT_HAS_ERRORS" => ImportRefusal::HasErrors {
+            session: details_id(details, "sessionId"),
+            errors: row_problems_from(details, "errors"),
+        },
+        "IMPORT_SESSION_ACTIVE" => ImportRefusal::SessionActive {
+            session: details_id(details, "existingSessionId"),
+            status: text("status").and_then(|s| SessionStatus::from_wire(&s)),
+        },
+        "IMPORT_DOCUMENT_TOTAL" => ImportRefusal::DocumentTotal,
+        "JE_AR_AP_NAME_REQUIRED" => ImportRefusal::ArApNameRequired,
         "IMPORT_INTERRUPTED" => ImportRefusal::Interrupted,
         "IMPORT_BATCH_UNDONE" => ImportRefusal::BatchUndone,
         "IMPORT_BATCH_NOT_COMMITTED" => ImportRefusal::BatchNotCommitted,
@@ -2085,11 +2214,15 @@ pub(crate) fn one_batch_from(body: &[u8]) -> Result<ImportBatch, ApiError> {
 }
 
 /// A job's `error` object (`None` when absent or null).
-fn failure_from(e: &Value) -> Option<BatchFailure> {
+pub(crate) fn failure_from(e: &Value) -> Option<BatchFailure> {
     e.is_object().then(|| BatchFailure {
         code: e["code"].as_str().unwrap_or_default().to_string(),
         row_number: e["rowNumber"].as_u64(),
         session: opt_id(&e["sessionId"]),
+        field: e["field"]
+            .as_str()
+            .or_else(|| e["details"]["field"].as_str())
+            .map(str::to_string),
         // `message` is never read: it can name accounts and people.
         details: crate::ConflictDetails::new(e["details"].clone()),
     })

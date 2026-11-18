@@ -1198,6 +1198,14 @@ fn main() -> std::process::ExitCode {
         ),
         ("import_transactions::undo", contract_import_transactions::undo),
         (
+            "import_transactions::unknown_refs",
+            contract_import_transactions::unknown_refs,
+        ),
+        (
+            "import_transactions::closed_period",
+            contract_import_transactions::closed_period,
+        ),
+        (
             "import_transactions::recommit",
             contract_import_transactions::recommit,
         ),

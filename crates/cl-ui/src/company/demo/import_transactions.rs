@@ -14,8 +14,8 @@
 use std::collections::BTreeMap;
 
 use cl_api::import_transactions::{
-    BatchError, BatchProgress, BatchState, BatchStatus, EngineRowProblem, ImportBatchId,
-    ImportSessionId, UploadOutcome,
+    BatchFailure, BatchState, BatchStatus, ImportBatchId, ImportSessionId, Progress, RowProblem,
+    UploadOutcome,
 };
 use cl_api::{ApiError, ConflictDetails, ConflictReason, ErrorCode, IdempotencyKey, UserText};
 use cl_core::{CalendarDate, Secret};
@@ -39,6 +39,44 @@ pub fn fixture_bytes(stem: &str) -> Option<&'static [u8]> {
     }
 }
 
+/// The names an upload may refer to (the demo's books now): nothing is
+/// created on import (U-268).
+#[derive(Clone, Debug, Default)]
+pub struct Known {
+    /// Customer and vendor display names.
+    pub names: Vec<String>,
+    /// Account names.
+    pub accounts: Vec<String>,
+    /// Product and service names.
+    pub items: Vec<String>,
+    /// Tag names.
+    pub tags: Vec<String>,
+}
+
+impl Known {
+    /// What the demo company has.
+    pub fn of(d: &mut super::DemoState) -> Known {
+        Known {
+            names: d
+                .contacts_mut()
+                .iter()
+                .map(|c| c.fields.display_name.clone())
+                .collect(),
+            accounts: d
+                .chart
+                .get_or_insert_with(super::chart)
+                .iter()
+                .map(|a| a.fields.name.clone())
+                .collect(),
+            items: d
+                .items_mut()
+                .iter()
+                .map(|i| i.fields.name.clone())
+                .collect(),
+            tags: d.tags_mut().iter().map(|t| t.fields.name.clone()).collect(),
+        }
+    }
+}
 #[derive(Clone)]
 struct Upload {
     hash: String,
@@ -126,11 +164,16 @@ impl DemoTxnImport {
         ))
     }
 
-    /// Reads an upload.
+    /// Reads an upload as the engine does (U-268): every reference must
+    /// already be in the books (nothing is created), so a customer or
+    /// vendor, account, product or tag the demo lacks is
+    /// `IMPORT_UNKNOWN_REF` on its row and column.
     ///
     /// # Errors
-    /// 409 `IMPORT_ALREADY_COMMITTED` for a file imported and not undone.
-    pub fn upload(&mut self, csv: &[u8], accounts: &[String]) -> Result<UploadOutcome, ApiError> {
+    /// 409 `IMPORT_ALREADY_COMMITTED` for a file imported and not undone;
+    /// 409 `IMPORT_SESSION_ACTIVE` for the same file while an earlier
+    /// upload of it is open.
+    pub fn upload(&mut self, csv: &[u8], known: &Known) -> Result<UploadOutcome, ApiError> {
         let hash: String = sha2::Sha256::digest(csv)
             .iter()
             .fold(String::new(), |mut h, b| {
@@ -144,6 +187,29 @@ impl DemoTxnImport {
                 json!({"batchId": b.to_string(), "committedAt": "2026-10-27T12:00:00.000Z"}),
             ));
         }
+        // A session is open until its batch commits, fails or is undone
+        // (the engine's terminal statuses).
+        let open = self.uploads.iter().find_map(|(id, u)| {
+            if u.hash != hash {
+                return None;
+            }
+            match self
+                .batches
+                .values()
+                .find(|b| b.session == *id)
+                .map(|b| b.status)
+            {
+                None | Some(BatchStatus::Draft) => Some((*id, "uploaded")),
+                Some(BatchStatus::Committing) => Some((*id, "committing")),
+                Some(_) => None,
+            }
+        });
+        if let Some((id, status)) = open {
+            return Err(conflict(
+                "IMPORT_SESSION_ACTIVE",
+                json!({"existingSessionId": id.to_string(), "status": status}),
+            ));
+        }
         let text = cl_import::csv::decode(csv);
         let rows = cl_import::csv::parse(&text).unwrap_or_default();
         let mut problems = Vec::new();
@@ -155,16 +221,24 @@ impl DemoTxnImport {
             if let Ok(d) = CalendarDate::parse_wire(cell(2)) {
                 dates.push(d);
             }
-            let account = cell(7);
-            if !account.is_empty() && !accounts.iter().any(|a| a.eq_ignore_ascii_case(account)) {
-                problems.push(EngineRowProblem {
-                    row: u64::try_from(i + 1).unwrap_or(0),
-                    field: Some("line_account".into()),
-                    code: "IMPORT_UNKNOWN_REF".into(),
-                });
+            let row = u64::try_from(i + 1).unwrap_or(0);
+            for (col, field, list) in [
+                (4, "name", &known.names),
+                (7, "line_account", &known.accounts),
+                (8, "line_item", &known.items),
+                (13, "line_tag", &known.tags),
+            ] {
+                let v = cell(col);
+                if !v.is_empty() && !list.iter().any(|a| a.eq_ignore_ascii_case(v)) {
+                    problems.push(RowProblem {
+                        row_number: row,
+                        field: Some(field.into()),
+                        code: "IMPORT_UNKNOWN_REF".into(),
+                    });
+                }
             }
         }
-        let id = ImportSessionId::new_v4();
+        let id = ImportSessionId::parse(&uuid::Uuid::new_v4().to_string())?;
         self.uploads.insert(
             id,
             Upload {
@@ -176,10 +250,10 @@ impl DemoTxnImport {
         Ok(UploadOutcome {
             session: id,
             total_rows: u64::try_from(rows.len().saturating_sub(1)).unwrap_or(0),
+            documents: Some(u64::try_from(groups.len()).unwrap_or(0)),
             problems,
         })
     }
-
     /// Discards an upload.
     pub fn discard(&mut self, id: ImportSessionId) {
         self.uploads.remove(&id);
@@ -196,7 +270,7 @@ impl DemoTxnImport {
         if self.batches.values().any(|b| b.session == session) {
             return Err(conflict("IMPORT_SESSION_IN_BATCH", json!({})));
         }
-        let id = ImportBatchId::new_v4();
+        let id = ImportBatchId::parse(&uuid::Uuid::new_v4().to_string())?;
         self.batches.insert(
             id,
             Batch {
@@ -305,7 +379,7 @@ impl DemoTxnImport {
         let b = self.batches.get_mut(&id).ok_or_else(not_found)?;
         let up = self.uploads.get(&b.session);
         let total = up.map_or(0, |u| u.documents);
-        if b.status.running() {
+        if b.status.is_running() {
             if b.polls_left > 0 {
                 b.polls_left -= 1;
             } else if b.status == BatchStatus::Committing {
@@ -333,12 +407,12 @@ impl DemoTxnImport {
         Ok(BatchState {
             id,
             status: b.status,
-            progress: BatchProgress {
-                step: Some("posting".into()),
+            progress: Progress {
+                step: "posting".into(),
                 done,
                 total,
             },
-            error: None::<BatchError>,
+            error: None::<BatchFailure>,
             backup_ref: b.backup_ref.clone(),
         })
     }

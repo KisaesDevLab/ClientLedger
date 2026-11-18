@@ -230,6 +230,10 @@ pub(crate) fn refusal_code(r: &ImportRefusal) -> &'static str {
         ImportRefusal::Unbalanced => "unbalanced",
         ImportRefusal::UnknownRef { .. } => "unknown_ref",
         ImportRefusal::MixedGroup => "mixed_group",
+        ImportRefusal::HasErrors { .. } => "has_errors",
+        ImportRefusal::SessionActive { .. } => "session_active",
+        ImportRefusal::DocumentTotal => "document_total",
+        ImportRefusal::ArApNameRequired => "ar_ap_name_required",
         ImportRefusal::Interrupted => "interrupted",
         ImportRefusal::BatchUndone => "batch_undone",
         ImportRefusal::BatchNotCommitted => "batch_not_committed",
@@ -485,10 +489,14 @@ pub(crate) fn merge_matches<'a>(
             }
             Some(have) => {
                 let rows = have.rows.saturating_add(m.rows);
+                let role = have.system_role.or(m.system_role);
                 if rank(m.status) > rank(have.status) {
                     *have = m.clone();
                 }
                 have.rows = rows;
+                // Only the account list carries the role (U-272): keep it
+                // whichever file's match won.
+                have.system_role = role;
                 if have.name.is_empty() {
                     have.name.clone_from(&m.name);
                 }

@@ -25,8 +25,8 @@ use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 use cl_api::import_transactions::{
-    BatchRunRequest, BatchState, BatchStatus, ImportBatchId, TxnImportRefusal, UndoBlocker,
-    UploadOutcome, txn_import_refusal,
+    BatchRunRequest, BatchState, BatchStatus, ImportBatchId, ImportRefusal, ImportSessionId,
+    RefProblem, SessionStatus, UndoBlocker, UploadOutcome, import_refusal,
 };
 use cl_api::{ApiError, Capabilities, ClosedPeriodAuthorization, IdempotencyKey, OrphanLabel};
 use cl_api::{RequestGroup, Session};
@@ -36,6 +36,7 @@ use cl_model::CommandId;
 use cl_model::imports::csv_txn::{self, DocCounts, MissingColumn, TxnField, TxnMapping, TxnPlan};
 use serde_json::{Value, json};
 
+use crate::company::demo::import_transactions::Known;
 use crate::company::{CompanyEvent, CompanyLink, Task};
 use crate::forms::closing_prompt::ClosingPrompt;
 use crate::i18n::t;
@@ -229,6 +230,9 @@ pub struct EngineProblem {
     pub field: Option<String>,
     /// The engine code.
     pub code: String,
+    /// Why a reference was not found (`IMPORT_UNKNOWN_REF` after the
+    /// commit started, U-268 `refs[].reason`).
+    pub reason: Option<cl_api::import_transactions::RefReason>,
 }
 
 /// The Import Transactions window.
@@ -260,6 +264,8 @@ pub struct CsvTransactionsScreen {
     held: Option<Held>,
     /// A commit was sent at least once: the upload is never discarded.
     commit_sent: bool,
+    /// One discard-and-upload after 409 `IMPORT_SESSION_ACTIVE` was tried.
+    retried_active: bool,
     pub(crate) state: Option<BatchState>,
     pub(crate) backup_ref: Option<String>,
     pub(crate) trouble: Option<Trouble>,
@@ -317,6 +323,7 @@ impl CsvTransactionsScreen {
             next_poll: None,
             held: None,
             commit_sent: false,
+            retried_active: false,
             state: None,
             backup_ref: None,
             trouble: None,
@@ -577,36 +584,59 @@ impl CsvTransactionsScreen {
             return;
         }
         let csv = plan.canonical_csv().into_bytes();
-        let accounts: Vec<String> = crate::company::demo::chart()
-            .into_iter()
-            .map(|a| a.fields.name)
-            .collect();
         let demo_csv = csv.clone();
+        self.retried_active = false;
         self.phase = Phase::Uploading;
         self.upload_job = Some(self.write(
             "orphan.txn_import_upload",
             None,
-            move |d| d.txn_import.upload(&demo_csv, &accounts),
+            move |d| {
+                let known = Known::of(d);
+                d.txn_import.upload(&demo_csv, &known)
+            },
             move |s| async move { s.import_transactions().upload(&csv).await },
         ));
+    }
+
+    /// The owner's row for an engine row of the canonical file (0 when it
+    /// is not one).
+    fn owner_row(&self, engine_row: u64) -> usize {
+        usize::try_from(engine_row)
+            .ok()
+            .and_then(|r| self.plan.as_ref().and_then(|pl| pl.source_row(r)))
+            .unwrap_or(0)
+    }
+
+    /// The engine's row problems on the owner's rows.
+    fn take_problems(&mut self, problems: &[cl_api::import_transactions::RowProblem]) {
+        self.engine_problems = problems
+            .iter()
+            .map(|p| EngineProblem {
+                row: self.owner_row(p.row_number),
+                field: p.field.clone(),
+                code: p.code.clone(),
+                reason: None,
+            })
+            .collect();
+    }
+
+    /// The references a failed commit named (U-268 `details.refs`).
+    fn take_refs(&mut self, refs: &[RefProblem]) {
+        self.engine_problems = refs
+            .iter()
+            .map(|r| EngineProblem {
+                row: self.owner_row(r.row_number),
+                field: r.field.clone(),
+                code: "IMPORT_UNKNOWN_REF".into(),
+                reason: r.reason,
+            })
+            .collect();
     }
 
     fn after_upload(&mut self, r: Result<UploadOutcome, ApiError>) {
         match r {
             Ok(u) if !u.problems.is_empty() => {
-                let plan = self.plan.as_ref();
-                self.engine_problems = u
-                    .problems
-                    .iter()
-                    .map(|p| EngineProblem {
-                        row: usize::try_from(p.row)
-                            .ok()
-                            .and_then(|r| plan.and_then(|pl| pl.source_row(r)))
-                            .unwrap_or(0),
-                        field: p.field.clone(),
-                        code: p.code.clone(),
-                    })
-                    .collect();
+                self.take_problems(&u.problems);
                 tracing::info!(target: "txn_import", problems = u.problems.len(), "the books found row problems");
                 // Nothing can be committed from it: let it go.
                 self.upload = Some(u);
@@ -821,15 +851,62 @@ impl CsvTransactionsScreen {
 
     fn refused(&mut self, e: &ApiError) {
         tracing::info!(target: "txn_import", detail = %cl_core::OwnerFacing::scrubbed_detail(e), "refused");
-        self.trouble = Some(match txn_import_refusal(e) {
-            Some(TxnImportRefusal::AlreadyCommitted { committed_at, .. }) => {
+        self.trouble = Some(match import_refusal(e) {
+            Some(ImportRefusal::AlreadyCommitted { committed_at, .. }) => {
                 Trouble::Already { when: committed_at }
             }
-            Some(TxnImportRefusal::Busy) => Trouble::Busy,
-            Some(TxnImportRefusal::AdminRequired) => Trouble::AdminRequired,
-            Some(TxnImportRefusal::UndoBlocked { blockers }) => Trouble::UndoBlocked(blockers),
-            Some(TxnImportRefusal::SessionInBatch) | None => Trouble::Engine,
+            Some(ImportRefusal::Busy) => Trouble::Busy,
+            Some(ImportRefusal::AdminRequired) => Trouble::AdminRequired,
+            Some(ImportRefusal::UndoBlocked { blockers }) => Trouble::UndoBlocked(blockers),
+            // 409 at commit (U-268): the upload's row problems. Nothing was
+            // posted and the commit never started: show them by row and let
+            // the upload go, so a fixed file can be chosen.
+            Some(ImportRefusal::HasErrors { errors, .. }) => {
+                self.take_problems(&errors);
+                self.commit_sent = false;
+                self.forget_upload();
+                return;
+            }
+            // An earlier upload of the same file is still open (a window
+            // closed mid-import, or an engine restart): one discard and one
+            // new upload; a running one is another import under way.
+            Some(ImportRefusal::SessionActive { session, status }) => match (session, status) {
+                (_, Some(SessionStatus::Committing)) => Trouble::Busy,
+                (Some(id), _) if !self.retried_active => {
+                    self.retried_active = true;
+                    self.discard_then_upload(id);
+                    return;
+                }
+                _ => Trouble::Engine,
+            },
+            Some(_) | None => Trouble::Engine,
         });
+    }
+
+    /// Discards the open upload `id` (409 `IMPORT_SESSION_ACTIVE`), then
+    /// sends the file again.
+    fn discard_then_upload(&mut self, id: ImportSessionId) {
+        let Some(plan) = self.plan.as_ref() else {
+            return;
+        };
+        tracing::info!(target: "txn_import", "an earlier upload of this file was open; discarding it");
+        let csv = plan.canonical_csv().into_bytes();
+        let demo_csv = csv.clone();
+        self.phase = Phase::Uploading;
+        self.upload_job = Some(self.write(
+            "orphan.txn_import_upload",
+            None,
+            move |d| {
+                d.txn_import.discard(id);
+                let known = Known::of(d);
+                d.txn_import.upload(&demo_csv, &known)
+            },
+            move |s| async move {
+                let it = s.import_transactions();
+                it.discard(id).await?;
+                it.upload(&csv).await
+            },
+        ));
     }
 
     fn maybe_read_batch(&mut self) {
@@ -870,7 +947,7 @@ impl CsvTransactionsScreen {
         let status = st.status;
         self.state = Some(st.clone());
         match (action, status) {
-            (_, s) if s.running() => {
+            (_, s) if s.is_running() => {
                 self.phase = Phase::Running(action);
                 self.next_poll = Some(Instant::now() + POLL_EVERY);
             }
@@ -892,15 +969,26 @@ impl CsvTransactionsScreen {
                 self.held = None;
                 self.phase = Phase::Idle;
                 let e = st.error.clone();
+                // U-268: a reference that went away after the upload lists
+                // every one by row.
+                if let Some(ImportRefusal::UnknownRef { refs, .. }) = e
+                    .as_ref()
+                    .and_then(cl_api::import_transactions::BatchFailure::refusal)
+                {
+                    self.take_refs(&refs);
+                }
                 self.trouble = Some(Trouble::Failed {
                     row: e
                         .as_ref()
-                        .and_then(|e| e.row)
-                        .and_then(|r| usize::try_from(r).ok())
-                        .and_then(|r| self.plan.as_ref().and_then(|p| p.source_row(r))),
+                        .and_then(|e| e.row_number)
+                        .map(|r| self.owner_row(r))
+                        .filter(|r| *r > 0),
                     code: e.as_ref().map_or_else(String::new, |e| e.code.clone()),
                     field: e.and_then(|e| e.field),
                 });
+                // Nothing was posted: Try again (after fixing the books) runs
+                // the same batch; Back or another file lets this upload go.
+                self.commit_sent = false;
             }
             // Check status found the run never started: Try again sends
             // the same request with the same key.
@@ -946,8 +1034,9 @@ impl CsvTransactionsScreen {
                 self.trouble = None;
                 self.begin(a, None);
             }
-            (Phase::Idle, Some(Trouble::Failed { .. })) => {
+            (Phase::Idle, Some(Trouble::Failed { .. })) if self.batch.is_some() => {
                 self.trouble = None;
+                self.engine_problems.clear();
                 self.begin(Action::Commit, None);
             }
             _ => {}
@@ -1002,6 +1091,11 @@ impl CsvTransactionsScreen {
     pub(crate) fn back(&mut self) {
         if self.phase != Phase::Idle || self.commit_sent {
             return;
+        }
+        if self.step == Step::Preview {
+            // The columns may change: a failed batch's upload goes.
+            self.forget_upload();
+            self.engine_problems.clear();
         }
         self.step = match self.step {
             Step::Map => Step::Choose,

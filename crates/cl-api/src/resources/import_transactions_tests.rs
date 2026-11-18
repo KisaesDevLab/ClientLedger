@@ -1,7 +1,6 @@
 //! Unit tests of the spreadsheet import resource (P31 D5), against a mock
 //! engine. The live engine is covered by
-//! `tests/contract/contract_import_transactions.rs` (pending until the pin
-//! has `imports-batch-v1` and `imports-transactions-v1`).
+//! `tests/contract/contract_import_transactions.rs`.
 
 use super::*;
 use crate::errors::LocalValidation;
@@ -69,8 +68,8 @@ async fn upload_sends_kind_transactions_and_keeps_codes_not_messages() {
     assert_eq!(out.total_rows, 4);
     assert_eq!(
         out.problems,
-        vec![EngineRowProblem {
-            row: 3,
+        vec![RowProblem {
+            row_number: 3,
             field: Some("line_account".into()),
             code: "IMPORT_UNKNOWN_REF".into(),
         }]
@@ -187,7 +186,7 @@ fn batch_reads_status_progress_and_error() {
     )
     .expect("batch");
     assert_eq!(b.status, BatchStatus::Committing);
-    assert!(b.status.running());
+    assert!(b.status.is_running());
     assert_eq!(b.progress.done, 3);
     assert_eq!(b.progress.total, 10);
     assert_eq!(b.error, None);
@@ -200,14 +199,10 @@ fn batch_reads_status_progress_and_error() {
     )
     .expect("batch");
     assert_eq!(f.status, BatchStatus::Failed);
-    assert_eq!(
-        f.error,
-        Some(BatchError {
-            code: "IMPORT_UNBALANCED".into(),
-            row: Some(7),
-            field: None
-        })
-    );
+    let e = f.error.expect("error");
+    assert_eq!(e.code, "IMPORT_UNBALANCED");
+    assert_eq!(e.row_number, Some(7));
+    assert_eq!(e.field, None);
     assert!(batch_from(br#"{"batch":{"id":"nope","status":"draft"}}"#).is_err());
     assert!(
         batch_from(format!(r#"{{"batch":{{"id":"{BATCH}","status":"weird"}}}}"#).as_bytes())
@@ -239,9 +234,10 @@ async fn refusals_are_classified() {
     let s = session_with_caps(&server, &ALL).await;
     let e = s.import_transactions().upload(b"x").await.expect_err("409");
     assert_eq!(
-        txn_import_refusal(&e),
-        Some(TxnImportRefusal::AlreadyCommitted {
+        import_refusal(&e),
+        Some(ImportRefusal::AlreadyCommitted {
             batch: Some(bid()),
+            session: Some(SESSION.parse().expect("id")),
             committed_at: Some("2026-11-01T10:00:00Z".into()),
         })
     );
@@ -251,8 +247,8 @@ async fn refusals_are_classified() {
         .await
         .expect_err("409");
     assert_eq!(
-        txn_import_refusal(&e),
-        Some(TxnImportRefusal::UndoBlocked {
+        import_refusal(&e),
+        Some(ImportRefusal::UndoBlocked {
             blockers: vec![UndoBlocker {
                 kind: "payment".into(),
                 id: Some("p1".into()),
@@ -260,5 +256,117 @@ async fn refusals_are_classified() {
             }]
         })
     );
-    assert_eq!(txn_import_refusal(&ApiError::NoCompanyOpen), None);
+    assert_eq!(import_refusal(&ApiError::NoCompanyOpen), None);
+}
+
+/// U-268 as built: a batch that failed on a reference that went away after
+/// the upload carries the column at the top level and every reference in
+/// `details.refs` (rows, columns, reasons; never a name).
+#[test]
+fn an_unknown_ref_batch_error_reads_field_and_refs() {
+    let f = batch_from(
+        format!(
+            r#"{{"batch":{{"id":"{BATCH}","status":"failed"}},
+            "error":{{"code":"IMPORT_UNKNOWN_REF","message":"Unknown Pine Co","rowNumber":4,"field":"name","sessionId":"{SESSION}",
+            "details":{{"field":"name","refs":[{{"rowNumber":4,"field":"name","reason":"ambiguous"}},{{"rowNumber":6,"field":"line_item","reason":"no_account"}},{{"rowNumber":7,"field":"line_tag","reason":"later"}}],"refCount":12}}}}}}"#
+        )
+        .as_bytes(),
+    )
+    .expect("batch");
+    let e = f.error.expect("error");
+    assert_eq!(e.field.as_deref(), Some("name"));
+    assert_eq!(e.row_number, Some(4));
+    match e.refusal() {
+        Some(ImportRefusal::UnknownRef {
+            field,
+            refs,
+            ref_count,
+        }) => {
+            assert_eq!(field.as_deref(), Some("name"));
+            assert_eq!(ref_count, 12);
+            assert_eq!(refs.len(), 3);
+            assert_eq!(refs[0].reason, Some(RefReason::Ambiguous));
+            assert_eq!(refs[1].field.as_deref(), Some("line_item"));
+            assert_eq!(refs[1].reason, Some(RefReason::NoAccount));
+            assert_eq!(refs[2].reason, None, "an unknown reason is kept as none");
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(!format!("{e:?}").contains("Pine"));
+}
+
+/// U-268: every row code arrives on the upload with its column; the
+/// document count is read.
+#[test]
+fn upload_reads_the_e4_row_codes() {
+    let u = upload_from(
+        format!(
+            r#"{{"session":{{"id":"{SESSION}"}},"preview":{{"totalRows":9,"documentCount":4}},
+            "validationErrors":[
+              {{"rowNumber":2,"field":null,"code":"IMPORT_UNBALANCED"}},
+              {{"rowNumber":3,"field":"line_amount","code":"IMPORT_AMOUNT_CENTS"}},
+              {{"rowNumber":4,"field":"line_item","code":"IMPORT_FIELD_NOT_ALLOWED"}},
+              {{"rowNumber":5,"field":"type","code":"IMPORT_UNKNOWN_TYPE"}},
+              {{"rowNumber":6,"field":"date","code":"IMPORT_MISSING_FIELD"}},
+              {{"rowNumber":7,"field":"type","code":"IMPORT_MIXED_GROUP"}},
+              {{"rowNumber":8,"field":"line_amount","code":"IMPORT_DOCUMENT_TOTAL"}},
+              {{"rowNumber":9,"field":"line_tag","code":"IMPORT_UNKNOWN_REF"}}]}}"#
+        )
+        .as_bytes(),
+    )
+    .expect("upload");
+    assert_eq!(u.total_rows, 9);
+    assert_eq!(u.documents, Some(4));
+    assert_eq!(u.problems.len(), 8);
+    assert_eq!(u.problems[0].field, None);
+    assert_eq!(u.problems[7].field.as_deref(), Some("line_tag"));
+}
+
+/// 409 `IMPORT_HAS_ERRORS` at commit and `IMPORT_SESSION_ACTIVE` at upload.
+#[tokio::test]
+async fn has_errors_and_session_active_are_classified() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/imports/upload"))
+        .respond_with(json(
+            409,
+            &format!(
+                r#"{{"error":{{"code":"IMPORT_SESSION_ACTIVE","message":"m","details":{{"existingSessionId":"{SESSION}","status":"uploaded"}}}}}}"#
+            ),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path_regex(r"/commit$"))
+        .respond_with(json(
+            409,
+            &format!(
+                r#"{{"error":{{"code":"IMPORT_HAS_ERRORS","message":"m","details":{{"sessionId":"{SESSION}","errors":[{{"rowNumber":5,"field":"type","code":"IMPORT_UNKNOWN_TYPE","message":"x"}}]}}}}}}"#
+            ),
+        ))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(&server, &ALL).await;
+    let e = s.import_transactions().upload(b"x").await.expect_err("409");
+    assert_eq!(
+        import_refusal(&e),
+        Some(ImportRefusal::SessionActive {
+            session: Some(SESSION.parse().expect("id")),
+            status: Some(crate::imports::SessionStatus::Uploaded),
+        })
+    );
+    let e = s
+        .import_transactions()
+        .commit(bid(), &req(), IdempotencyKey::new())
+        .await
+        .expect_err("409");
+    match import_refusal(&e) {
+        Some(ImportRefusal::HasErrors { session, errors }) => {
+            assert_eq!(session, Some(SESSION.parse().expect("id")));
+            assert_eq!(errors.len(), 1);
+            assert_eq!(errors[0].row_number, 5);
+            assert_eq!(errors[0].code, "IMPORT_UNKNOWN_TYPE");
+        }
+        other => panic!("{other:?}"),
+    }
 }

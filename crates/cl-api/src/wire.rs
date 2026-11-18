@@ -545,6 +545,10 @@ impl Capabilities {
     /// U-268 (P31 E4): kind `transactions` (invoices, bills and journal
     /// entries from a spreadsheet) posted inside the batch.
     pub const IMPORTS_TRANSACTIONS: &'static str = "imports-transactions-v1";
+    /// U-272 (P31): a QBD/QBO Retained Earnings account-list row merges
+    /// into the system retained earnings account in a batch (`systemRole`
+    /// `retained_earnings` on `accountMatches`).
+    pub const QBD_RETAINED_EARNINGS: &'static str = "qbd-retained-earnings-v1";
     /// U-175 (P26 QA-6): a bank file goes into any bank register account
     /// (`bank`, `checking`, `savings`, `cash`, `petty_cash`) or a card.
     pub const BANK_IMPORT_ACCOUNT_TYPES: &'static str = "bank-import-account-types-v1";

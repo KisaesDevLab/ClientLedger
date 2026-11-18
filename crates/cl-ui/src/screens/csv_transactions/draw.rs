@@ -26,9 +26,11 @@ fn field_name(f: TxnField) -> String {
     t(&format!("txn_import.field.{}", f.wire()))
 }
 
+/// The engine's column in the owner's words ("A cell" when it named none
+/// or one this build doesn't know).
 fn engine_field_name(f: Option<&str>) -> String {
     f.and_then(TxnField::from_wire)
-        .map_or_else(|| t("txn_import.field.line_account"), field_name)
+        .map_or_else(|| t("txn_import.field.unknown"), field_name)
 }
 
 fn row_label(row: usize) -> String {
@@ -56,7 +58,12 @@ pub(super) fn problem_text(p: &RowProblem) -> String {
 
 /// A problem the books found, in the owner's words.
 pub(super) fn engine_problem_text(p: &EngineProblem) -> String {
-    let key = format!("txn_import.engine.{}", p.code);
+    use cl_api::import_transactions::RefReason;
+    let key = match p.reason {
+        Some(RefReason::Ambiguous) => format!("txn_import.engine.{}.ambiguous", p.code),
+        Some(RefReason::NoAccount) => format!("txn_import.engine.{}.no_account", p.code),
+        Some(RefReason::Unknown) | None => format!("txn_import.engine.{}", p.code),
+    };
     let field = engine_field_name(p.field.as_deref());
     let text = t_with(&key, &[("field", &field)]);
     if text == key {
@@ -225,6 +232,8 @@ impl CsvTransactionsScreen {
                 ("rows", &plan.rows.to_string()),
             ],
         ));
+        // U-268: the import adds no names, products, tags or accounts.
+        note(ui, tokens, &t("txn_import.preview.nothing_created"));
         if plan.problems.is_empty() && self.engine_problems.is_empty() {
             note(ui, tokens, &t("txn_import.preview.ready"));
         } else {
@@ -351,6 +360,7 @@ impl CsvTransactionsScreen {
                     row: row.unwrap_or(0),
                     field: field.clone(),
                     code: code.clone(),
+                    reason: None,
                 });
                 match row {
                     Some(r) => warn(

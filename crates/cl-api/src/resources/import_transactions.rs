@@ -14,14 +14,19 @@
 //! - Both carry `backupRef`, the file name of the verified backup the
 //!   desktop made just before (non-negotiable 9).
 //! - Upload is refused for an already-imported file (409
-//!   `IMPORT_ALREADY_COMMITTED`); [`txn_import_refusal`] reads it.
+//!   `IMPORT_ALREADY_COMMITTED`) and for the same file while an earlier
+//!   upload of it is open (409 `IMPORT_SESSION_ACTIVE`: discard that one
+//!   first); [`import_refusal`] reads both, and the commit's 409
+//!   `IMPORT_HAS_ERRORS`.
+//! - Row problems (U-268 codes) come back on the upload; nothing is
+//!   created on import, so names, items, tags and accounts must exist.
 //! - Nothing here reads an amount: the engine's answers carry codes, row
 //!   numbers and counts, and the engine's `message` is never kept (it may
 //!   embed names, plan §2a E3).
 //!
 //! The routes are P31 D1's shared rows in [`crate::OPERATIONS`] (the same
-//! ones `resources/imports.rs` uses); the contract test is pending by
-//! capability.
+//! ones `resources/imports.rs` uses); the contract test runs on engines
+//! with `imports-transactions-v1` (pin 1f2c9bb3 on).
 
 use std::fmt;
 
@@ -30,7 +35,8 @@ use serde_json::{Value, json};
 use crate::client::{Call, Method};
 use crate::errors::ApiError;
 use crate::idempotency::IdempotencyKey;
-use crate::resources::customer_payments::{error_code, require};
+use crate::resources::customer_payments::require;
+use crate::resources::imports::{failure_from, row_problem_from};
 use crate::resources::operations::{
     IMPORT_BATCH, IMPORT_BATCH_COMMIT, IMPORT_BATCH_CREATE, IMPORT_BATCH_UNDO, IMPORTS_DISCARD,
     IMPORTS_UPLOAD, Operation,
@@ -74,139 +80,32 @@ fn at(o: &Operation, id: &str) -> Call {
 }
 
 // ---- Types --------------------------------------------------------------------
+//
+// The ids, the batch status, the row problem, the batch failure, the undo
+// blocker and the refusals are crate::imports's: one batch model for every
+// import (P31 E4 adoption).
 
-macro_rules! uuid_id {
-    ($name:ident, $doc:literal) => {
-        #[doc = $doc]
-        #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-        pub struct $name(uuid::Uuid);
-
-        impl $name {
-            /// A new random id (the demo's).
-            #[must_use]
-            pub fn new_v4() -> $name {
-                $name(uuid::Uuid::new_v4())
-            }
-        }
-
-        impl std::str::FromStr for $name {
-            type Err = uuid::Error;
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                uuid::Uuid::parse_str(s).map($name)
-            }
-        }
-
-        impl fmt::Display for $name {
-            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                self.0.fmt(f)
-            }
-        }
-    };
-}
-
-uuid_id!(ImportSessionId, "An upload (an engine import session).");
-uuid_id!(
-    ImportBatchId,
-    "An import batch: the unit of commit and undo."
-);
-
-/// One row problem the engine found (codes and row numbers only; the
-/// engine's message is never kept).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EngineRowProblem {
-    /// The engine's row number in the uploaded file (1 is the header; 0 the
-    /// whole file).
-    pub row: u64,
-    /// The engine's column name, when one cell is at fault.
-    pub field: Option<String>,
-    /// The engine's code (`IMPORT_UNKNOWN_REF`, `IMPORT_UNBALANCED`, …).
-    pub code: String,
-}
-
+pub use crate::resources::imports::{
+    BatchFailure, BatchStatus, ImportBatchId, ImportRefusal, ImportSessionId, Progress, RefProblem,
+    RefReason, RowProblem, SessionStatus, UndoBlocker, import_refusal,
+};
 /// What an upload made.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UploadOutcome {
     /// The upload.
     pub session: ImportSessionId,
-    /// Data rows the engine read.
+    /// Data rows (lines) the engine read.
     pub total_rows: u64,
-    /// Problems it found (nothing can be committed while there are any).
-    pub problems: Vec<EngineRowProblem>,
+    /// Documents the engine found (`preview.documentCount`).
+    pub documents: Option<u64>,
+    /// Row problems it found (U-268 codes, the column, the file row with
+    /// the header as row 1). Any one blocks the commit: 409
+    /// `IMPORT_HAS_ERRORS` (or, for `IMPORT_UNKNOWN_REF`, a failed batch).
+    pub problems: Vec<RowProblem>,
 }
 
-/// Where a batch is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BatchStatus {
-    /// Created, not committed.
-    Draft,
-    /// The commit is running.
-    Committing,
-    /// Everything posted.
-    Committed,
-    /// The commit (or a restart during it) failed; nothing posted.
-    Failed,
-    /// The undo is running.
-    Undoing,
-    /// Undone: nothing the batch made remains.
-    Undone,
-}
-
-impl BatchStatus {
-    fn from_wire(s: &str) -> Option<BatchStatus> {
-        Some(match s {
-            "draft" => BatchStatus::Draft,
-            "committing" => BatchStatus::Committing,
-            "committed" => BatchStatus::Committed,
-            "failed" => BatchStatus::Failed,
-            "undoing" => BatchStatus::Undoing,
-            "undone" => BatchStatus::Undone,
-            _ => return None,
-        })
-    }
-
-    /// The engine's name.
-    #[must_use]
-    pub const fn as_wire(self) -> &'static str {
-        match self {
-            BatchStatus::Draft => "draft",
-            BatchStatus::Committing => "committing",
-            BatchStatus::Committed => "committed",
-            BatchStatus::Failed => "failed",
-            BatchStatus::Undoing => "undoing",
-            BatchStatus::Undone => "undone",
-        }
-    }
-
-    /// A commit or undo is still running.
-    #[must_use]
-    pub const fn running(self) -> bool {
-        matches!(self, BatchStatus::Committing | BatchStatus::Undoing)
-    }
-}
-
-/// How far a running batch is.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct BatchProgress {
-    /// The engine's step name (a code).
-    pub step: Option<String>,
-    /// Done so far.
-    pub done: u64,
-    /// Of.
-    pub total: u64,
-}
-
-/// Why a batch failed (nothing posted).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BatchError {
-    /// The engine code.
-    pub code: String,
-    /// The uploaded file's row, when one row is at fault.
-    pub row: Option<u64>,
-    /// The column, when one cell is at fault (`IMPORT_UNKNOWN_REF`).
-    pub field: Option<String>,
-}
-
-/// A batch as the engine has it now.
+/// A batch as the engine has it now (the parts the spreadsheet screen
+/// reads; `crate::imports::Imports::batch` reads it whole).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BatchState {
     /// The batch.
@@ -214,13 +113,13 @@ pub struct BatchState {
     /// Where it is.
     pub status: BatchStatus,
     /// Progress while running.
-    pub progress: BatchProgress,
-    /// Why it failed.
-    pub error: Option<BatchError>,
+    pub progress: Progress,
+    /// Why it failed (code, row, column; `IMPORT_UNKNOWN_REF` carries
+    /// `details.refs`).
+    pub error: Option<BatchFailure>,
     /// The backup file the commit named.
     pub backup_ref: Option<String>,
 }
-
 /// A commit or undo request.
 #[derive(Clone, Default)]
 pub struct BatchRunRequest {
@@ -239,92 +138,10 @@ impl fmt::Debug for BatchRunRequest {
     }
 }
 
-/// Something the batch blocks undo on.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct UndoBlocker {
-    /// What it is (`payment`, `reconciliation`, `deposit`, …).
-    pub kind: String,
-    /// Its id.
-    pub id: Option<String>,
-    /// Why (a code).
-    pub reason: Option<String>,
-}
-
-/// A refusal the screen explains (U-261, U-263, U-268).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum TxnImportRefusal {
-    /// 409 `IMPORT_ALREADY_COMMITTED`: this file was imported before.
-    AlreadyCommitted {
-        /// The earlier batch.
-        batch: Option<ImportBatchId>,
-        /// When (engine text).
-        committed_at: Option<String>,
-    },
-    /// 409 `IMPORT_BUSY`: another import is running in this company.
-    Busy,
-    /// 409 `IMPORT_SESSION_IN_BATCH`: the upload is already in a batch.
-    SessionInBatch,
-    /// 409 `IMPORT_UNDO_BLOCKED`: later work uses what the batch made.
-    UndoBlocked {
-        /// What blocks it.
-        blockers: Vec<UndoBlocker>,
-    },
-    /// 403 `IMPORT_ADMIN_REQUIRED`: only an Admin may commit or undo.
-    AdminRequired,
-}
-
-/// Classifies `e` (`None` for anything else: closed periods, passwords,
-/// network, plain validation).
-#[must_use]
-pub fn txn_import_refusal(e: &ApiError) -> Option<TxnImportRefusal> {
-    let code = error_code(e)?;
-    let details = match e {
-        ApiError::Conflict { details, .. } => Some(details),
-        _ => None,
-    };
-    Some(match code {
-        "IMPORT_ALREADY_COMMITTED" => TxnImportRefusal::AlreadyCommitted {
-            batch: details.and_then(|d| d.id("batchId")),
-            committed_at: details
-                .and_then(|d| d.text("committedAt"))
-                .map(str::to_string),
-        },
-        "IMPORT_BUSY" => TxnImportRefusal::Busy,
-        "IMPORT_SESSION_IN_BATCH" => TxnImportRefusal::SessionInBatch,
-        "IMPORT_UNDO_BLOCKED" => TxnImportRefusal::UndoBlocked {
-            blockers: details
-                .and_then(|d| d.raw("blockers"))
-                .and_then(Value::as_array)
-                .map(|l| {
-                    l.iter()
-                        .filter_map(|b| {
-                            Some(UndoBlocker {
-                                kind: b.get("kind")?.as_str()?.to_string(),
-                                id: b.get("id").and_then(Value::as_str).map(str::to_string),
-                                reason: b.get("reason").and_then(Value::as_str).map(str::to_string),
-                            })
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
-        },
-        "IMPORT_ADMIN_REQUIRED" => TxnImportRefusal::AdminRequired,
-        _ => return None,
-    })
-}
-
 // ---- Parsing --------------------------------------------------------------------
 
 fn parse_json(body: &[u8]) -> Result<Value, ApiError> {
     serde_json::from_slice(body).map_err(|_| decode_err())
-}
-
-fn row_problem(v: &Value) -> Option<EngineRowProblem> {
-    Some(EngineRowProblem {
-        row: v.get("rowNumber").and_then(Value::as_u64).unwrap_or(0),
-        field: v.get("field").and_then(Value::as_str).map(str::to_string),
-        code: v.get("code")?.as_str()?.to_string(),
-    })
 }
 
 pub(crate) fn upload_from(body: &[u8]) -> Result<UploadOutcome, ApiError> {
@@ -335,7 +152,7 @@ pub(crate) fn upload_from(body: &[u8]) -> Result<UploadOutcome, ApiError> {
         .ok_or_else(decode_err)?;
     let problems = v["validationErrors"]
         .as_array()
-        .map(|l| l.iter().filter_map(row_problem).collect())
+        .map(|l| l.iter().filter_map(row_problem_from).collect())
         .unwrap_or_default();
     Ok(UploadOutcome {
         session,
@@ -343,6 +160,7 @@ pub(crate) fn upload_from(body: &[u8]) -> Result<UploadOutcome, ApiError> {
             .as_u64()
             .or_else(|| v["session"]["rowCount"].as_u64())
             .unwrap_or(0),
+        documents: v["preview"]["documentCount"].as_u64(),
         problems,
     })
 }
@@ -367,20 +185,15 @@ pub(crate) fn batch_from(body: &[u8]) -> Result<BatchState, ApiError> {
     Ok(BatchState {
         id,
         status,
-        progress: BatchProgress {
-            step: p["step"].as_str().map(str::to_string),
+        progress: Progress {
+            step: p["step"].as_str().unwrap_or_default().to_string(),
             done: p["done"].as_u64().unwrap_or(0),
             total: p["total"].as_u64().unwrap_or(0),
         },
-        error: err["code"].as_str().map(|c| BatchError {
-            code: c.to_string(),
-            row: err["rowNumber"].as_u64(),
-            field: err["field"].as_str().map(str::to_string),
-        }),
+        error: failure_from(err).filter(|e| !e.code.is_empty()),
         backup_ref: b["backupRef"].as_str().map(str::to_string),
     })
 }
-
 fn multipart(bytes: &[u8]) -> (String, Vec<u8>) {
     let boundary = format!("cl-import-{}", uuid::Uuid::new_v4().simple());
     let mut body = Vec::with_capacity(bytes.len() + 512);
