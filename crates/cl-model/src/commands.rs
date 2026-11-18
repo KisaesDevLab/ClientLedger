@@ -644,6 +644,20 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.payroll_demo_close_books",
         "Close Demo Books for Payroll (developer)",
     ),
+    // Q-P30h: the backup before a post fails, or stays running until
+    // released, once.
+    dev_action(
+        "dev.payroll_demo_backup_fail",
+        "Fail Next Demo Payroll Backup (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_backup_hold",
+        "Hold Next Demo Payroll Backup (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_backup_release",
+        "Finish Held Demo Payroll Backup (developer)",
+    ),
     dev_action(
         "dev.payroll_demo_require_tag",
         "Require Tags for Demo Payroll (developer)",

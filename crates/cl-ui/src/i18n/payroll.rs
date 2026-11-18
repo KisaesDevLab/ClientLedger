@@ -201,6 +201,12 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("payroll.status.posted", "It was posted. Nothing was posted twice."),
     ("payroll.status.not_posted", "It isn't posted yet. Try again sends the same post, so it can't post twice."),
     ("payroll.unknown_kept", "If you close this window now, the import is kept. Check it later in History."),
+    // Q-P30h: a verified backup before every post.
+    ("payroll.backup.running", "Making a backup before posting…"),
+    ("payroll.backup.stop", "Stop, don't post"),
+    ("payroll.backup.failed", "We couldn't make a backup, so nothing was posted. ClientLedger always backs up before posting payroll."),
+    ("payroll.backup.open_backup", "Open Back Up"),
+    ("payroll.backup.stopped", "Posting stopped. Nothing was posted."),
     ("payroll.engine_down", "The books on this computer stopped. They usually start again on their own within a minute; this message changes when they do. If they don't, close this window and open the company again."),
     ("payroll.engine_down_not_sent", "The books on this computer stopped before the post was sent, so nothing was posted. When they're running again, press Post."),
     ("payroll.engine_back", "The books are running again. Nothing was lost; you can carry on where you left off."),

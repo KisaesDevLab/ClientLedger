@@ -204,6 +204,7 @@ impl PayrollImportScreen {
                     // Next to Post, never below the last entry (QA-3).
                     if self.view == View::Import {
                         self.password_ui(ui, &tokens);
+                        self.backup_ui(ui, &tokens);
                     }
                     self.buttons_ui(ui);
                 });
@@ -285,7 +286,12 @@ impl PayrollImportScreen {
                 if ui.button(t("payroll.check_status")).clicked() {
                     self.check_status();
                 }
-                if ui.button(t("payroll.try_again")).clicked() {
+                // While a backup is made or after it failed, the backup's
+                // own line offers Try again (one button, Q-P30h).
+                if self.backup_failed.is_none()
+                    && !self.backing_up()
+                    && ui.button(t("payroll.try_again")).clicked()
+                {
                     self.try_again();
                 }
             });
@@ -1116,6 +1122,47 @@ impl PayrollImportScreen {
                 Some(Trouble::PasswordWrong) => warn(ui, tokens, &t("payroll.password_wrong")),
                 Some(Trouble::PasswordWait) => warn(ui, tokens, &t("payroll.password_wait")),
                 _ => {}
+            }
+        });
+        ui.add_space(6.0);
+    }
+
+    /// The backup before a post (Q-P30h), next to Post: progress with a
+    /// way to stop, or why it failed with Try again. There is no way to
+    /// post without it.
+    fn backup_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        if self.backing_up() {
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                crate::screens::company::form::progress_line(
+                    ui,
+                    tokens,
+                    &t("payroll.backup.running"),
+                );
+                if ui.button(t("payroll.backup.stop")).clicked() {
+                    self.stop_backup();
+                }
+            });
+            ui.add_space(6.0);
+            return;
+        }
+        if self.backup_stopped {
+            ui.add_space(6.0);
+            note(ui, tokens, &t("payroll.backup.stopped"));
+        }
+        let Some(e) = &self.backup_failed else {
+            return;
+        };
+        let no_passphrase = matches!(e, cl_company::CompanyError::NoPassphrase);
+        ui.add_space(6.0);
+        warn(ui, tokens, &t("payroll.backup.failed"));
+        crate::screens::company::form::inline_error(ui, tokens, e);
+        ui.horizontal(|ui| {
+            if ui.button(t("payroll.try_again")).clicked() {
+                self.backup_try_again();
+            }
+            if no_passphrase && ui.button(t("payroll.backup.open_backup")).clicked() {
+                self.link_open("file.backup");
             }
         });
         ui.add_space(6.0);
