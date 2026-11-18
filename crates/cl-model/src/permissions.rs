@@ -828,9 +828,25 @@ pub fn command_door(id: CommandId) -> Option<Door> {
 }
 
 /// Admin-only desktop screens whose routes may stay refused for others (an
-/// Admin is never refused). None today: Preferences › AI is offered to
-/// every user, so its routes are [`Door::AiSettings`].
-pub const ADMIN_ONLY_ROUTES: &[(&str, &str)] = &[];
+/// Admin is never refused). Preferences › AI is offered to every user, so
+/// its routes are [`Door::AiSettings`]. P31: the import screens
+/// (`file.import_qbd`, `file.import_system`, `file.import_transactions`)
+/// are Admin-only; the engine refuses `/api/v1/imports` to a viewer with a
+/// hidden account (U-263).
+pub const ADMIN_ONLY_ROUTES: &[(&str, &str)] = &[
+    ("POST", "/api/v1/imports/upload"),
+    ("GET", "/api/v1/imports/{id}"),
+    ("DELETE", "/api/v1/imports/{id}"),
+    ("POST", "/api/v1/imports/batches"),
+    ("GET", "/api/v1/imports/batches"),
+    ("GET", "/api/v1/imports/batches/{id}"),
+    ("POST", "/api/v1/imports/batches/{id}/commit"),
+    ("POST", "/api/v1/imports/batches/{id}/undo"),
+    ("POST", "/api/v1/imports/batches/{id}/tieout"),
+    ("POST", "/api/v1/imports/batches/{id}/verify"),
+    ("PUT", "/api/v1/imports/batches/{id}/spot-check"),
+    ("GET", "/api/v1/imports/batches/{id}/transactions"),
+];
 
 /// Built-in roles the Users screen offers (plan §1 table, Q-P29v). Admin
 /// and View-only are engine roles; the others are a `bookkeeper` with a

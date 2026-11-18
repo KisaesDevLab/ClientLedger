@@ -30,7 +30,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("imports.step.done", "Done"),
     ("imports.step.source", "Choose the program"),
     ("imports.step.current", "Current step: {step}"),
-    ("imports.step.done", "Done: {step}"),
+    ("imports.step.finished", "Done: {step}"),
     ("imports.not_brought_over", "Not brought over: memorized transactions and QuickBooks users. You'll set those up fresh."),
     // Sources.
     ("imports.source.pick", "Where your books are now"),

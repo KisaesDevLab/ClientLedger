@@ -228,7 +228,7 @@ impl ImportScreen {
                             14.0,
                             tokens.accent,
                             tokens.surface_window,
-                            &t_with("imports.step.done", &[("step", &name)]),
+                            &t_with("imports.step.finished", &[("step", &name)]),
                         );
                     }
                     ui.add(egui::Label::new(rich))
