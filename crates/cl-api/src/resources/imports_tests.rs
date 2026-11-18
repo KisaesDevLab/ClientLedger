@@ -142,7 +142,11 @@ fn upload_checks_refuse_before_sending() {
     assert_eq!(r.check(), Err(LocalValidation::InvalidValue));
     let mut r = tb_upload();
     r.kind = ImportKind::Contacts;
-    assert_eq!(r.check(), Err(LocalValidation::InvalidValue), "needs a list");
+    assert_eq!(
+        r.check(),
+        Err(LocalValidation::InvalidValue),
+        "needs a list"
+    );
     r.contact_kind = Some(ContactKind::Other);
     assert!(r.check().is_ok());
     assert_eq!(r.options()["contactKind"], "other");
@@ -228,10 +232,7 @@ async fn create_batch_sends_sessions_and_options() {
     let new = NewBatch {
         source: SourceSystem::QuickBooksDesktop,
         kind: BatchKind::Conversion,
-        sessions: vec![
-            SESSION.parse().expect("id"),
-            SESSION2.parse().expect("id"),
-        ],
+        sessions: vec![SESSION.parse().expect("id"), SESSION2.parse().expect("id")],
         options,
     };
     let b = s.imports().create_batch(&new).await.expect("batch");
@@ -322,9 +323,7 @@ async fn commit_is_keyed_sent_once_and_needs_a_backup() {
     assert!(posts[0].headers.get("idempotency-key").is_some());
     let confirmed = CommitRequest {
         confirm_closed_period: true,
-        closed_period: Some(ClosedPeriodAuthorization::with_password(Secret::new(
-            "pw",
-        ))),
+        closed_period: Some(ClosedPeriodAuthorization::with_password(Secret::new("pw"))),
         ..req
     };
     s.imports()

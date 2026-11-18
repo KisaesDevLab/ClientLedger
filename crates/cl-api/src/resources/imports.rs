@@ -1,4 +1,4 @@
-//! QuickBooks Desktop and other-system imports (P31; engine U-260 to U-268).
+//! `QuickBooks` Desktop and other-system imports (P31; engine U-260 to U-268).
 //!
 //! The engine does all of the accounting. It reads every file, parses every
 //! amount exactly (`imports-amounts-v1`), commits a whole batch of files in
@@ -60,7 +60,7 @@ pub const MAX_NOTE_CHARS: usize = 500;
 /// Which import flow a screen runs; each needs its own capabilities.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Flow {
-    /// QuickBooks Desktop conversion (lists, history, open items, valuation).
+    /// `QuickBooks` Desktop conversion (lists, history, open items, valuation).
     QbdConversion,
     /// Another accounting system (or QBD GL only) on the Bulk Import kinds.
     OtherSystem,
@@ -195,9 +195,9 @@ wire_enum!(
     SourceSystem {
         /// Accounting Power.
         AccountingPower => "accounting_power",
-        /// QuickBooks Online.
+        /// `QuickBooks` Online.
         QuickBooksOnline => "quickbooks_online",
-        /// QuickBooks Desktop (conversion and GL only).
+        /// `QuickBooks` Desktop (conversion and GL only).
         QuickBooksDesktop => "quickbooks_desktop",
         /// The engine's generic CSV layout.
         Generic => "generic",
@@ -927,6 +927,7 @@ pub struct TieOut {
 
 impl fmt::Debug for TieOut {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Totals are amounts: left out.
         f.debug_struct("TieOut")
             .field("as_of", &self.as_of)
             .field("accounts", &self.accounts.len())
@@ -935,7 +936,7 @@ impl fmt::Debug for TieOut {
             .field("inventory_items", &self.inventory_items.len())
             .field("balance_rows", &self.balance_rows)
             .field("all_zero", &self.all_zero)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -1304,9 +1305,10 @@ fn item_from(i: &Value, name_key: &str) -> Result<TieOutItem, ApiError> {
 }
 
 fn items_from(v: &Value, name_key: &str) -> Result<Vec<TieOutItem>, ApiError> {
-    v.as_array()
-        .map(|l| l.iter().map(|i| item_from(i, name_key)).collect())
-        .unwrap_or_else(|| Ok(Vec::new()))
+    v.as_array().map_or_else(
+        || Ok(Vec::new()),
+        |l| l.iter().map(|i| item_from(i, name_key)).collect(),
+    )
 }
 
 /// Reads the tie-out (E3).
