@@ -16,6 +16,17 @@ steps:
   - assert_state: {key: screen.step, equals: choose}
   - assert_state: {key: screen.can_next, equals: false}
   - screenshot: choose-empty
+  # QA-2: the service list shows every service; the last ones can be
+  # picked with the pointer (the list used to cut off after six).
+  - click: {role: combo_box, label: Payroll service}
+  - click: {role: button, label: "Other (any CSV file)"}
+  - assert_state: {key: screen.provider, equals: generic_csv}
+  - click: {role: combo_box, label: Payroll service}
+  - click: {role: button, label: Rippling}
+  - assert_state: {key: screen.provider, equals: rippling}
+  - click: {role: combo_box, label: Payroll service}
+  - click: {role: button, label: Gusto}
+  - assert_state: {key: screen.provider, equals: gusto}
   - command: dev.payroll_demo_file_gusto
   - assert_state: {key: screen.file_chosen, equals: true}
   - assert_state: {key: screen.can_next, equals: true}
@@ -27,6 +38,13 @@ steps:
   - screenshot: map
   - key: Alt+N
   - assert_state: {key: screen.step, equals: accounts}
+  # QA-1: payroll accounts by name; reimbursements have no matching
+  # account in the demo chart, so that line waits for the owner.
+  - assert_state: {key: screen.accounts_complete, equals: false}
+  - assert_state: {key: screen.can_next, equals: false}
+  - assert_exists: {role: combo_box, label: Employee reimbursements}
+  - click: {role: combo_box, label: Employee reimbursements}
+  - click: {role: button, label: "6400 · Telephone and Internet"}
   - assert_state: {key: screen.accounts_complete, equals: true}
   - screenshot: accounts
   - key: Alt+N

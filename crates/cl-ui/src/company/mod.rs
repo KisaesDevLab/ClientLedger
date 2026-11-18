@@ -73,6 +73,9 @@ pub enum CompanyEvent {
     PromptDirty,
     /// Close the window of this kind (a screen that finished its job).
     CloseWindow(cl_model::CommandId),
+    /// Close the window of this kind as its tab's close button does: a
+    /// window with unsaved work asks first (P30 QA-8: a wizard's Cancel).
+    RequestClose(cl_model::CommandId),
     /// Bring the register of this account to the front, or open it in its
     /// own tab (one register tab per account, P12).
     OpenRegister(cl_core::ids::AccountId),

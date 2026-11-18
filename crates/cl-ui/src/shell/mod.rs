@@ -666,6 +666,11 @@ impl Shell {
                         self.windows.close_now(id);
                     }
                 }
+                CompanyEvent::RequestClose(kind) => {
+                    if let Some(id) = self.windows.find_kind(kind) {
+                        self.windows.request_close(id);
+                    }
+                }
                 CompanyEvent::OpenRegister(account) => self.open_register(account),
                 CompanyEvent::OpenRecord(kind, txn) => self.open_record(kind, txn),
                 CompanyEvent::OpenTemplate(t) => self.open_template(*t),

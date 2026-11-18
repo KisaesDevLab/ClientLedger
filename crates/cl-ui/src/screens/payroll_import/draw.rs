@@ -71,9 +71,11 @@ fn account_combo(
 ) -> Option<AccountId> {
     let mut chosen = None;
     let l = ui.label(label);
+    let shown = chart.iter().filter(|a| a.is_active).count();
     egui::ComboBox::from_id_salt(id)
         .selected_text(account_name(chart, current))
         .width(260.0)
+        .height(list_height(ui, shown))
         .show_ui(ui, |ui| {
             for a in chart.iter().filter(|a| a.is_active) {
                 if ui
@@ -199,6 +201,10 @@ impl PayrollImportScreen {
                 });
                 frame.bottom(|ui| {
                     ui.add_space(4.0);
+                    // Next to Post, never below the last entry (QA-3).
+                    if self.view == View::Import {
+                        self.password_ui(ui, &tokens);
+                    }
                     self.buttons_ui(ui);
                 });
                 let _ = frame.end();
@@ -209,6 +215,12 @@ impl PayrollImportScreen {
         let Some(tr) = self.trouble.clone() else {
             return;
         };
+        // The prompt says these beside its field (QA-7).
+        if self.asking_password.is_some()
+            && matches!(tr, Trouble::PasswordWrong | Trouble::PasswordWait)
+        {
+            return;
+        }
         let text = match &tr {
             Trouble::Refused(r) => match r {
                 PayrollRefusal::DuplicateFile { posted_at, .. }
@@ -304,9 +316,12 @@ impl PayrollImportScreen {
     fn choose_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let l = ui.label(t("payroll.provider"));
         let mut provider = self.provider;
+        // QA-2: every service shows without scrolling (egui's default list
+        // fits about six; Rippling and "Other" were out of reach).
         egui::ComboBox::from_id_salt("payroll.provider")
             .selected_text(t(&format!("payroll.provider.{}", provider.key())))
             .width(280.0)
+            .height(list_height(ui, Provider::ALL.len()))
             .show_ui(ui, |ui| {
                 for p in Provider::ALL {
                     ui.selectable_value(
@@ -378,6 +393,27 @@ impl PayrollImportScreen {
         }
     }
 
+    /// The early duplicate warning (QA-6): a run the engine knows was
+    /// posted, or the same file chosen before (posted or not).
+    fn duplicate_ui(&self, ui: &mut Ui, tokens: &Tokens) {
+        let Some(u) = &self.upload else {
+            return;
+        };
+        if u.is_duplicate_by_key {
+            warn(ui, tokens, &t("payroll.duplicate_posted"));
+        } else if u.is_duplicate {
+            warn(ui, tokens, &t("payroll.duplicate_warning"));
+        }
+        // QA-11: the file reads as another service's.
+        if self.service_mismatch() {
+            let name = t(&format!("payroll.provider.{}", self.provider.key()));
+            warn(
+                ui,
+                tokens,
+                &t_with("payroll.service_mismatch", &[("service", &name)]),
+            );
+        }
+    }
     fn upload_job_running(&self) -> bool {
         self.upload.is_none()
             && self.step == Step::Choose
@@ -397,13 +433,8 @@ impl PayrollImportScreen {
     fn map_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         heading(ui, tokens, "payroll.map.heading");
         note(ui, tokens, &t("payroll.map.hint"));
-        if self
-            .upload
-            .as_ref()
-            .is_some_and(|u| u.is_duplicate || u.is_duplicate_by_key)
-        {
-            warn(ui, tokens, &t("payroll.duplicate_warning"));
-        }
+        self.duplicate_ui(ui, tokens);
+
         match &self.layout_choice {
             Some(LayoutChoice::Saved(id)) => {
                 let name = self.saved_name(*id);
@@ -536,13 +567,8 @@ impl PayrollImportScreen {
     fn accounts_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         heading(ui, tokens, "payroll.accounts.heading");
         note(ui, tokens, &t("payroll.accounts.hint"));
-        if self
-            .upload
-            .as_ref()
-            .is_some_and(|u| u.is_duplicate || u.is_duplicate_by_key)
-        {
-            warn(ui, tokens, &t("payroll.duplicate_warning"));
-        }
+        self.duplicate_ui(ui, tokens);
+
         if let Some(LayoutChoice::Saved(id)) = &self.layout_choice
             && self.provider.is_generic()
             && !self.visited.contains(&Step::Map)
@@ -645,12 +671,17 @@ impl PayrollImportScreen {
             }
         };
         let errors: Vec<_> = v.messages.iter().filter(|m| m.is_error).collect();
-        let warnings: Vec<_> = v.messages.iter().filter(|m| !m.is_error).collect();
+        let notes = note_groups(&v.messages);
         if errors.is_empty() {
+            let key = if notes.is_empty() {
+                "payroll.check.ok"
+            } else {
+                "payroll.check.ok_notes"
+            };
             note(
                 ui,
                 tokens,
-                &t_with("payroll.check.ok", &[("n", &v.total_rows.to_string())]),
+                &t_count(key, usize::try_from(v.total_rows).unwrap_or(usize::MAX)),
             );
         } else {
             warn(ui, tokens, &t("payroll.check.errors"));
@@ -658,10 +689,25 @@ impl PayrollImportScreen {
                 warn(ui, tokens, &line(m));
             }
         }
-        if !warnings.is_empty() {
+        // QA-5: the engine's notes, one line per kind with a row count and
+        // its reason; marked as not stopping the post. No cell text.
+        if !notes.is_empty() {
+            ui.add_space(6.0);
             note(ui, tokens, &t("payroll.check.warnings"));
-            for m in warnings.iter().take(50) {
-                ui.label(line(m));
+            for (code, rows) in &notes {
+                let reason = note_reason(code);
+                let text = if *rows == 0 {
+                    reason
+                } else {
+                    t_with(
+                        "payroll.check.note_rows",
+                        &[
+                            ("reason", &reason),
+                            ("rows", &t_count("payroll.rows", *rows)),
+                        ],
+                    )
+                };
+                ui.label(format!("\u{2022} {text}"));
             }
         }
         // S3: every department in the file (the Map step saw only the
@@ -674,6 +720,10 @@ impl PayrollImportScreen {
     fn preview_ui(&mut self, ui: &mut Ui, tokens: &Tokens, style: MoneyStyle) {
         heading(ui, tokens, "payroll.preview.heading");
         note(ui, tokens, &t("payroll.preview.hint"));
+        // The refusal (with its date) says it already when Post was refused.
+        if !matches!(self.trouble, Some(Trouble::Refused(_))) {
+            self.duplicate_ui(ui, tokens);
+        }
         let Some(p) = self.preview.clone() else {
             note(ui, tokens, &t("payroll.preview.loading"));
             return;
@@ -698,7 +748,11 @@ impl PayrollImportScreen {
                         "payroll.preview.debit",
                         "payroll.preview.credit",
                     ] {
-                        ui.strong(t(k));
+                        if k.ends_with("debit") || k.ends_with("credit") {
+                            amount_cell(ui, RichText::new(t(k)).strong());
+                        } else {
+                            ui.strong(t(k));
+                        }
                     }
                     ui.end_row();
                     for (li, l) in e.lines.iter().enumerate() {
@@ -733,16 +787,14 @@ impl PayrollImportScreen {
                             self.plan.set(ei, li, c);
                             self.untagged = None;
                         }
-                        ui.label(if l.debit.is_zero() {
-                            String::new()
-                        } else {
-                            l.debit.format(style)
-                        });
-                        ui.label(if l.credit.is_zero() {
-                            String::new()
-                        } else {
-                            l.credit.format(style)
-                        });
+                        for m in [l.debit, l.credit] {
+                            let text = if m.is_zero() {
+                                String::new()
+                            } else {
+                                m.format(style)
+                            };
+                            amount_cell(ui, RichText::new(text));
+                        }
                         ui.end_row();
                     }
                     ui.strong(t("payroll.preview.totals"));
@@ -753,8 +805,8 @@ impl PayrollImportScreen {
                     } else {
                         String::new()
                     });
-                    ui.strong(e.total_debits.format(style));
-                    ui.strong(e.total_credits.format(style));
+                    amount_cell(ui, RichText::new(e.total_debits.format(style)).strong());
+                    amount_cell(ui, RichText::new(e.total_credits.format(style)).strong());
                     ui.end_row();
                 });
             if !e.is_balanced {
@@ -787,13 +839,20 @@ impl PayrollImportScreen {
     fn done_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
         heading(ui, tokens, "payroll.done.heading");
         let n = self.posted.as_ref().map_or(0, Vec::len);
-        ui.label(t_with("payroll.done.entries", &[("n", &n.to_string())]));
+        ui.label(t_count("payroll.done.entries", n));
         let w = self.expected_withdrawals();
         if w > 0 {
-            ui.label(t_with("payroll.done.withdrawals", &[("n", &w.to_string())]));
+            ui.label(t_count("payroll.done.withdrawals", w));
         }
         note(ui, tokens, &t("payroll.done.discarded"));
         ui.horizontal(|ui| {
+            // QA-9: the next pay run without closing the window (same
+            // service; the accounts chosen stay).
+            if ui.button(t("payroll.done.another")).clicked() {
+                let p = self.provider;
+                self.start_over();
+                self.provider = p;
+            }
             if ui.button(t("payroll.done.open_feed")).clicked() {
                 self.link_open("banking.feed");
             }
@@ -820,7 +879,10 @@ impl PayrollImportScreen {
             note(
                 ui,
                 tokens,
-                &t_with("payroll.history.reversed", &[("n", &n.to_string())]),
+                &t_count(
+                    "payroll.history.reversed",
+                    usize::try_from(n).unwrap_or(usize::MAX),
+                ),
             );
         }
         let Some(h) = self.history.clone() else {
@@ -901,9 +963,10 @@ impl PayrollImportScreen {
                     ui.end_row();
                 }
             });
-        if let Some((id, mut reason)) = self.reversing.clone()
-            && self.asking_password.is_none()
-        {
+        if self.asking_password.is_some() {
+            // Where Reverse was clicked (QA-3).
+            self.password_ui(ui, tokens);
+        } else if let Some((id, mut reason)) = self.reversing.clone() {
             ui.add_space(8.0);
             // S2: the reason is part of the keyed body; it is locked while
             // an answer is outstanding (Try again resends it as sent).
@@ -952,7 +1015,10 @@ impl PayrollImportScreen {
                     "payroll.overlap.item",
                     &[
                         ("period", &period),
-                        ("posted", o.posted_on.as_deref().unwrap_or_default()),
+                        (
+                            "posted",
+                            &o.posted_on.as_deref().map(posted_text).unwrap_or_default(),
+                        ),
                     ],
                 ));
                 if !o.matching_dates.is_empty() {
@@ -969,34 +1035,57 @@ impl PayrollImportScreen {
                 }
             });
         }
-        if let Some(lock) = self.asking_password {
-            ui.add_space(10.0);
-            heading(ui, tokens, "payroll.closed.heading");
-            note(
-                ui,
-                tokens,
-                &t_with(
-                    "payroll.closed.text",
-                    &[("date", &lock.map(show_date).unwrap_or_default())],
-                ),
-            );
-            ui.horizontal(|ui| {
-                let l = ui.label(t("payroll.closed.password"));
-                ui.add(
+    }
+
+    /// The closing-date password prompt (QA-3, QA-7): drawn beside the
+    /// button that asked (Post in the bottom bar, Reverse in History),
+    /// focused and scrolled into view when it opens; the closing date in
+    /// its text; a wrong password said beside the field; Enter submits.
+    fn password_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
+        let Some(lock) = self.asking_password else {
+            return;
+        };
+        ui.add_space(6.0);
+        heading(ui, tokens, "payroll.closed.heading");
+        let text = match lock {
+            Some(d) => t_with("payroll.closed.text", &[("date", &show_date(d))]),
+            None => t("payroll.closed.text_undated"),
+        };
+        note(ui, tokens, &text);
+        ui.horizontal_wrapped(|ui| {
+            let l = ui.label(t("payroll.closed.password"));
+            let r = ui
+                .add(
                     egui::TextEdit::singleline(&mut self.password_text)
                         .password(true)
                         .desired_width(200.0),
                 )
                 .labelled_by(l.id);
-                if ui.button(t("payroll.closed.continue")).clicked() {
-                    self.give_password();
+            if std::mem::take(&mut self.password_focus) {
+                r.request_focus();
+                r.scroll_to_me(Some(egui::Align::Center));
+            }
+            let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            if ui.button(t("payroll.closed.continue")).clicked() || enter {
+                self.give_password();
+            }
+            if ui.button(t("payroll.cancel")).clicked() {
+                self.asking_password = None;
+                self.password_text.clear();
+                if matches!(
+                    self.trouble,
+                    Some(Trouble::PasswordWrong | Trouble::PasswordWait)
+                ) {
+                    self.trouble = None;
                 }
-                if ui.button(t("payroll.cancel")).clicked() {
-                    self.asking_password = None;
-                    self.password_text.clear();
-                }
-            });
-        }
+            }
+            match self.trouble {
+                Some(Trouble::PasswordWrong) => warn(ui, tokens, &t("payroll.password_wrong")),
+                Some(Trouble::PasswordWait) => warn(ui, tokens, &t("payroll.password_wait")),
+                _ => {}
+            }
+        });
+        ui.add_space(6.0);
     }
 
     fn buttons_ui(&mut self, ui: &mut Ui) {
@@ -1011,7 +1100,7 @@ impl PayrollImportScreen {
             }
             let primary = if self.step == Step::Preview {
                 let n = self.preview.as_ref().map_or(0, |p| p.entries.len());
-                t_with("payroll.post", &[("n", &n.to_string())])
+                t_count("payroll.post", n)
             } else {
                 t("payroll.next")
             };
@@ -1061,18 +1150,84 @@ impl PayrollImportScreen {
 /// The height of a column list: every column (plus "none") when it fits in
 /// most of the window, else the most that do (the list scrolls).
 #[allow(clippy::float_arithmetic)] // pixels for egui, never money (M10)
+/// `key` with `{n}`, or its `.one` form for exactly one.
+pub(crate) fn t_count(key: &str, n: usize) -> String {
+    let one = format!("{key}.one");
+    if n == 1 && crate::i18n::has(&one) {
+        t(&one)
+    } else {
+        t_with(key, &[("n", &n.to_string())])
+    }
+}
+
+/// The engine's non-blocking check messages grouped by kind, in the order
+/// first seen: `(code, rows)` (0 rows: a note about the whole file).
+pub(crate) fn note_groups(messages: &[cl_api::payroll::ValidationMessage]) -> Vec<(String, usize)> {
+    let mut out: Vec<(String, usize)> = Vec::new();
+    for m in messages.iter().filter(|m| !m.is_error) {
+        let i = match out.iter().position(|(c, _)| *c == m.code) {
+            Some(i) => i,
+            None => {
+                out.push((m.code.clone(), 0));
+                out.len() - 1
+            }
+        };
+        if m.row_number.is_some() {
+            out[i].1 += 1;
+        }
+    }
+    out
+}
+
+/// A note's reason in plain words (never the engine's message).
+fn note_reason(code: &str) -> String {
+    let k = format!("payroll.note.{code}");
+    if crate::i18n::has(&k) {
+        t(&k)
+    } else {
+        t("payroll.note.other")
+    }
+}
+/// An amount in a preview column, right-aligned so the figures line up
+/// (QA-11); the column is at least as wide as a large amount.
+fn amount_cell(ui: &mut Ui, text: RichText) {
+    ui.allocate_ui_with_layout(
+        egui::vec2(110.0, ui.spacing().interact_size.y),
+        egui::Layout::right_to_left(egui::Align::Center),
+        |ui| {
+            ui.set_min_width(110.0);
+            ui.label(text);
+        },
+    );
+}
 fn column_list_height(ui: &Ui, columns: usize) -> f32 {
+    list_height(ui, columns.saturating_add(1))
+}
+
+/// A drop-down list tall enough for `items` rows, capped to the window.
+fn list_height(ui: &Ui, items: usize) -> f32 {
     let row = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
-    let rows = u16::try_from(columns.saturating_add(1)).unwrap_or(u16::MAX);
+    let rows = u16::try_from(items).unwrap_or(u16::MAX);
     let all = f32::from(rows) * row + ui.spacing().menu_margin.sum().y;
     let room = ui.ctx().content_rect().height() * 0.45;
     all.min(room).max(ui.spacing().combo_height)
 }
 
-/// The day of the engine's `postedAt` (an ISO timestamp, U-244; a bare
-/// date reads too).
+/// The day of the engine's `postedAt` (an ISO timestamp, U-244) on this
+/// computer's clock, as the Audit Trail shows it (QA-4: the UTC day was
+/// shown); a bare date reads as itself.
 pub(crate) fn posted_day(s: &str) -> Option<cl_core::CalendarDate> {
+    if let Ok(ts) = cl_core::Timestamp::parse_wire(s) {
+        let d = ts.as_utc().with_timezone(&chrono::Local).date_naive();
+        return cl_core::CalendarDate::from_naive(d).ok();
+    }
     cl_core::CalendarDate::parse_wire(s.get(..10)?).ok()
+}
+
+/// An engine time as the owner's local date (MM/DD/YYYY); text that isn't
+/// a time is shown as it came.
+fn posted_text(s: &str) -> String {
+    posted_day(s).map_or_else(|| s.to_string(), show_date)
 }
 
 /// Rows shown by number in the undated-rows message before "and N more".

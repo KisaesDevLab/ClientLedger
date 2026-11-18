@@ -215,6 +215,15 @@ pub fn plain_action(action: &str, entity: &str) -> Option<&'static str> {
     match (action, entity) {
         ("update" | "create", "user_password_change") => {
             Some("reports.audit.action.password_changed")
+        } // P30 QA-11: payroll and a wrong closing-date password in words (a
+        // failed password changed nothing).
+        ("create", "payroll_import_post") => Some("reports.audit.action.payroll_posted"),
+        ("update", "payroll_import_reverse") => Some("reports.audit.action.payroll_reversed"),
+        ("update", "closing_password_failed") => {
+            Some("reports.audit.action.closing_password_failed")
+        }
+        ("update", "closing_password_reset_failed") => {
+            Some("reports.audit.action.closing_password_reset_failed")
         }
         _ => None,
     }

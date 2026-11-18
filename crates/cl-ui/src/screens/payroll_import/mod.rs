@@ -46,9 +46,9 @@ use cl_core::ids::{AccountId, TagId, TransactionId};
 use cl_core::{CalendarDate, Secret};
 use cl_model::CommandId;
 use cl_model::payroll_import::{
-    ColumnLayout, FieldColumn, FileMode, LayoutChoice, PeriodInput, PeriodProblem, PlanLine,
-    Provider, REQUIRED_FIELDS, SavedLayout, Step, TagPlan, UntaggedLine, builtin_mapping,
-    choose_layout, mappable_field,
+    ChartKind, ChartRow, ColumnLayout, FieldColumn, FileMode, LayoutChoice, PeriodInput,
+    PeriodProblem, PlanLine, Provider, REQUIRED_FIELDS, SavedLayout, Step, TagPlan, UntaggedLine,
+    builtin_mapping, choose_layout, mappable_field,
 };
 use cl_model::permissions::Door;
 use serde_json::{Value, json};
@@ -284,7 +284,12 @@ pub struct PayrollImportScreen {
     pub(crate) chart: Vec<Account>,
     tags_job: Option<Job<Vec<Tag>>>,
     pub(crate) tags: Vec<Tag>,
-    accounts_job: Option<Job<BTreeMap<String, AccountId>>>,
+    accounts_job: Option<Job<AccountHints>>,
+    /// The engine's suggestions and the saved accounts, until the chart
+    /// is here to check them against.
+    account_hints: Option<AccountHints>,
+    /// The active chart as the matcher sees it.
+    pub(crate) chart_rows: Vec<ChartRow<AccountId>>,
     pub(crate) line_accounts: BTreeMap<String, AccountId>,
     desc_job: Option<Job<Vec<DescriptionMapping>>>,
     pub(crate) descriptions: Vec<DescriptionMapping>,
@@ -305,6 +310,11 @@ pub struct PayrollImportScreen {
     /// The closed-period prompt is open (with the closing date, if known).
     #[allow(clippy::option_option)] // outer: open or not; inner: the date if known
     pub(crate) asking_password: Option<Option<CalendarDate>>,
+    /// The closing date the engine last named (kept for the prompt after a
+    /// wrong password, QA-7).
+    lock_date: Option<CalendarDate>,
+    /// The prompt just opened: focus its field and scroll it into view.
+    pub(crate) password_focus: bool,
     pub(crate) overlaps: Option<Vec<Overlap>>,
     post_job: Option<Job<PostOutcome>>,
     status_job: Option<Job<cl_api::payroll::SessionSummary>>,
@@ -389,6 +399,42 @@ fn column_map(
     }
 }
 
+/// The engine's suggested accounts and the company's saved ones, by line.
+type AccountHints = (BTreeMap<String, AccountId>, BTreeMap<String, AccountId>);
+
+/// True for a bank account (net pay's withdrawals match in the Bank Feed).
+fn is_bank_account(a: &Account) -> bool {
+    a.fields.account_type == AccountType::Asset
+        && a.fields
+            .detail_type
+            .as_deref()
+            .is_none_or(|d| cl_api::BANK_REGISTER_DETAIL_TYPES.contains(&d))
+}
+
+/// The active chart as the Accounts step's matcher sees it (QA-1).
+pub(crate) fn chart_rows(chart: &[Account]) -> Vec<ChartRow<AccountId>> {
+    chart
+        .iter()
+        .filter(|a| a.is_active)
+        .map(|a| {
+            let kind = match a.fields.account_type {
+                AccountType::Expense | AccountType::Cogs => ChartKind::Expense,
+                AccountType::Liability => ChartKind::Liability,
+                AccountType::Asset if is_bank_account(a) => ChartKind::Bank,
+                _ => ChartKind::Other,
+            };
+            let checking = kind == ChartKind::Bank
+                && (a.fields.detail_type.as_deref() == Some("checking")
+                    || a.fields.name.to_lowercase().contains("checking"));
+            ChartRow {
+                id: a.id,
+                name: a.fields.name.clone(),
+                kind,
+                checking,
+            }
+        })
+        .collect()
+}
 /// A saved template as the model's layout.
 fn saved_layout(t: &PayrollTemplate) -> Option<SavedLayout<uuid::Uuid>> {
     let m = t.column_map.as_ref()?;
@@ -464,6 +510,8 @@ impl PayrollImportScreen {
             tags_job: None,
             tags: Vec::new(),
             accounts_job: None,
+            account_hints: None,
+            chart_rows: Vec::new(),
             line_accounts: BTreeMap::new(),
             desc_job: None,
             descriptions: Vec::new(),
@@ -479,6 +527,8 @@ impl PayrollImportScreen {
             password: None,
             password_text: String::new(),
             asking_password: None,
+            lock_date: None,
+            password_focus: false,
             overlaps: None,
             post_job: None,
             status_job: None,
@@ -580,25 +630,29 @@ impl PayrollImportScreen {
             |d| Ok(d.payroll.templates()),
             |s| async move { s.payroll().templates().await },
         ));
-        let chart_for_demo = crate::company::demo::chart();
+        // The engine's suggestions and the company's saved accounts; the
+        // starting choices are made once the chart is here (QA-1). The
+        // demo has no suggestions of its own: the rules pick the same.
         self.accounts_job = Some(self.read(
-            move |d| {
-                let mut m = crate::company::demo::payroll::DemoPayroll::suggest(&chart_for_demo);
-                for a in d.payroll.account_mappings() {
-                    if let Some(id) = a.account {
-                        m.insert(a.line_type, id);
-                    }
-                }
-                Ok(m)
+            |d| {
+                let remembered = d
+                    .payroll
+                    .account_mappings()
+                    .into_iter()
+                    .filter_map(|a| Some((a.line_type, a.account?)))
+                    .collect();
+                Ok((BTreeMap::new(), remembered))
             },
             |s| async move {
-                let mut m = s.payroll().suggest_accounts().await?;
-                for a in s.payroll().account_mappings().await? {
-                    if let Some(id) = a.account {
-                        m.insert(a.line_type, id);
-                    }
-                }
-                Ok(m)
+                let suggested = s.payroll().suggest_accounts().await?;
+                let remembered = s
+                    .payroll()
+                    .account_mappings()
+                    .await?
+                    .into_iter()
+                    .filter_map(|a| Some((a.line_type, a.account?)))
+                    .collect();
+                Ok((suggested, remembered))
             },
         ));
     }
@@ -635,9 +689,22 @@ impl PayrollImportScreen {
             self.templates.push(t);
         }
         if let Some(Ok(v)) = poll(&mut self.accounts_job) {
-            for (k, a) in v {
+            self.account_hints = Some(v);
+        }
+        if !self.chart.is_empty()
+            && let Some((suggested, remembered)) = self.account_hints.take()
+        {
+            let lines: Vec<&str> = cl_model::payroll_import::LINE_TYPES
+                .iter()
+                .map(|(l, _)| *l)
+                .collect();
+            let rows = chart_rows(&self.chart);
+            for (k, a) in
+                cl_model::payroll_import::default_accounts(&lines, &rows, &suggested, &remembered)
+            {
                 self.line_accounts.entry(k).or_insert(a);
             }
+            self.chart_rows = rows;
         }
         if let Some(r) = poll(&mut self.upload_job) {
             match r {
@@ -866,6 +933,36 @@ impl PayrollImportScreen {
         }
     }
 
+    /// The engine said this payroll is already posted (QA-6): the upload's
+    /// run check, or a refused post. Post stays off; History reverses it.
+    pub(crate) fn posted_duplicate(&self) -> bool {
+        self.upload.as_ref().is_some_and(|u| u.is_duplicate_by_key)
+            || matches!(
+                self.trouble,
+                Some(Trouble::Refused(
+                    PayrollRefusal::DuplicateFile { .. } | PayrollRefusal::DuplicateRun { .. }
+                ))
+            )
+    }
+    /// The chosen file doesn't look like the chosen service's (QA-11): the
+    /// engine read it as another service's, or the built-in layout's
+    /// columns aren't in it. Generic files never warn.
+    pub(crate) fn service_mismatch(&self) -> bool {
+        let Some(u) = &self.upload else {
+            return false;
+        };
+        if self.provider.is_generic() {
+            return false;
+        }
+        let other = u
+            .detected_provider
+            .as_deref()
+            .and_then(Provider::from_engine_key)
+            .is_some_and(|p| p != self.provider);
+        let misfit = matches!(self.layout_choice, Some(LayoutChoice::Builtin))
+            && builtin_mapping(self.provider).is_some_and(|l| !l.fits(&u.headers));
+        other || misfit
+    }
     pub(crate) fn can_next(&self) -> bool {
         if self.busy()
             || !self.allowed()
@@ -883,7 +980,9 @@ impl PayrollImportScreen {
                 .validation
                 .as_ref()
                 .is_some_and(ValidationSummary::can_continue),
-            Step::Preview => self.preview.as_ref().is_some_and(Preview::is_balanced),
+            Step::Preview => {
+                self.preview.as_ref().is_some_and(Preview::is_balanced) && !self.posted_duplicate()
+            }
             Step::Done => false,
         }
     }
@@ -1016,6 +1115,8 @@ impl PayrollImportScreen {
             .iter()
             .filter_map(|r| r.get(i))
             .find_map(|c| cl_model::payroll_import::SampleGuard::displayable(c).map(str::to_string))
+            // QA-10: an ISO date shows as the screen's MM/DD/YYYY.
+            .map(|c| CalendarDate::parse_wire(&c).map_or(c, show_date))
     }
 
     /// The departments in the sample rows' Department column (names of
@@ -1156,19 +1257,22 @@ impl PayrollImportScreen {
     }
 
     fn take_descriptions(&mut self, mut v: Vec<DescriptionMapping>) {
-        // Suggest: net pay to the bank, other credits to a liability, debits
-        // to an expense (the owner changes any of them).
+        // A saved account stays; the engine's own guess stays only when it
+        // fits the line the description reads as (QA-1); else the line's
+        // starting account, if one was confident, else none.
+        let rows = chart_rows(&self.chart);
         for m in &mut v {
+            let debit = m.side.as_deref() == Some("debit");
+            let lt = cl_model::payroll_import::line_for_description(&m.description, debit);
+            let fits = |id: AccountId| {
+                rows.iter()
+                    .find(|r| r.id == id)
+                    .is_some_and(|r| cl_model::payroll_import::account_fits(lt, r))
+            };
+            if m.suggested && !m.account.is_some_and(fits) {
+                m.account = None;
+            }
             if m.account.is_none() {
-                let net = m.description.to_lowercase().contains("net");
-                let debit = m.side.as_deref() == Some("debit");
-                let lt = if net {
-                    cl_model::payroll_import::NET_PAY_LINE
-                } else if debit {
-                    "gross_wages_expense"
-                } else {
-                    "fit_payable"
-                };
                 m.account = self.line_accounts.get(lt).copied();
             }
         }
@@ -1227,14 +1331,7 @@ impl PayrollImportScreen {
     }
 
     pub(crate) fn is_bank(&self, id: AccountId) -> bool {
-        self.chart.iter().any(|a| {
-            a.id == id
-                && a.fields.account_type == AccountType::Asset
-                && a.fields
-                    .detail_type
-                    .as_deref()
-                    .is_none_or(|d| cl_api::BANK_REGISTER_DETAIL_TYPES.contains(&d))
-        })
+        self.chart.iter().any(|a| a.id == id && is_bank_account(a))
     }
 
     fn save_accounts(&mut self) {
@@ -1255,7 +1352,10 @@ impl PayrollImportScreen {
                 move |s| async move { s.payroll().save_description_map(id, key, &list).await },
             ));
         } else {
+            // Every line with an account: the owner's choices and the
+            // confident starting ones only (QA-1), never a first-of-type.
             let map: BTreeMap<String, AccountId> = self.line_accounts.clone();
+
             let m2 = map.clone();
             self.save_accounts_job = Some(self.write(
                 "orphan.payroll_upload",
@@ -1564,12 +1664,15 @@ impl PayrollImportScreen {
     fn refused(&mut self, e: &ApiError) {
         match e {
             ApiError::ClosedPeriod(c) => {
-                self.asking_password = Some(c.lock_date);
+                self.lock_date = c.lock_date.or(self.lock_date);
+                self.asking_password = Some(self.lock_date);
+                self.password_focus = true;
                 self.password = None;
                 return;
             }
-            ApiError::ClosingPasswordRejected => {
-                self.asking_password.get_or_insert(None);
+            ApiError::ClosingPasswordRejected | ApiError::ClosingPasswordRateLimited { .. } => {
+                self.asking_password = Some(self.lock_date);
+                self.password_focus = true;
                 self.password = None;
                 // The next body differs (another password): new keys.
                 self.key = None;
@@ -1637,6 +1740,7 @@ impl PayrollImportScreen {
         // Posted: nothing left to discard on close.
         if let Some(u) = &mut self.upload {
             u.is_duplicate = false;
+            u.is_duplicate_by_key = false;
         }
     }
 
@@ -1853,6 +1957,13 @@ impl PayrollImportScreen {
         if self.in_flight() {
             return;
         }
+        // QA-8: a chosen file or an import under way asks first, as the
+        // tab's close button does; closing then discards it (Drop).
+        if Screen::dirty(self) {
+            self.link
+                .push(CompanyEvent::RequestClose(CommandId::new(KIND)));
+            return;
+        }
         self.release_upload();
         // The demo answers at once; the engine's answer is not waited for.
         let _ = poll(&mut self.discard_job);
@@ -1902,7 +2013,7 @@ impl PayrollImportScreen {
     }
 
     /// Starts the wizard again (scenarios run several imports in one window).
-    fn start_over(&mut self) {
+    pub(crate) fn start_over(&mut self) {
         let keep = (
             Arc::clone(&self.link),
             self.today,
@@ -1939,9 +2050,10 @@ impl Screen for PayrollImportScreen {
         true
     }
 
-    /// An uploaded file not yet posted: closing asks first.
+    /// A chosen file or an uploaded one not yet posted: closing (or
+    /// Cancel) asks first (QA-8).
     fn dirty(&self) -> bool {
-        self.upload.is_some() && self.posted.is_none()
+        (self.file.is_some() || self.upload.is_some()) && self.posted.is_none()
     }
 
     /// A post is out or its answer was lost: the close prompt says the
@@ -2097,7 +2209,7 @@ impl Screen for PayrollImportScreen {
                 "warnings": v.messages.iter().filter(|m| !m.is_error).count(),
             })
         });
-        json!({
+        let mut s = json!({
             "screen": KIND,
             "view": match self.view { View::Import => "import", View::History => "history" },
             "step": self.step.key(),
@@ -2144,6 +2256,10 @@ impl Screen for PayrollImportScreen {
                 "unposted": h.sessions.iter().filter(|s| s.status.is_unposted_draft()).count(),
             })),
             "reversed": self.reversed,
-        })
+        });
+        // QA-6, QA-11 (flags only).
+        s["posted_duplicate"] = json!(self.posted_duplicate());
+        s["service_mismatch"] = json!(self.service_mismatch());
+        s
     }
 }

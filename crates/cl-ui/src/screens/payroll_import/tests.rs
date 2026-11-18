@@ -49,6 +49,9 @@ fn next_to(s: &mut PayrollImportScreen, step: Step) {
         if s.step == step {
             return;
         }
+        if s.step == Step::Accounts {
+            choose_unmatched(s);
+        }
         assert!(s.can_next(), "stuck on {:?} ({:?})", s.step, s.trouble);
         s.next();
         s.poll();
@@ -56,6 +59,30 @@ fn next_to(s: &mut PayrollImportScreen, step: Step) {
     assert_eq!(s.step, step, "{}", s.state());
 }
 
+/// The demo chart has no reimbursement account: nothing is pre-selected
+/// for that line (QA-1), so the owner (here, the test) picks one.
+fn choose_unmatched(s: &mut PayrollImportScreen) {
+    let missing: Vec<&str> = s
+        .needed_lines()
+        .into_iter()
+        .filter(|l| !s.line_accounts.contains_key(*l))
+        .collect();
+    assert!(
+        missing.iter().all(|l| *l == "reimbursement_expense"),
+        "only reimbursements lack a match on the demo chart: {missing:?}"
+    );
+    if !missing.is_empty() {
+        assert!(!s.can_next(), "Next waits for every line");
+        let telephone = s
+            .chart
+            .iter()
+            .find(|a| a.fields.name == "Telephone and Internet")
+            .map(|a| a.id)
+            .expect("an expense account");
+        s.line_accounts
+            .insert("reimbursement_expense".into(), telephone);
+    }
+}
 fn state_text(s: &PayrollImportScreen) -> String {
     s.state().to_string()
 }
@@ -638,6 +665,14 @@ fn a_definite_answer_lets_cancel_discard() {
     s.after_post(Err(ApiError::ClosingPasswordRejected));
     assert!(!s.post_unsettled);
     s.cancel();
+    // QA-8: Cancel asks first; the prompt's Don't save closes (Drop).
+    assert!(
+        f.link
+            .drain()
+            .iter()
+            .any(|e| matches!(e, CompanyEvent::RequestClose(_)))
+    );
+    drop(s);
     assert_eq!(discards(&f), 1);
 }
 
@@ -739,6 +774,15 @@ fn cancel_after_upload_discards_the_draft() {
     next_to(&mut s, Step::Map);
     assert_eq!(f.link.demo_state().expect("demo").payroll.unposted(), 1);
     s.cancel();
+    // QA-8: Cancel asks first; the prompt's Don't save closes (Drop).
+    assert!(
+        f.link
+            .drain()
+            .iter()
+            .any(|e| matches!(e, CompanyEvent::RequestClose(_)))
+    );
+    assert_eq!(f.link.demo_state().expect("demo").payroll.unposted(), 1);
+    drop(s);
     assert_eq!(f.link.demo_state().expect("demo").payroll.unposted(), 0);
 }
 
@@ -854,4 +898,232 @@ fn the_file_is_read_off_the_egui_thread() {
     }
     assert_eq!(s.file_error, Some("payroll.file.too_large"));
     assert!(s.file.is_none());
+}
+
+/// One frame of the window at 1600 × 1000 with `events`; its AccessKit
+/// nodes.
+fn draw_frame(
+    s: &mut PayrollImportScreen,
+    ctx: &eframe::egui::Context,
+    events: Vec<eframe::egui::Event>,
+) -> Vec<(
+    eframe::egui::accesskit::NodeId,
+    eframe::egui::accesskit::Node,
+)> {
+    use crate::windows::Screen as _;
+    use eframe::egui::{self, Pos2, RawInput, Rect, vec2};
+    let input = RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0))),
+        events,
+        ..RawInput::default()
+    };
+    let mut out = ctx.run_ui(input, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+    });
+    out.textures_delta.clear();
+    out.platform_output
+        .accesskit_update
+        .map(|u| u.nodes)
+        .unwrap_or_default()
+}
+
+/// A press and release at the centre of `node`'s box, over two frames.
+fn click_node(
+    s: &mut PayrollImportScreen,
+    ctx: &eframe::egui::Context,
+    node: &eframe::egui::accesskit::Node,
+) -> Vec<(
+    eframe::egui::accesskit::NodeId,
+    eframe::egui::accesskit::Node,
+)> {
+    use eframe::egui::{Event, Modifiers, PointerButton, pos2};
+    let b = node.bounds().expect("bounds");
+    #[allow(clippy::cast_possible_truncation)] // pixel positions
+    let at = pos2(((b.x0 + b.x1) / 2.0) as f32, ((b.y0 + b.y1) / 2.0) as f32);
+    let press = |pressed| Event::PointerButton {
+        pos: at,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::default(),
+    };
+    draw_frame(s, ctx, vec![Event::PointerMoved(at), press(true)]);
+    draw_frame(s, ctx, vec![press(false)]);
+    draw_frame(s, ctx, Vec::new())
+}
+
+/// QA-2: every service in the list can be picked with the pointer, in
+/// turn, including the last two (egui's default list height cut them off).
+#[test]
+fn every_payroll_service_can_be_picked_from_the_list() {
+    use eframe::egui::accesskit::Role;
+    let f = fixture();
+    let mut s = screen(&f);
+    let ctx = eframe::egui::Context::default();
+    crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+    crate::fonts::install(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = Vec::new();
+    for _ in 0..3 {
+        nodes = draw_frame(&mut s, &ctx, Vec::new());
+    }
+    for p in Provider::ALL.into_iter().rev().chain([Provider::Gusto]) {
+        let label = nodes
+            .iter()
+            .find(|(_, n)| n.role() == Role::Label && n.value() == Some("Payroll service"))
+            .map(|(id, _)| *id)
+            .expect("service label");
+        let combo = nodes
+            .iter()
+            .find(|(_, n)| n.labelled_by().contains(&label))
+            .map(|(_, n)| n.clone())
+            .expect("service list");
+        let open = click_node(&mut s, &ctx, &combo);
+        let name = t(&format!("payroll.provider.{}", p.key()));
+        let item = open
+            .iter()
+            .find(|(_, n)| {
+                !matches!(n.role(), Role::Label | Role::ComboBox)
+                    && (n.label() == Some(name.as_str()) || n.value() == Some(name.as_str()))
+            })
+            .map(|(_, n)| n.clone())
+            .unwrap_or_else(|| panic!("{name} in the open list"));
+        nodes = click_node(&mut s, &ctx, &item);
+        assert_eq!(s.provider, p, "{name} picked");
+    }
+}
+
+/// QA-1 on the demo: the Accounts step starts on the payroll accounts by
+/// name, never on the first account of a kind; a line nothing matches
+/// says "Choose an account" and keeps Next off until it is chosen.
+#[test]
+fn accounts_start_on_payroll_accounts_or_empty() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_gusto");
+    s.next();
+    s.poll();
+    s.next();
+    s.poll();
+    assert_eq!(s.step, Step::Accounts);
+    let name = |s: &PayrollImportScreen, line: &str| {
+        s.line_accounts.get(line).and_then(|id| {
+            s.chart
+                .iter()
+                .find(|a| a.id == *id)
+                .map(|a| a.fields.name.clone())
+        })
+    };
+    assert_eq!(name(&s, "gross_wages_expense").as_deref(), Some("Wages"));
+    assert_eq!(
+        name(&s, "employer_tax_expense").as_deref(),
+        Some("Payroll Taxes")
+    );
+    for l in ["fit_payable", "ss_payable", "retirement_payable"] {
+        assert_eq!(name(&s, l).as_deref(), Some("Payroll Liabilities"), "{l}");
+    }
+    assert_eq!(
+        name(&s, cl_model::payroll_import::NET_PAY_LINE).as_deref(),
+        Some("Operating Checking")
+    );
+    assert_eq!(name(&s, "reimbursement_expense"), None);
+    assert!(!s.accounts_complete());
+    assert!(!s.can_next());
+    choose_unmatched(&mut s);
+    assert!(s.can_next());
+}
+
+/// QA-5: the engine's notes are grouped by kind with a row count, never
+/// listed per row, and never block.
+#[test]
+fn check_notes_are_grouped_by_kind() {
+    use cl_api::payroll::ValidationMessage;
+    let m = |row: Option<u64>, code: &str, is_error| ValidationMessage {
+        row_number: row,
+        field: "check_date".into(),
+        code: code.into(),
+        is_error,
+    };
+    let msgs = vec![
+        m(Some(1), "STALE_DATE", false),
+        m(Some(2), "STALE_DATE", false),
+        m(Some(5), "DUPLICATE_EMPLOYEE", false),
+        m(Some(3), "AMOUNT_INVALID", true),
+        m(None, "DUPLICATE_FILE", false),
+        m(Some(3), "STALE_DATE", false),
+    ];
+    assert_eq!(
+        draw::note_groups(&msgs),
+        vec![
+            ("STALE_DATE".to_string(), 3),
+            ("DUPLICATE_EMPLOYEE".to_string(), 1),
+            ("DUPLICATE_FILE".to_string(), 0),
+        ]
+    );
+    assert_eq!(draw::t_count("payroll.rows", 1), "1 row");
+    assert_eq!(draw::t_count("payroll.rows", 3), "3 rows");
+    assert_eq!(draw::t_count("payroll.post", 1), "Post 1 entry");
+    assert_eq!(draw::t_count("payroll.post", 2), "Post 2 entries");
+    assert_eq!(
+        draw::t_count("payroll.done.withdrawals", 1),
+        "1 expected withdrawal is waiting to be matched in the Bank Feed."
+    );
+}
+
+/// QA-4: an engine time shows as this computer's date, not the UTC day.
+#[test]
+fn posted_day_is_the_local_date() {
+    let ts = "2026-11-18T00:16:00.000Z";
+    let expected = cl_core::Timestamp::parse_wire(ts)
+        .map(|t| t.as_utc().with_timezone(&chrono::Local).date_naive())
+        .expect("time");
+    let got = draw::posted_day(ts).expect("day");
+    assert_eq!(
+        (got.year(), got.month(), got.day()),
+        (
+            chrono::Datelike::year(&expected),
+            chrono::Datelike::month(&expected),
+            chrono::Datelike::day(&expected)
+        )
+    );
+    assert_eq!(
+        draw::posted_day("2026-11-17"),
+        CalendarDate::from_ymd(2026, 11, 17).ok()
+    );
+}
+
+/// QA-8: Cancel with a chosen file asks (the tab's close prompt) instead
+/// of closing; QA-6: a run the engine says is posted keeps Post off.
+#[test]
+fn cancel_asks_and_a_posted_run_keeps_post_off() {
+    let f = fixture();
+    let mut s = screen(&f);
+    s.cancel();
+    assert!(
+        f.link
+            .drain()
+            .iter()
+            .any(|e| matches!(e, CompanyEvent::CloseWindow(_))),
+        "an empty wizard closes"
+    );
+    cmd(&mut s, "dev.payroll_demo_file_gusto");
+    s.cancel();
+    let events = f.link.drain();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, CompanyEvent::RequestClose(_))),
+        "a chosen file asks first"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, CompanyEvent::CloseWindow(_)))
+    );
+    next_to(&mut s, Step::Preview);
+    assert!(s.can_next());
+    if let Some(u) = &mut s.upload {
+        u.is_duplicate_by_key = true;
+    }
+    assert!(s.posted_duplicate());
+    assert!(!s.can_next(), "Post stays off for a posted run");
 }
