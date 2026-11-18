@@ -534,6 +534,60 @@ fn a_partner_outside_the_window_is_not_pre_picked() {
     assert_eq!(d.pick_transfer, None);
 }
 
+/// P30 QA-16: a payroll entry the engine lists both as a general match and
+/// as a payroll bank line is offered once, as the payroll choice (in owner
+/// words, the amount's size); other candidates stay.
+#[test]
+fn a_payroll_entry_is_one_choice() {
+    use cl_api::{MatchCandidate, PayrollOverlap};
+    use cl_core::Money;
+    let txn = |n: u8| -> cl_core::ids::TransactionId {
+        format!("d30f0000-0000-4000-8000-0000000000{n:02x}")
+            .parse()
+            .expect("id")
+    };
+    let line = |n: u8| -> cl_core::ids::JournalLineId {
+        format!("d30f0001-0000-4000-8000-0000000000{n:02x}")
+            .parse()
+            .expect("id")
+    };
+    let amount = Money::parse_wire("-5134.88").expect("money");
+    let candidate = |t: u8, l: u8| MatchCandidate {
+        transaction: txn(t),
+        line: line(l),
+        txn_type: Some("journal_entry".into()),
+        txn_number: None,
+        date: None,
+        amount,
+        memo: None,
+        contact_name: None,
+        check_number: None,
+    };
+    let mut d = detail::Detail::default();
+    // A pick of the general candidate that goes away is dropped.
+    d.pick_match = Some((txn(1), Some(line(9))));
+    d.take_data(detail::DetailData {
+        candidates: vec![candidate(1, 9), candidate(2, 2)],
+        payroll: vec![PayrollOverlap {
+            transaction: txn(1),
+            line: line(1),
+            memo: None,
+            date: cl_core::CalendarDate::from_ymd(2025, 3, 14).ok(),
+            amount,
+        }],
+        ..detail::DetailData::default()
+    });
+    assert_eq!(d.data.candidates.len(), 1, "the payroll entry once");
+    assert_eq!(d.data.candidates[0].transaction, txn(2), "others stay");
+    assert_eq!(d.data.payroll.len(), 1);
+    assert_eq!(d.pick_match, None);
+    let text = crate::i18n::t_with(
+        "bank_feed.match.payroll",
+        &[("date", "03/14/2025"), ("amount", "5,134.88")],
+    );
+    assert_eq!(text, "Payroll \u{2014} pay date 03/14/2025 \u{b7} 5,134.88");
+}
+
 /// P26 QA-13: "From the bank" shows the bank's own text.
 #[test]
 fn the_bank_text_is_the_banks_own() {

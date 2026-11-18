@@ -471,7 +471,7 @@ pub const COMMANDS: &[Command] = &[
     built("banking.import_file", "Import Bank File", Some(Menu::Banking), 2, None),
     built("banking.feed", "Bank Feed", Some(Menu::Banking), 2, None),
     // Payroll
-    screen("payroll.import", "Import Payroll", Some(Menu::Payroll), 0, None, "P30"),
+    built("payroll.import", "Import Payroll", Some(Menu::Payroll), 0, None),
     // Reports
     built("reports.center", "Reports", Some(Menu::Reports), 0, None),
     built("reports.profit_loss", "Profit & Loss", Some(Menu::Reports), 1, None),
@@ -629,6 +629,44 @@ pub const DEV_COMMANDS: &[Command] = &[
     dev_action(
         "dev.demo_bank_import_slow",
         "Slow Demo Bank Import Preparation (developer)",
+    ),
+    // P30: the payroll scenarios run light and dark in one app.
+    dev_action("dev.payroll_demo_reset", "Reset Demo Payroll (developer)"),
+    dev_action(
+        "dev.payroll_start_over",
+        "Start Payroll Import Over (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_restricted",
+        "Demo Payroll as Restricted Viewer (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_close_books",
+        "Close Demo Books for Payroll (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_require_tag",
+        "Require Tags for Demo Payroll (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_forget_left_out",
+        "Forget Left-out Payroll Columns (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_file_gusto",
+        "Demo Payroll File: Gusto (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_file_adp_run_gli",
+        "Demo Payroll File: ADP (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_file_generic_period1",
+        "Demo Payroll File: Generic 1 (developer)",
+    ),
+    dev_action(
+        "dev.payroll_demo_file_generic_period2",
+        "Demo Payroll File: Generic 2 (developer)",
     ),
     // P26: the Bank Feed's other computers, roles and AI switch in the demo.
     dev_action(
@@ -884,6 +922,8 @@ mod tests {
             "company.my_sign_in",
             "company.users",
             "reports.closing_date_exceptions",
+            // P30
+            "payroll.import",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

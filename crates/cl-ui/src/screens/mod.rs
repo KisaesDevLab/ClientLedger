@@ -67,6 +67,8 @@ pub mod sales_tax;
 pub mod inventory;
 // P25: Import Bank File.
 pub mod import_bank_file;
+// P30: Import Payroll.
+pub mod payroll_import;
 // P26: Bank Feed review.
 pub mod bank_feed;
 // P27: Reconcile.
@@ -149,6 +151,9 @@ pub(crate) const P28_SCREENS: [crate::shell::MakeScreen; 1] = [reports::make];
 /// P29 screens.
 pub(crate) const P29_SCREENS: [crate::shell::MakeScreen; 3] =
     [closing_date::make, audit_trail::make, users::make];
+
+/// P30 screens.
+pub(crate) const P30_SCREENS: [crate::shell::MakeScreen; 1] = [payroll_import::make];
 
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
 

@@ -325,6 +325,7 @@ pub(crate) struct Executor {
     feed_post_v1: AtomicBool,
     feed_accept_v1: AtomicBool,
     feed_undo_v1: AtomicBool,
+    payroll_v1: AtomicBool,
 }
 
 /// Per-request bookkeeping of the retry loop.
@@ -399,6 +400,7 @@ impl Executor {
             feed_post_v1: AtomicBool::new(false),
             feed_accept_v1: AtomicBool::new(false),
             feed_undo_v1: AtomicBool::new(false),
+            payroll_v1: AtomicBool::new(false),
         }
     }
 
@@ -536,6 +538,12 @@ impl Executor {
         self.feed_undo_v1.store(undo, Ordering::Relaxed);
     }
 
+    /// Record whether the engine advertises `payroll-import-post-v1`
+    /// (payroll post and reverse; U-244, P30).
+    pub(crate) fn set_payroll_v1(&self, on: bool) {
+        self.payroll_v1.store(on, Ordering::Relaxed);
+    }
+
     /// Record whether the engine advertises
     /// `idempotency-receive-payment-v1` (U-132).
     pub(crate) fn set_idempotency_receive_payment_v1(&self, on: bool) {
@@ -575,6 +583,7 @@ impl Executor {
             KeySet::FeedPostV1 => self.feed_post_v1.load(Ordering::Relaxed),
             KeySet::FeedAcceptV1 => self.feed_accept_v1.load(Ordering::Relaxed),
             KeySet::FeedUndoV1 => self.feed_undo_v1.load(Ordering::Relaxed),
+            KeySet::PayrollV1 => self.payroll_v1.load(Ordering::Relaxed),
         }
     }
 
@@ -614,13 +623,17 @@ impl Executor {
         // Each keyed route set replays only under its own capability: an
         // engine with `idempotency-v1` alone does not replay the A/P routes.
         let replayed_route = op.key_set().is_some_and(|set| self.replays(set));
-        let class = op.retry().effective(
-            replayed_route
-                && call
-                    .idempotency_key
-                    .as_ref()
-                    .is_some_and(IdempotencyKey::replayable),
-        );
+        let class = if call.once {
+            RetryClass::Never
+        } else {
+            op.retry().effective(
+                replayed_route
+                    && call
+                        .idempotency_key
+                        .as_ref()
+                        .is_some_and(IdempotencyKey::replayable),
+            )
+        };
         // With `idempotency-v1` the key goes only where the engine replays
         // it: its route sets under their capabilities, and `/batch/save`
         // (its own `batch-idempotent-v1`). Without it every mutation sends
@@ -687,6 +700,13 @@ impl Executor {
                 Err(e) => self.on_transport(&ctx, e, &mut r).await,
             };
             match step {
+                // P30 QA-15: an earlier attempt of a keyed write may have
+                // committed; an engine that is down (or not answering as
+                // the engine) on a later attempt leaves that unknown, not
+                // "nothing was sent" (the same key may be sent again).
+                Step::Done(Err(e @ ApiError::EngineUnavailable { .. })) => {
+                    return Err(keyed_give_up(&ctx, &r, e));
+                }
                 Step::Done(result) => return result,
                 Step::Again => {
                     if r.same_key_retried && Instant::now() >= ctx.deadline {
@@ -2171,6 +2191,51 @@ pub(crate) mod tests {
                 "{e:?}"
             );
         }
+    }
+
+    /// P30 QA-15: a keyed write whose first attempt may have reached the
+    /// engine, retried while the engine is down, is `OutcomeUnknown` with
+    /// its key (never "engine unavailable", which reads as nothing sent).
+    /// Down before anything was sent stays `EngineUnavailable`.
+    #[tokio::test]
+    async fn keyed_once_sent_then_engine_down_is_outcome_unknown() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(json(503, r#"{"error":{"message":"x"}}"#))
+            .mount(&server)
+            .await;
+        let port = server.address().port();
+        let down = EndpointState::Down { permanent: true };
+        let src = Arc::new(SeqEndpoint::new(vec![ready(port, TOKEN, 1), down.clone()]));
+        let ex = exec_on(src);
+        ex.set_idempotency_v1(true);
+        let key = IdempotencyKey::new();
+        let mut call = post_call();
+        call.idempotency_key = Some(key.clone());
+        let e = ex
+            .run(&post_op(), call, &none(), None)
+            .await
+            .expect_err("gave up");
+        assert_eq!(
+            count(&server).await,
+            1,
+            "sent once, then the engine was down"
+        );
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { idempotency_key: Some(ref k), keyed: true, .. } if *k == key),
+            "{e:?}"
+        );
+        // Down from the start: nothing was sent.
+        let ex = exec_on(Arc::new(SeqEndpoint::new(vec![down])));
+        ex.set_idempotency_v1(true);
+        let mut call = post_call();
+        call.idempotency_key = Some(IdempotencyKey::new());
+        let e = ex
+            .run(&post_op(), call, &none(), None)
+            .await
+            .expect_err("down");
+        assert_eq!(e, ApiError::EngineUnavailable { permanent: true });
+        assert_eq!(count(&server).await, 1, "nothing more was sent");
     }
 
     fn post_to(route: &'static str) -> (Operation, Call) {

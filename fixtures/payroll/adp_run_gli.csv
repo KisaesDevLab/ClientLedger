@@ -1,0 +1,8 @@
+Company Code,Company Name,Batch Number,Check Date,GL Account Number,GL Account Description,Debit Amount,Credit Amount
+TST,Synthetic Test Co,014,02/14/2025,6000,Payroll - Salaries & Wages,6235.45,0.00
+TST,Synthetic Test Co,014,02/14/2025,6200,ER Social Security,386.60,0.00
+TST,Synthetic Test Co,014,02/14/2025,6200,ER Medicare,90.42,0.00
+TST,Synthetic Test Co,014,02/14/2025,2120,Federal Withholding,0.00,623.55
+TST,Synthetic Test Co,014,02/14/2025,2100,Social Security Withholding,0.00,773.20
+TST,Synthetic Test Co,014,02/14/2025,2110,Medicare Withholding,0.00,180.84
+TST,Synthetic Test Co,014,02/14/2025,1010,Net Pay,0.00,5134.88

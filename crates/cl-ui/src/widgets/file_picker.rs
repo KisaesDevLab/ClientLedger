@@ -45,6 +45,8 @@ pub enum PickUse {
     BankFile,
     /// Where to save a report export (P28: CSV, Excel, PDF).
     SaveReport,
+    /// A payroll file to import (P30).
+    PayrollFile,
 }
 
 impl PickUse {
@@ -57,6 +59,7 @@ impl PickUse {
             PickUse::Logo => "picker.title.logo",
             PickUse::BankFile => "picker.title.bank_file",
             PickUse::SaveReport => "picker.title.save_report",
+            PickUse::PayrollFile => "picker.title.payroll_file",
         }
     }
 }
@@ -82,6 +85,12 @@ pub const DOCUMENTS: Filter = Filter {
 pub const BANK_FILES: Filter = Filter {
     name_key: "picker.filter.bank_files",
     extensions: &["qfx", "ofx", "qbo", "qif", "csv", "txt"],
+};
+
+/// A payroll file: CSV, TSV, TXT or Excel (P30; checked again before upload).
+pub const PAYROLL_FILES: Filter = Filter {
+    name_key: "picker.filter.payroll_files",
+    extensions: &["csv", "tsv", "txt", "xlsx", "xls"],
 };
 
 /// A company logo: PNG or JPEG (Q-P19v).

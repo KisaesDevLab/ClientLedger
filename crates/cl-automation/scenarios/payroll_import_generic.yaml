@@ -1,0 +1,66 @@
+# Import Payroll (P30, A2): a generic CSV is mapped once (period 1) and
+# its saved layout maps the next period's file with no Map step; the tag
+# gate ("Require a tag on every line") refuses before posting and names
+# the line. Synthetic fixtures `generic_period1.csv` / `generic_period2.csv`.
+name: payroll_import_generic
+description: Generic CSV - map once, the second period skips Match columns; the tag gate refuses an untagged line.
+steps:
+  - resize: {width: 1440, height: 940}
+  - command: payroll.import
+  - command: dev.payroll_demo_reset
+  - command: dev.payroll_demo_file_generic_period1
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: map}
+  - assert_state: {key: screen.layout, equals: manual}
+  - click: {role: combo_box, label: "Employee (used only until posting)"}
+  - click: {role: button, label: Worker}
+  - click: {role: combo_box, label: Gross pay}
+  - click: {role: button, label: Wages}
+  - click: {role: combo_box, label: Pay date}
+  - click: {role: button, label: Paid On}
+  # Net pay is the last field: scroll the column list to it first.
+  - scroll: {target: {role: combo_box, label: Gross pay}, to: end}
+  - click: {role: combo_box, label: Net pay}
+  - click: {role: button, label: Take Home}
+  # Back up, over a field still in view (Gross pay is scrolled away).
+  - scroll: {target: {role: combo_box, label: Net pay}, to: start}
+  - assert_state: {key: screen.can_next, equals: true}
+  - screenshot: map-generic
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: preview}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: done}
+  # Period 2: the saved layout applies.
+  - command: dev.payroll_start_over
+  - command: dev.payroll_demo_require_tag
+  - command: dev.payroll_demo_file_generic_period2
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: accounts}
+  - assert_state: {key: screen.layout, equals: saved}
+  - screenshot: saved-layout
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: preview}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: preview}
+  - assert_state: {key: screen.posts_sent, equals: 0}
+  - screenshot: untagged
+  # S4: "Match columns again" from the entries, though the layout applied
+  # without the step.
+  - assert_state: {key: screen.can_match_again, equals: true}
+  - click: {role: button, label: Match columns again}
+  - assert_state: {key: screen.step, equals: map}
+  # S4: a layout that doesn't know the file's other amount columns (as one
+  # saved before they were kept) stops on Match columns and names them.
+  - command: dev.payroll_start_over
+  - command: dev.payroll_demo_forget_left_out
+  - command: dev.payroll_demo_file_generic_period2
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: map}
+  - assert_state: {key: screen.layout, equals: saved}
+  - assert_state: {key: screen.new_columns, equals: 6}
+  - screenshot: new-columns
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: accounts}

@@ -364,6 +364,10 @@ impl HomeScreen {
                 move |s| async move { s.dashboard().summary(today, window).await },
             ));
         }
+        let payroll_open = self
+            .link
+            .rights()
+            .door_open(cl_model::permissions::Door::PayrollImport);
         self.data.counts.start(run(
             &self.link,
             group,
@@ -374,7 +378,11 @@ impl HomeScreen {
                 Ok(Counts {
                     feed: Ok(demo::feed_waiting(s)),
                     bills: Ok(demo::bills_due(through).0),
-                    payroll: Ok(demo::PAYROLL_UNPOSTED),
+                    payroll: Ok(if payroll_open {
+                        demo::PAYROLL_UNPOSTED + s.payroll.unposted()
+                    } else {
+                        0
+                    }),
                     clients: Ok(clients),
                     vendors: Ok(vendors),
                 })
@@ -388,7 +396,12 @@ impl HomeScreen {
                 Ok(Counts {
                     feed: home.feed_pending_count(today).await,
                     bills,
-                    payroll: home.payroll_sessions_count(&PayrollStatus::UNPOSTED).await,
+                    // P30 (U-247): no count call while payroll is refused.
+                    payroll: if payroll_open {
+                        home.payroll_sessions_count(&PayrollStatus::UNPOSTED).await
+                    } else {
+                        Ok(0)
+                    },
                     clients: contact_count(&s, ContactType::Customer).await,
                     vendors: contact_count(&s, ContactType::Vendor).await,
                 })

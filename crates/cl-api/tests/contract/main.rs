@@ -57,6 +57,7 @@ mod contract_merges;
 mod contract_money;
 mod contract_money_helpers;
 mod contract_pay_bills;
+mod contract_payroll;
 mod contract_pr3;
 mod contract_preferences;
 mod contract_printing;
@@ -85,6 +86,8 @@ mod contract_tags;
 mod contract_team;
 mod contract_templates;
 mod contract_thresholds_1099;
+#[path = "../support/payroll_expect.rs"]
+mod payroll_expect;
 // A09: `.clreport` transfer (U-220, WP-A) and the tenant-archive round
 // trip of memorized reports (AC3, WP-B).
 mod contract_report_defs_archive;
@@ -1062,6 +1065,56 @@ fn main() -> std::process::ExitCode {
         (
             "lifecycle::ten_switches_under_two_seconds",
             contract_lifecycle::ten_switches_under_two_seconds,
+        ),
+        // P30 payroll import (U-242 to U-251): PENDING until the pin has
+        // the three payroll capabilities.
+        (
+            "payroll::providers_post_their_expected_entries",
+            contract_payroll::providers_post_their_expected_entries,
+        ),
+        (
+            "payroll::generic_layout_is_reused",
+            contract_payroll::generic_layout_is_reused,
+        ),
+        (
+            "payroll::bank_withdrawals_match",
+            contract_payroll::bank_withdrawals_match,
+        ),
+        (
+            "payroll::duplicates_overlap_concurrency_and_reverse",
+            contract_payroll::duplicates_overlap_concurrency_and_reverse,
+        ),
+        (
+            "payroll::a_failed_post_leaves_nothing",
+            contract_payroll::a_failed_post_leaves_nothing,
+        ),
+        (
+            "payroll::two_drafts_of_one_file_post_once",
+            contract_payroll::two_drafts_of_one_file_post_once,
+        ),
+        (
+            "payroll::a_discard_racing_a_post_keeps_the_posted_import",
+            contract_payroll::a_discard_racing_a_post_keeps_the_posted_import,
+        ),
+        (
+            "payroll::closed_period_needs_the_password",
+            contract_payroll::closed_period_needs_the_password,
+        ),
+        (
+            "payroll::department_tags_reach_the_posted_lines",
+            contract_payroll::department_tags_reach_the_posted_lines,
+        ),
+        (
+            "payroll::mode_b_negatives_post_on_the_other_side",
+            contract_payroll::mode_b_negatives_post_on_the_other_side,
+        ),
+        (
+            "payroll::every_department_is_listed_and_tagged",
+            contract_payroll::every_department_is_listed_and_tagged,
+        ),
+        (
+            "payroll::restricted_viewer_sees_no_payroll",
+            contract_payroll::restricted_viewer_sees_no_payroll,
         ),
         // P25 bank file import (U-06): its own accounts in Contract Co.
         (

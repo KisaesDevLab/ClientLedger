@@ -270,7 +270,24 @@ impl Detail {
 
     /// The partners arrived: a pre-picked partner outside the owner's
     /// transfer window (Preferences) is dropped (P26 QA-16).
-    pub(crate) fn take_data(&mut self, d: DetailData) {
+    pub(crate) fn take_data(&mut self, mut d: DetailData) {
+        // P30 QA-16: a payroll entry the engine also lists among the
+        // general match candidates is one choice, the payroll one (it names
+        // the entry's own bank line). Nothing else about matching changes.
+        d.candidates
+            .retain(|c| !d.payroll.iter().any(|p| p.transaction == c.transaction));
+        if let Some((txn, line)) = self.pick_match
+            && !d
+                .candidates
+                .iter()
+                .any(|c| c.transaction == txn && Some(c.line) == line)
+            && !d
+                .payroll
+                .iter()
+                .any(|p| p.transaction == txn && Some(p.line) == line)
+        {
+            self.pick_match = None;
+        }
         if let Some(p) = self.pick_transfer
             && !d.transfers.iter().any(|c| c.feed_item == p)
         {
@@ -1152,13 +1169,16 @@ fn match_ui(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens, r: &FeedRow) -
     }
     for p in &s.detail.data.payroll {
         let date = p.date.map(crate::shell::us_date).unwrap_or_default();
+        // QA-16: owner words, the amount's size (as the other choices).
         rows.push((
             p.transaction,
             Some(p.line),
-            format!(
-                "{date} \u{b7} {} \u{b7} {}",
-                t("bank_feed.match.payroll"),
-                amount_text(ui, model::display_amount(p.amount))
+            t_with(
+                "bank_feed.match.payroll",
+                &[
+                    ("date", &date),
+                    ("amount", &amount_text(ui, p.amount.abs())),
+                ],
             ),
         ));
     }

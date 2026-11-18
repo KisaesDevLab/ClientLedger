@@ -51,7 +51,7 @@ fn bookkeeper_map(sensitive: &str) -> serde_json::Map<String, Value> {
 /// no "See sensitive accounts" (an override listing it as none). Since the
 /// owner's 2026-11-17 decision the built-in Bookkeeper sees them, so the
 /// hidden viewer must be restricted on purpose.
-fn as_restricted_bookkeeper(h: &Harness) -> Session {
+pub(crate) fn as_restricted_bookkeeper(h: &Harness) -> Session {
     let (user, bk) = h.bookkeeper();
     let map = bookkeeper_map("none");
     let r = h
@@ -375,9 +375,9 @@ pub fn builtin_bookkeeper_sees_sensitive_accounts(h: &Harness) {
 }
 
 /// Unmarks the account when dropped (also after a failed assert).
-struct Unmark<'a> {
-    h: &'a Harness,
-    id: cl_core::ids::AccountId,
+pub(crate) struct Unmark<'a> {
+    pub(crate) h: &'a Harness,
+    pub(crate) id: cl_core::ids::AccountId,
 }
 
 impl Drop for Unmark<'_> {

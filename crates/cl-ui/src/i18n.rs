@@ -146,6 +146,7 @@ mod statements;
 mod inventory;
 // P25: Import Bank File.
 mod bank_import;
+mod payroll;
 mod reconcile;
 // P28: the report window.
 mod report_builder;
@@ -163,7 +164,7 @@ mod auth;
 mod sensitive;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 58] = [
+const TABLES: [&[(&str, &str)]; 59] = [
     audit::ENGLISH,
     auth::ENGLISH,
     sensitive::ENGLISH,
@@ -216,6 +217,7 @@ const TABLES: [&[(&str, &str)]; 58] = [
     finance_charges::ENGLISH,
     inventory::ENGLISH,
     bank_import::ENGLISH,
+    payroll::ENGLISH,
     reconcile::ENGLISH,
     reports::ENGLISH,
     report_builder::ENGLISH,
@@ -284,6 +286,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("window.prompt.discard", "Discard changes"),
     ("window.prompt.keep", "Keep editing"),
     ("window.prompt.message_unsent", "\"{title}\" has a file that wasn't sent to the Bank Feed yet. Close it anyway?"),
+    ("window.prompt.message_unsettled", "We couldn't confirm whether \"{title}\" finished posting. It may already be in the books. Closing keeps the import so you can check it later in History with Check status. Close anyway?"),
     ("window.prompt.close_anyway", "Close anyway"),
     // Status bar
     ("status.not_signed_in", "Not signed in"),

@@ -43,6 +43,8 @@ pub mod list_csv;
 pub mod me;
 pub mod operations;
 pub mod payments;
+// P30: payroll import (U-242 to U-251).
+pub mod payroll;
 pub mod posting;
 pub mod printing;
 pub(crate) mod reconcile;

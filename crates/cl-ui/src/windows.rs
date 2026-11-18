@@ -43,6 +43,14 @@ pub trait Screen {
         true
     }
 
+    /// The close prompt's own words for a window with nothing to save (an
+    /// import wizard, P30 QA-13), used instead of the bank-import ones;
+    /// `None` keeps the shared wording. Not used while a save is
+    /// unconfirmed (that prompt keeps its own text).
+    fn close_words(&self) -> Option<CloseWords> {
+        None
+    }
+
     /// The keymap scope while this window has focus. Forms return
     /// [`Scope::Form`] so form shortcuts (Alt+N, Esc, Ctrl+Insert) apply.
     fn scope(&self) -> Scope {
@@ -419,6 +427,58 @@ impl Window {
     pub fn can_save(&self) -> bool {
         self.screen.can_save()
     }
+
+    /// The window's own close-prompt words, if it has them (P30 QA-13).
+    #[must_use]
+    pub fn close_words(&self) -> Option<CloseWords> {
+        self.screen.close_words()
+    }
+}
+
+/// A close prompt in a window's own words: the question and its two
+/// buttons (close and discard, keep the window).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CloseWords {
+    /// The question.
+    pub message: String,
+    /// The button that closes (and discards).
+    pub close: String,
+    /// The button that keeps the window open.
+    pub keep: String,
+}
+
+/// The close prompt's text for `w`: (message, close button, keep button).
+/// A save that may be in the books keeps its own warning; a window with
+/// nothing to save uses its own words when it has them (P30 QA-13).
+#[must_use]
+pub fn close_prompt_text(w: Option<&Window>, title: &str) -> (String, String, String) {
+    let unconfirmed = w.is_some_and(Window::save_unconfirmed);
+    let can_save = w.is_none_or(Window::can_save);
+    let keep = t("window.prompt.keep");
+    if !can_save && unconfirmed {
+        // An import whose post is out or lost: closing keeps it.
+        return (
+            t_with("window.prompt.message_unsettled", &[("title", title)]),
+            t("window.prompt.close_anyway"),
+            keep,
+        );
+    }
+    if !can_save {
+        if let Some(words) = w.and_then(Window::close_words) {
+            return (words.message, words.close, words.keep);
+        }
+        return (
+            t_with("window.prompt.message_unsent", &[("title", title)]),
+            t("window.prompt.close_anyway"),
+            keep,
+        );
+    }
+    let message = if unconfirmed {
+        prompt_message_unconfirmed(title)
+    } else {
+        prompt_message(title)
+    };
+    (message, t("window.prompt.discard"), keep)
 }
 
 /// Why a window is being closed.

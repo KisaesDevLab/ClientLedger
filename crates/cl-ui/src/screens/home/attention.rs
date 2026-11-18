@@ -465,6 +465,10 @@ pub(super) fn show(ui: &mut Ui, home: &HomeScreen, tokens: &Tokens) -> Option<&'
         first = false;
         line(ui, tokens, l, &mut clicked);
     }
+    if clicked.is_some() && clicked == AttentionKind::PayrollUnposted.opens() {
+        // Import Payroll opens on History, unposted imports only.
+        crate::screens::payroll_import::open_history_unposted();
+    }
     if clicked == AttentionKind::IntakeFolders.opens() {
         // Preferences opens on Document intake.
         crate::screens::preferences::open_at(crate::screens::preferences::Category::ReceiptInbox);

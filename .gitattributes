@@ -11,3 +11,5 @@
 fixtures/batch/** -text
 # Bank import fixtures keep their exact bytes (CRLF, BOM, Windows-1252, UTF-16).
 fixtures/bank/** -text
+# Payroll import fixtures keep their exact bytes (file hashes are duplicate keys).
+fixtures/payroll/** -text

@@ -373,10 +373,14 @@ impl HomeQueries<'_> {
     ) -> Result<u64, ApiError> {
         let mut n: u64 = 0;
         for s in statuses {
-            let q = vec![
+            let mut q = vec![
                 ("status".into(), s.as_wire().into()),
                 ("limit".into(), "1".into()),
             ];
+            // P30: the open company's imports only (a tenant may hold more).
+            if let crate::session::Scope::Company { company_id, .. } = self.0.scope() {
+                q.push(("companyId".into(), company_id.to_string()));
+            }
             let t = self
                 .total(&PAYROLL_SESSIONS, q, "payroll sessions total")
                 .await?;

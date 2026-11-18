@@ -509,6 +509,21 @@ impl Capabilities {
     pub const FEED_ACCEPT: &'static str = "feed-accept-v1";
     /// U-169 (P26 E3): `POST /banking/feed/undo`, rows or an accept group.
     pub const FEED_UNDO: &'static str = "feed-undo-v1";
+    /// U-250, U-242, U-243, U-246 (P30): exact payroll sums, one summary
+    /// entry per pay date, Square's "other" taxes, departments to tags.
+    pub const PAYROLL_IMPORT_EXACT: &'static str = "payroll-import-exact-v1";
+    /// U-244, U-245, U-251 (P30): atomic, keyed payroll post and reverse
+    /// with 409 codes, the closing-date password, and discarding employee
+    /// detail on post.
+    pub const PAYROLL_IMPORT_POST: &'static str = "payroll-import-post-v1";
+    /// U-247 (P30): payroll routes refuse viewers with hidden accounts; the
+    /// payroll overlap and match doors filter or refuse hidden lines.
+    pub const PAYROLL_IMPORT_SENSITIVE: &'static str = "payroll-import-sensitive-v1";
+    /// P30 review fixes (engine B1, S1, S3, S5): a discard never removes a
+    /// posted import, one post per file at a time, every department in the
+    /// Mode A check (`departments`, `departmentsTruncated`), Mode B signed
+    /// amounts. Optional: the screen works without it (sample departments).
+    pub const PAYROLL_IMPORT_REVIEW: &'static str = "payroll-import-review-v1";
     /// U-175 (P26 QA-6): a bank file goes into any bank register account
     /// (`bank`, `checking`, `savings`, `cash`, `petty_cash`) or a card.
     pub const BANK_IMPORT_ACCOUNT_TYPES: &'static str = "bank-import-account-types-v1";

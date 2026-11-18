@@ -30,6 +30,8 @@ pub mod invoices;
 pub mod journal;
 pub mod lists;
 pub mod money;
+// P30: payroll import answered from the fixtures' goldens.
+pub mod payroll;
 // P18: Pay Bills.
 pub mod layouts;
 pub mod pay_bills;
@@ -134,6 +136,8 @@ pub struct DemoState {
     pub daily_sales: daily_sales::DemoDailySales,
     /// Bank files imported in the demo (P25).
     pub bank_feed: bank_import::DemoBankFeed,
+    /// P30: payroll imports.
+    pub payroll: payroll::DemoPayroll,
     /// The Bank Feed review (P26).
     pub feed_review: feed_review::DemoFeedReview,
     /// Reconciliations (P27).
@@ -307,6 +311,7 @@ impl DemoState {
             deposits: deposits::DemoDeposits::default(),
             daily_sales: daily_sales::DemoDailySales::default(),
             bank_feed: bank_import::DemoBankFeed::default(),
+            payroll: payroll::DemoPayroll::default(),
             feed_review: feed_review::DemoFeedReview::default(),
             reconcile: reconcile::DemoRecon::default(),
             entity_type: cl_api::EntityType::SingleMemberLlc,
@@ -645,6 +650,18 @@ pub fn chart() -> Vec<cl_api::Account> {
         name: "Interest Income".into(),
         kind: AccountType::OtherRevenue,
         detail: None,
+        parent: None,
+        active: true,
+        system: false,
+        tag: None,
+    });
+    // P30 QA-1: where imported payroll's withholdings wait (the sample has
+    // Wages and Payroll Taxes but no liability for them).
+    rows.push(DemoRow {
+        number: "2100".into(),
+        name: "Payroll Liabilities".into(),
+        kind: AccountType::Liability,
+        detail: Some("other_current_liability".into()),
         parent: None,
         active: true,
         system: false,

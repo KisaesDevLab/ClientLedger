@@ -1,0 +1,58 @@
+{
+  "provider": "qbo_payroll",
+  "mode": "A",
+  "periodStart": "2025-03-01",
+  "periodEnd": "2025-03-14",
+  "checkDate": "2025-03-14",
+  "entries": [
+    {
+      "date": "2025-03-14",
+      "lines": [
+        {
+          "lineType": "gross_wages_expense",
+          "department": null,
+          "side": "debit",
+          "amount": "4521.15"
+        },
+        {
+          "lineType": "employer_tax_expense",
+          "department": null,
+          "side": "debit",
+          "amount": "345.86"
+        },
+        {
+          "lineType": "fit_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "363.88"
+        },
+        {
+          "lineType": "sit_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "146.59"
+        },
+        {
+          "lineType": "ss_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "560.62"
+        },
+        {
+          "lineType": "medicare_payable",
+          "department": null,
+          "side": "credit",
+          "amount": "131.10"
+        },
+        {
+          "lineType": "payroll_clearing",
+          "department": null,
+          "side": "credit",
+          "amount": "3664.82"
+        }
+      ],
+      "totalDebits": "4867.01",
+      "totalCredits": "4867.01"
+    }
+  ]
+}
