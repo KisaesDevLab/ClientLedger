@@ -535,6 +535,10 @@ async fn refusals_keep_codes_and_ids_never_messages() {
         Some(ImportRefusal::AmountInvalid { rows: vec![3, 9] })
     );
     assert_eq!(import_refusal(&refusal(409, "SOMETHING", "{}").await), None);
+}
+
+#[tokio::test]
+async fn the_batch_codes_of_e1_are_refusals() {
     // E1 as built: the batch codes, at 409 and 422 alike.
     for (status, code, want) in [
         (409, "IMPORT_BATCH_UNDONE", ImportRefusal::BatchUndone),

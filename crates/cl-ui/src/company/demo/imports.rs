@@ -1246,19 +1246,20 @@ fn tieout_of(set: &Set, conversion: Option<CalendarDate>) -> Result<TieOut, ApiE
         }
         Ok(out)
     };
-    let (ar_items, ap_items) = (items("open_invoices", true)?, items("unpaid_bills", true)?);
+    let receivables = items("open_invoices", true)?;
+    let payables = items("unpaid_bills", true)?;
     let inventory_items = items("inventory_valuation", false)?;
     let all_zero = all_zero
-        && ar_items
+        && receivables
             .iter()
-            .chain(&ap_items)
+            .chain(&payables)
             .chain(&inventory_items)
             .all(|i| i.diff.is_zero());
     Ok(TieOut {
         as_of,
         accounts,
-        ar_items,
-        ap_items,
+        ar_items: receivables,
+        ap_items: payables,
         inventory_items,
         balance_rows,
         totals,

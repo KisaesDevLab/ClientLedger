@@ -469,7 +469,9 @@ impl ImportScreen {
             tracing::info!(target: "imports", "closed period without a password: asking");
             self.confirm_closed_next = false;
             self.trouble = None;
-            self.ask_closed = Some(c.lock_date.or(closing));
+            self.ask_closed = Some(super::ClosedAsk {
+                date: c.lock_date.or(closing),
+            });
             return;
         }
         if self.closing.failed(e, locked, true, closing) {

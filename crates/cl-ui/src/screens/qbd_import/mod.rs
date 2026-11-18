@@ -291,6 +291,13 @@ pub(crate) struct Held {
     pub(crate) key: IdempotencyKey,
 }
 
+/// The closed-period question (no closing-date password is set).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ClosedAsk {
+    /// The closing date it names, when known.
+    pub(crate) date: Option<CalendarDate>,
+}
+
 /// What the closing-date password is for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Locked {
@@ -347,9 +354,8 @@ pub struct ImportScreen {
     pub(crate) closing: ClosingPrompt<Locked>,
     /// The closing-date password for the next send (dropped once sent).
     password: Option<Secret>,
-    /// A closed period with no closing-date password: the question is up
-    /// (its closing date).
-    pub(crate) ask_closed: Option<Option<CalendarDate>>,
+    /// A closed period with no closing-date password: the question is up.
+    pub(crate) ask_closed: Option<ClosedAsk>,
     /// The owner said yes: the next commit carries the confirmation.
     confirm_closed_next: bool,
     pub(crate) status_answer: Option<bool>,

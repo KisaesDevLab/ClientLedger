@@ -501,8 +501,7 @@ fn diff_of(s: &ImportScreen, label: &str) -> String {
         .rows
         .iter()
         .find(|r| r.input.label == label)
-        .map(|r| r.diff_text.clone())
-        .unwrap_or_else(|| panic!("no row {label}"))
+        .map_or_else(|| panic!("no row {label}"), |r| r.diff_text.clone())
 }
 
 #[test]
@@ -518,9 +517,9 @@ fn the_tie_out_is_verified_only_when_every_difference_is_zero() {
         json!(["accounts", "receivables", "payables", "inventory"])
     );
     let tie = s.tie.as_ref().expect("tie");
-    let tile = tie.tile(tieout::Tab::TrialBalance, s.tieout.as_ref().expect("t"));
-    assert_eq!(tile.figure, "0.00");
-    assert!(tile.tick && tile.matches);
+    let tb = tie.tile(tieout::Tab::TrialBalance, s.tieout.as_ref().expect("t"));
+    assert_eq!(tb.figure, "0.00");
+    assert!(tb.tick && tb.matches);
     assert_eq!(
         tie.rows(tieout::Tab::Receivables).len(),
         4,
@@ -534,7 +533,7 @@ fn the_tie_out_is_verified_only_when_every_difference_is_zero() {
     assert!(demo_batch(&f, &s).is_verified());
     assert_eq!(s.wizard.step, Step::SpotCheck);
     // The spot-check list is made from this tie-out and saved at once.
-    assert!(!s.spot.items.is_empty());
+    assert_ne!(s.spot.items.len(), 0);
     assert!(s.spot.items.iter().any(|i| i.key.starts_with("ar:")));
     assert!(s.spot.items.iter().any(|i| i.key == "inventory"));
     assert_eq!(s.spot.saves, 1);
@@ -824,9 +823,10 @@ fn the_tie_out_pdf_has_every_comparison() {
 /// A report as plain text: title, subtitle, then each section's rows.
 fn report_text(r: &cl_print::reports::Report) -> String {
     use cl_print::reports::Section as S;
+    use std::fmt::Write as _;
     let mut out = format!("{}\n", r.title);
     for l in &r.subtitle {
-        out.push_str(&format!("{l}\n"));
+        let _ = writeln!(out, "{l}");
     }
     for sec in &r.sections {
         match sec {
@@ -836,17 +836,17 @@ fn report_text(r: &cl_print::reports::Report) -> String {
                 rows,
                 ..
             } => {
-                out.push_str(&format!("\n## {heading}\n"));
+                let _ = write!(out, "\n## {heading}\n");
                 let head: Vec<&str> = columns.iter().map(|c| c.heading.as_str()).collect();
-                out.push_str(&format!("{}\n", head.join(" | ")));
+                let _ = writeln!(out, "{}", head.join(" | "));
                 for row in rows {
-                    out.push_str(&format!("{}\n", row.join(" | ")));
+                    let _ = writeln!(out, "{}", row.join(" | "));
                 }
             }
             S::Summary { heading, rows } => {
-                out.push_str(&format!("\n## {heading}\n"));
+                let _ = write!(out, "\n## {heading}\n");
                 for (label, amount, _) in rows {
-                    out.push_str(&format!("{label} | {amount}\n"));
+                    let _ = writeln!(out, "{label} | {amount}");
                 }
             }
         }

@@ -593,10 +593,10 @@ impl ImportScreen {
     /// A closed period with no closing-date password: the owner confirms
     /// each time (nothing is sent until then).
     fn closed_question_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        let Some(date) = self.ask_closed else {
+        let Some(ask) = self.ask_closed else {
             return;
         };
-        let date = date.map(show_date).unwrap_or_default();
+        let date = ask.date.map(show_date).unwrap_or_default();
         ui.add_space(10.0);
         egui::Frame::new()
             .fill(tokens.surface_subtle)
