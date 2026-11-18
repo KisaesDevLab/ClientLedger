@@ -58,6 +58,9 @@ pub enum Change {
     /// The company's AI settings were saved in Preferences (A10 QA-4): an
     /// open Describe the report panel reads its switches again.
     Ai,
+    /// A backup passphrase was set on the Back Up screen (Q-P30h): an
+    /// open Import Payroll drops its "no passphrase" message.
+    BackupPassphrase,
 }
 
 impl Change {
@@ -108,6 +111,8 @@ pub struct Changes {
     pub reports: bool,
     /// The company's AI settings (A10 QA-4).
     pub ai: bool,
+    /// A backup passphrase was set (Q-P30h).
+    pub backup_passphrase: bool,
 }
 
 impl Changes {
@@ -127,6 +132,7 @@ impl Changes {
             bank_feed: true,
             reports: true,
             ai: true,
+            backup_passphrase: true,
         }
     }
 
@@ -184,6 +190,7 @@ impl Changes {
             Change::BankFeed | Change::Payroll => self.bank_feed = true,
             Change::Reports => self.reports = true,
             Change::Ai => self.ai = true,
+            Change::BackupPassphrase => self.backup_passphrase = true,
             Change::Bills(vendor) => {
                 self.bill_vendors.insert(*vendor);
             }

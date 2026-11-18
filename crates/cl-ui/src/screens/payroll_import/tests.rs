@@ -315,10 +315,16 @@ fn an_overlap_asks_and_post_anyway_uses_a_new_key() {
     s.next();
     s.poll();
     assert_eq!(s.state()["overlap_open"], 1);
+    assert_eq!(backups_taken(&f), 2, "one per post attempt so far");
     let first = s.key.as_ref().map(|k| k.1.clone()).expect("key");
     s.post_anyway();
     s.poll();
     assert_eq!(s.step, Step::Done);
+    assert_eq!(
+        backups_taken(&f),
+        2,
+        "Post anyway reuses the attempt's backup"
+    );
     assert_ne!(
         s.key.as_ref().map(|k| k.1.clone()),
         Some(first),
@@ -481,6 +487,299 @@ fn lost() -> ApiError {
     }
 }
 
+/// Post, and let the (demo) backup before it answer, so the post is sent
+/// and its answer waits in `post_job` (Q-P30h).
+fn post_now(s: &mut PayrollImportScreen) {
+    s.post();
+    if let Some(r) = poll(&mut s.backup_job) {
+        s.after_backup(r.map_err(cl_company::CompanyError::from).and_then(|x| x));
+    }
+    assert!(s.post_job.is_some(), "the post went out after the backup");
+}
+
+fn posts_received(f: &Fixture) -> u32 {
+    f.link.demo_state().expect("demo").payroll.posts_received
+}
+
+fn backups_taken(f: &Fixture) -> u32 {
+    f.link.demo_state().expect("demo").payroll.backups_taken
+}
+
+fn key_now(s: &PayrollImportScreen) -> Option<IdempotencyKey> {
+    s.key.as_ref().map(|k| k.1.clone())
+}
+
+/// Q-P30h: Post makes a verified backup first, then sends the post once.
+/// The closing-date password and Post anyway paths back up before their
+/// send too.
+#[test]
+fn a_backup_is_made_before_the_post_is_sent_once() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    assert_eq!(backups_taken(&f), 0);
+    s.next();
+    s.poll();
+    assert_eq!(s.step, Step::Done, "{}", s.state());
+    assert_eq!(backups_taken(&f), 1);
+    assert_eq!(s.posts_sent, 1);
+    assert_eq!(posts_received(&f), 1, "posted once");
+    assert_eq!(s.state()["backing_up"], false);
+
+    // Closed books: Post backs up, the engine asks for the password, and
+    // Continue sends the same attempt on that backup: one backup per post.
+    let f = fixture();
+    cmd(&mut screen(&f), "dev.payroll_demo_close_books");
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    s.next();
+    s.poll();
+    assert_eq!(s.state()["password_open"], true);
+    assert_eq!(backups_taken(&f), 1);
+    s.password_text = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
+    s.give_password();
+    assert!(!s.backing_up(), "Continue doesn't back up again");
+    s.poll();
+    assert_eq!(s.step, Step::Done, "{}", s.state());
+    assert_eq!(backups_taken(&f), 1, "one backup per post attempt");
+    assert_eq!(s.posts_sent, 2);
+    assert_eq!(posts_received(&f), 2);
+}
+
+/// Q-P30h: a wrong password, then the right one, is still the same
+/// attempt (one backup); cancelling the prompt ends the attempt, so the
+/// next Post backs up again.
+#[test]
+fn a_new_attempt_backs_up_again_a_continued_one_does_not() {
+    let f = fixture();
+    cmd(&mut screen(&f), "dev.payroll_demo_close_books");
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    s.next();
+    s.poll();
+    assert_eq!(s.state()["password_open"], true);
+    s.password_text = "wrong".into();
+    s.give_password();
+    s.poll();
+    assert_eq!(s.state()["trouble"], "password_wrong");
+    assert_eq!(backups_taken(&f), 1, "a wrong password: same attempt");
+    // Cancel the prompt and press Post again: a new attempt, a new backup.
+    s.asking_password = None;
+    s.next();
+    s.poll();
+    assert_eq!(backups_taken(&f), 2, "a new Post backs up again");
+    assert_eq!(s.state()["password_open"], true);
+    s.password_text = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
+    s.give_password();
+    s.poll();
+    assert_eq!(s.step, Step::Done, "{}", s.state());
+    assert_eq!(backups_taken(&f), 2);
+    // A failed backup is never reused: Try again backs up again.
+    let f = fixture();
+    cmd(&mut screen(&f), "dev.payroll_demo_close_books");
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    cmd(&mut s, "dev.payroll_demo_backup_fail");
+    s.next();
+    s.poll();
+    assert_eq!(s.state()["backup_failed"], true);
+    s.password_text = crate::company::demo::register::DEMO_CLOSING_PASSWORD.into();
+    s.give_password();
+    s.poll();
+    assert_eq!(posts_received(&f), 1, "only after a verified backup");
+    assert_eq!(backups_taken(&f), 1);
+}
+
+/// Q-P30h: setting a backup passphrase on Back Up clears Import
+/// Payroll's "no passphrase" message without posting anything.
+#[test]
+fn setting_a_passphrase_clears_the_stale_message() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    s.backup_failed = Some(cl_company::CompanyError::NoPassphrase);
+    s.poll();
+    assert_eq!(s.state()["backup_failed"], true, "stays until it's set");
+    f.link
+        .bus()
+        .publish(crate::data_bus::Change::BackupPassphrase);
+    s.poll();
+    assert_eq!(s.state()["backup_failed"], false);
+    assert_eq!(posts_received(&f), 0, "nothing posts on its own");
+    assert_eq!(s.step, Step::Preview);
+    // Another failure isn't cleared by it.
+    s.backup_failed = Some(cl_company::CompanyError::JobFailed { code: "X".into() });
+    f.link
+        .bus()
+        .publish(crate::data_bus::Change::BackupPassphrase);
+    s.poll();
+    assert_eq!(s.state()["backup_failed"], true);
+}
+
+/// Q-P30h: a failed backup sends nothing, says so with Try again, and Try
+/// again backs up and posts with the same key.
+#[test]
+fn a_failed_backup_posts_nothing_and_try_again_posts_once() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    cmd(&mut s, "dev.payroll_demo_backup_fail");
+    s.next();
+    let key = key_now(&s).expect("a key for this body");
+    s.poll();
+    assert_eq!(s.step, Step::Preview);
+    assert_eq!(s.state()["backup_failed"], true);
+    assert!(s.held_post.is_none(), "the post is not kept to send later");
+    assert!(s.post_job.is_none());
+    assert_eq!(s.posts_sent, 0);
+    assert_eq!(posts_received(&f), 0, "no post request");
+    assert_eq!(backups_taken(&f), 0);
+    for _ in 0..3 {
+        s.poll();
+    }
+    assert_eq!(posts_received(&f), 0, "nothing goes out on its own");
+    assert!(s.can_next(), "Post stays available");
+    assert!(s.may_discard(), "nothing was sent: Cancel may discard");
+    assert!(!s.save_unconfirmed());
+    // The message: plain words from the backup error (no path, no name).
+    let msg = cl_core::OwnerFacing::owner_message(s.backup_failed.as_ref().expect("failed"));
+    assert!(crate::i18n::has(msg.key), "{}", msg.key);
+    assert!(crate::i18n::has("payroll.backup.failed"));
+    s.backup_try_again();
+    s.poll();
+    assert_eq!(s.step, Step::Done, "{}", s.state());
+    assert_eq!(s.state()["backup_failed"], false);
+    assert_eq!(backups_taken(&f), 1);
+    assert_eq!(posts_received(&f), 1, "posted once");
+    assert_eq!(key_now(&s), Some(key), "the backup never changes the key");
+}
+
+/// Q-P30h: after a lost answer, Try again backs up first; a failed backup
+/// sends nothing again, keeps the outcome-unknown state (Check status, the
+/// close prompt's warning), and the notice leaves once Check status
+/// settles it.
+#[test]
+fn a_failed_backup_after_a_lost_answer_keeps_it_unsettled() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    post_now(&mut s);
+    let _ = s.post_job.take();
+    s.after_post(Err(lost()));
+    assert_eq!(posts_received(&f), 1);
+    cmd(&mut s, "dev.payroll_demo_backup_fail");
+    s.try_again();
+    s.poll();
+    assert_eq!(s.state()["backup_failed"], true);
+    assert_eq!(posts_received(&f), 1, "nothing sent again");
+    assert_eq!(s.state()["trouble"], "unknown", "Check status stays");
+    assert!(s.post_unsettled);
+    assert!(s.save_unconfirmed(), "the close prompt still warns");
+    assert!(crate::i18n::has("payroll.backup.failed_unsettled"));
+    s.check_status();
+    s.poll();
+    assert_eq!(s.step, Step::Done);
+    assert_eq!(s.state()["backup_failed"], false, "the notice leaves");
+    assert_eq!(posts_received(&f), 1);
+}
+
+/// Q-P30h: stopping while the backup is made (the button, Cancel or Esc)
+/// sends no post, even when the backup finishes afterwards; the window
+/// stays on Review and Post works again.
+#[test]
+fn stopping_during_the_backup_posts_nothing() {
+    for how in ["stop", "cancel", "esc"] {
+        let f = fixture();
+        let mut s = screen(&f);
+        cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+        next_to(&mut s, Step::Preview);
+        cmd(&mut s, "dev.payroll_demo_backup_hold");
+        s.next();
+        s.poll();
+        assert!(s.backing_up(), "{how}");
+        assert_eq!(s.state()["backing_up"], true);
+        assert!(!s.can_next(), "{how}: Post waits for the backup");
+        assert!(!s.in_flight(), "{how}: no post is out");
+        assert!(!s.save_unconfirmed(), "{how}: nothing may be posted yet");
+        s.back();
+        assert_eq!(s.step, Step::Preview, "{how}: Back waits");
+        s.post();
+        assert_eq!(
+            s.posts_sent, 0,
+            "{how}: a second Post doesn't jump the backup"
+        );
+        let _ = f.link.drain();
+        match how {
+            "stop" => assert!(s.stop_backup()),
+            "cancel" => s.cancel(),
+            _ => assert!(s.command(CommandId::new("form.revert"))),
+        }
+        assert!(f.link.drain().is_empty(), "{how}: the window stays open");
+        assert!(!s.backing_up(), "{how}");
+        assert_eq!(s.state()["backup_stopped"], true);
+        assert_eq!(
+            crate::i18n::t("payroll.backup.stopped"),
+            "Posting stopped. Nothing was posted. The backup that was made is kept."
+        );
+        assert!(s.upload.is_some(), "{how}: the import is kept");
+        for _ in 0..3 {
+            s.poll();
+        }
+        assert_eq!(s.posts_sent, 0, "{how}");
+        assert_eq!(posts_received(&f), 0, "{how}: no post request");
+        assert_eq!(s.step, Step::Preview, "{how}");
+        // Post again: a fresh backup, then the post.
+        s.next();
+        s.poll();
+        assert_eq!(s.step, Step::Done, "{how}: {}", s.state());
+        assert_eq!(posts_received(&f), 1, "{how}");
+    }
+}
+
+/// Q-P30h: a backup released late after the post was stopped sends
+/// nothing; one released while still wanted sends the held post as made.
+#[test]
+fn a_held_backup_sends_the_post_as_made_when_it_finishes() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    cmd(&mut s, "dev.payroll_demo_backup_hold");
+    s.next();
+    s.poll();
+    let key = key_now(&s).expect("key");
+    assert!(s.backing_up());
+    // Switching to History and back mid-backup clears the password field
+    // state but never the held post's body or key.
+    s.show_history();
+    s.poll();
+    s.show_import();
+    assert!(s.backing_up());
+    cmd(&mut s, "dev.payroll_demo_backup_release");
+    assert_eq!(s.step, Step::Done, "{}", s.state());
+    assert_eq!(posts_received(&f), 1);
+    assert_eq!(key_now(&s), Some(key));
+    // Closing a window while its backup runs discards the draft (nothing
+    // was sent) and never posts.
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    cmd(&mut s, "dev.payroll_demo_backup_hold");
+    s.next();
+    s.poll();
+    drop(s);
+    assert_eq!(posts_received(&f), 0);
+    assert_eq!(discards(&f), 1, "nothing was sent: the draft goes");
+}
+
 /// A post that is out: a request that never answers.
 fn post_in_flight(s: &mut PayrollImportScreen) {
     s.post_job = Some(Job::Done(None));
@@ -502,7 +801,7 @@ fn a_lost_answer_is_never_sent_again_on_its_own() {
     let mut s = screen(&f);
     cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
     next_to(&mut s, Step::Preview);
-    s.post();
+    post_now(&mut s);
     let _ = s.post_job.take();
     s.after_post(Err(lost()));
     assert_eq!(s.state()["trouble"], "unknown");
@@ -1286,7 +1585,7 @@ fn engine_down_after_the_post_is_sent_is_outcome_unknown() {
     cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
     next_to(&mut s, Step::Preview);
     // The engine got it and posted; the answer was lost.
-    s.post();
+    post_now(&mut s);
     let _ = s.post_job.take();
     s.after_post(Err(lost()));
     assert_eq!(s.state()["trouble"], "unknown");

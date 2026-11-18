@@ -641,7 +641,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("fix.company.passphrase", "Type the passphrase that was set when the backup was made."),
     ("error.company.too_new", "This backup was made by a newer ClientLedger."),
     ("fix.company.too_new", "Update ClientLedger, then restore it."),
-    ("error.company.project_failed", "The backup could not be finished."),
+    ("error.company.job_failed", "The backup or restore could not be finished."),
     ("fix.company.no_passphrase", "Set one on the Back Up screen; it is shown once."),
     ("error.company.not_a_backup", "That file is not a ClientLedger backup."),
     ("fix.company.not_a_backup", "Pick a .clbackup file made by ClientLedger."),
