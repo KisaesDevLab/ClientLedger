@@ -108,6 +108,10 @@ pub enum BackupKind {
     LegacyPortable,
     /// The backup taken before a delete or a replace-with-restore.
     BeforeDelete,
+    /// The automatic backup taken before an import posts (payroll, P30;
+    /// shared with later imports, Q-P30h). Retention keeps the newest 10
+    /// of this kind per company and folder.
+    BeforeImport,
 }
 
 /// One backup file this app wrote.
@@ -559,6 +563,18 @@ mod tests {
         // Saving the list again keeps the old flag as written.
         let v = serde_json::to_value(&old).expect("json");
         assert_eq!(v["kind"], "portable");
+    }
+
+    #[test]
+    fn before_import_kind_is_snake_case_q_p30h() {
+        let v = serde_json::to_value(BackupKind::BeforeImport).expect("json");
+        assert_eq!(v, "before_import");
+        let back: BackupKind = serde_json::from_value(v).expect("back");
+        assert_eq!(back, BackupKind::BeforeImport);
+        assert_eq!(
+            serde_json::to_value(BackupKind::BeforeDelete).expect("json"),
+            "before_delete"
+        );
     }
 
     #[test]
