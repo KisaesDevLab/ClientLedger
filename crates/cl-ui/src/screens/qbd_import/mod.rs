@@ -137,6 +137,9 @@ pub(crate) enum Trouble {
     Failed,
     /// The batch is gone (discarded elsewhere): nothing was posted.
     Gone,
+    /// A failed import from History that needs its files again (a new
+    /// batch: accounts to pick, or the valuation to add).
+    AddAgain,
     Other,
 }
 
@@ -168,6 +171,7 @@ impl Trouble {
             Trouble::BackupFailed => "backup_failed",
             Trouble::Failed => "failed",
             Trouble::Gone => "gone",
+            Trouble::AddAgain => "add_again",
             Trouble::Other => "other",
         }
     }
@@ -195,6 +199,24 @@ pub(crate) fn refusal_code(r: &ImportRefusal) -> &'static str {
         ImportRefusal::BatchNotCommitted => "batch_not_committed",
         ImportRefusal::BatchEmpty => "batch_empty",
         ImportRefusal::SourceMismatch => "source_mismatch",
+        ImportRefusal::JournalAfterConversion { .. } => "journal_after_conversion",
+        ImportRefusal::BadDate => "bad_date",
+        ImportRefusal::UnmappedAccount { .. } => "unmapped_account",
+        ImportRefusal::AccountMapInvalid { .. } => "account_map_invalid",
+        ImportRefusal::InventoryOff => "inventory_off",
+        ImportRefusal::InventoryPeriodClosed { .. } => "inventory_period_closed",
+        ImportRefusal::ValuationRequired { .. } => "valuation_required",
+    }
+}
+
+/// A failed import that can't be committed again as it is: its options
+/// are fixed when the batch is made (E2b), so the files go in a new batch
+/// (accounts picked, or the valuation file added). The step it goes back to.
+pub(crate) fn rebuild_step(r: &ImportRefusal) -> Option<Step> {
+    match r {
+        ImportRefusal::UnmappedAccount { .. } => Some(Step::Mapping),
+        ImportRefusal::ValuationRequired { .. } => Some(Step::Files),
+        _ => None,
     }
 }
 
@@ -230,6 +252,9 @@ pub(crate) struct SlotFile {
     pub(crate) problem: Option<&'static str>,
     /// The engine's refusal (a re-import).
     pub(crate) refusal: Option<ImportRefusal>,
+    /// The bytes sent, kept for a new batch after a failed one (E2b: a
+    /// failed batch's files are deleted and uploaded again).
+    pub(crate) bytes: Option<Arc<Vec<u8>>>,
 }
 
 impl SlotFile {
@@ -241,6 +266,7 @@ impl SlotFile {
             outcome: None,
             problem: None,
             refusal: None,
+            bytes: None,
         }
     }
 
@@ -331,6 +357,14 @@ pub struct ImportScreen {
     pub(crate) chart: Vec<Account>,
     /// Source key → the company account the owner picked.
     pub(crate) account_map: BTreeMap<String, AccountId>,
+    /// Keys a failed commit said have no account (`IMPORT_UNMAPPED_ACCOUNT`):
+    /// unmatched until picked, whatever the uploads said.
+    pub(crate) unmapped_failed: std::collections::BTreeSet<String>,
+    /// A failed batch's files being deleted before they go up again; the
+    /// step the wizard returns to when they are.
+    rebuild: Option<(Vec<Job<()>>, Step)>,
+    /// What the batch's dates mean (E2c), from its creation and reads.
+    pub(crate) date_check: Option<cl_api::imports::DateCheck>,
     // Dates.
     pub(crate) date_text: String,
     pub(crate) opening_text: String,
@@ -391,6 +425,57 @@ pub struct ImportScreen {
     pub(crate) history: Option<Vec<ImportBatch>>,
 }
 
+/// Combines the files' account matches by source key: `existing` (any
+/// file) wins over `create` (the account list), which wins over
+/// `unmatched`; rows add up. `failed` keys (from a failed commit) are
+/// unmatched whatever the files said, and listed even when no file did.
+pub(crate) fn merge_matches<'a>(
+    all: impl IntoIterator<Item = &'a AccountMatch>,
+    failed: &std::collections::BTreeSet<String>,
+) -> Vec<AccountMatch> {
+    let rank = |s: MatchStatus| match s {
+        MatchStatus::Existing => 2,
+        MatchStatus::Create => 1,
+        MatchStatus::Unmatched => 0,
+    };
+    let mut by_key: BTreeMap<String, AccountMatch> = BTreeMap::new();
+    for m in all {
+        match by_key.get_mut(&m.source_key) {
+            None => {
+                by_key.insert(m.source_key.clone(), m.clone());
+            }
+            Some(have) => {
+                let rows = have.rows.saturating_add(m.rows);
+                if rank(m.status) > rank(have.status) {
+                    *have = m.clone();
+                }
+                have.rows = rows;
+                if have.name.is_empty() {
+                    have.name.clone_from(&m.name);
+                }
+                if have.number.is_none() {
+                    have.number.clone_from(&m.number);
+                }
+            }
+        }
+    }
+    for k in failed {
+        let m = by_key.entry(k.clone()).or_insert_with(|| AccountMatch {
+            source_key: k.clone(),
+            number: None,
+            name: k.clone(),
+            status: MatchStatus::Unmatched,
+            account: None,
+            matched_by: None,
+            rows: 0,
+            system_role: None,
+        });
+        m.status = MatchStatus::Unmatched;
+        m.account = None;
+    }
+    by_key.into_values().collect()
+}
+
 /// A date as the screen shows and takes it.
 pub(crate) fn show_date(d: CalendarDate) -> String {
     format!("{:02}/{:02}/{:04}", d.month(), d.day(), d.year())
@@ -426,6 +511,9 @@ impl ImportScreen {
             chart_job: None,
             chart: Vec::new(),
             account_map: BTreeMap::new(),
+            unmapped_failed: std::collections::BTreeSet::new(),
+            rebuild: None,
+            date_check: None,
             date_text: String::new(),
             opening_text: String::new(),
             batch_create_job: None,
@@ -562,6 +650,7 @@ impl ImportScreen {
         }
         self.poll_files();
         self.discard_jobs.retain_mut(|j| j.take().is_none());
+        self.poll_rebuild();
         if let Some(r) = poll(&mut self.batch_create_job) {
             self.after_batch_created(r);
         }
@@ -631,6 +720,7 @@ impl ImportScreen {
 
     pub(crate) fn busy(&self) -> bool {
         self.pick_rx.is_some()
+            || self.rebuild.is_some()
             || self.uploads.values().flatten().any(SlotFile::busy)
             || self.chart_job.is_some()
             || self.batch_create_job.is_some()
@@ -672,16 +762,23 @@ impl ImportScreen {
         self.sync_mapping();
     }
 
-    /// Every account the files name, once each (by source key).
-    pub(crate) fn matches(&self) -> Vec<&AccountMatch> {
-        let mut seen = std::collections::BTreeSet::new();
-        self.uploads
-            .values()
-            .flatten()
-            .filter_map(|f| f.outcome.as_ref())
-            .flat_map(|o| o.preview.account_matches.iter())
-            .filter(|m| seen.insert(m.source_key.as_str()))
-            .collect()
+    /// Every account the posted files name, once each (by source key),
+    /// combined across the files: the engine matches each file against the
+    /// chart as it is now, so a trial balance names an account the batch's
+    /// own account list creates as unmatched. A key is resolved when any
+    /// file found it (`existing`) or the account list makes it (`create`);
+    /// a key a failed commit named stays unmatched until picked.
+    pub(crate) fn matches(&self) -> Vec<AccountMatch> {
+        merge_matches(
+            self.uploads
+                .values()
+                .flatten()
+                .filter_map(|f| f.outcome.as_ref())
+                // A reference file is only compared against, never posted.
+                .filter(|o| o.session.role != Some(cl_api::imports::FileRole::Reference))
+                .flat_map(|o| o.preview.account_matches.iter()),
+            &self.unmapped_failed,
+        )
     }
 
     /// Unmatched accounts with no account picked yet.
@@ -775,6 +872,9 @@ impl ImportScreen {
         let fy = self.wizard.fy_start_month;
         self.wizard = Wizard::new(source, fy);
         self.account_map.clear();
+        self.unmapped_failed.clear();
+        self.date_check = None;
+        self.failure = None;
         self.date_text.clear();
         self.opening_text.clear();
         self.batch = None;

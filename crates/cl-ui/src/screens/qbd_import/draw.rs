@@ -262,7 +262,10 @@ impl ImportScreen {
             Step::Import => self.import_ui(ui, tokens),
             Step::TieOut => super::tieout::tieout_ui(self, ui, tokens),
             Step::SpotCheck => super::spot_check::spot_check_ui(self, ui, tokens),
-            Step::Done => note(ui, tokens, &t("imports.done")),
+            Step::Done => {
+                note(ui, tokens, &t("imports.done"));
+                self.results_ui(ui, tokens);
+            }
         }
         if !matches!(self.wizard.step, Step::Import | Step::TieOut | Step::Done) {
             self.sync_dates();
@@ -510,6 +513,19 @@ impl ImportScreen {
                     self.try_again();
                 }
             });
+        } else if self.trouble == Some(Trouble::Failed)
+            && self.allowed()
+            && self
+                .failure
+                .as_ref()
+                .and_then(super::rebuild_step)
+                .is_some()
+        {
+            // Its options are fixed: a new batch, not the same one again.
+            note(ui, tokens, &t("imports.rebuild.note"));
+            if ui.button(t("imports.rebuild.button")).clicked() {
+                self.rebuild_after_failure();
+            }
         } else if self.trouble == Some(Trouble::Failed) && self.allowed() {
             if ui.button(t("imports.retry")).clicked() {
                 self.start_import();
@@ -519,6 +535,41 @@ impl ImportScreen {
         {
             self.start_import();
         }
+        self.date_check_ui(ui, tokens);
+    }
+
+    /// The batch's date warnings (E2c): shown while and after it posts;
+    /// they never block.
+    fn date_check_ui(&self, ui: &mut Ui, tokens: &Tokens) {
+        let Some(dc) = &self.date_check else {
+            return;
+        };
+        let lines = date_check_lines(dc);
+        if lines.is_empty() {
+            return;
+        }
+        ui.add_space(8.0);
+        ui.label(RichText::new(t("imports.datecheck.title")).strong());
+        for l in &lines {
+            note(ui, tokens, l);
+        }
+    }
+
+    /// What the import brought in (Done).
+    fn results_ui(&self, ui: &mut Ui, tokens: &Tokens) {
+        let lines = self
+            .state
+            .as_ref()
+            .map(|s| result_lines(&s.batch))
+            .unwrap_or_default();
+        if !lines.is_empty() {
+            ui.add_space(8.0);
+            ui.label(RichText::new(t("imports.result.title")).strong());
+            for l in &lines {
+                note(ui, tokens, l);
+            }
+        }
+        self.date_check_ui(ui, tokens);
     }
 
     fn trouble_ui(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -553,6 +604,21 @@ impl ImportScreen {
                         | ImportRefusal::PeriodOverlap { batch: Some(_), .. },
                     ) if ui.link(t("imports.open_history")).clicked() => {
                         self.show_history();
+                    }
+                    Trouble::Refused(ImportRefusal::DateMismatch { files, .. }) => {
+                        for f in files {
+                            ui.label(format!("• {}", self.mismatch_text(f)));
+                        }
+                    }
+                    Trouble::Refused(ImportRefusal::JournalAfterConversion { rows, .. })
+                        if !rows.is_empty() =>
+                    {
+                        let shown: Vec<String> =
+                            rows.iter().take(10).map(|(_, r)| r.to_string()).collect();
+                        ui.label(t_with(
+                            "imports.refusal.journal_after_conversion.rows",
+                            &[("rows", &shown.join(", "))],
+                        ));
                     }
                     _ => {}
                 }
@@ -701,6 +767,17 @@ impl ImportScreen {
                         }
                     });
                     ui.end_row();
+                    let lines = result_lines(b);
+                    if !lines.is_empty() {
+                        ui.label("");
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(lines.join(" ")).color(tokens.text_secondary),
+                            )
+                            .wrap(),
+                        );
+                        ui.end_row();
+                    }
                 }
             });
     }
@@ -828,8 +905,122 @@ pub(crate) fn refusal_text(r: &ImportRefusal) -> String {
         ImportRefusal::UndoBlocked { blockers } => {
             t_with(&key, &[("n", &blockers.len().to_string())])
         }
+        ImportRefusal::DateMismatch {
+            conversion_date: Some(d),
+            ..
+        } => t_with(
+            "imports.refusal.date_mismatch_on",
+            &[("date", &show_date(*d))],
+        ),
+        ImportRefusal::JournalAfterConversion {
+            conversion_date: Some(d),
+            row_count,
+            ..
+        } if *row_count > 0 => t_with(
+            "imports.refusal.journal_after_conversion_on",
+            &[("n", &row_count.to_string()), ("date", &show_date(*d))],
+        ),
+        ImportRefusal::UnmappedAccount { count, .. } if *count > 0 => t_with(
+            "imports.refusal.unmapped_account_n",
+            &[("n", &count.to_string())],
+        ),
+        ImportRefusal::InventoryPeriodClosed {
+            closing_date: Some(d),
+        } => t_with(
+            "imports.refusal.inventory_period_closed_on",
+            &[("date", &show_date(*d))],
+        ),
         _ => t(&key),
     }
+}
+
+/// The batch's date warnings and history skip in plain words (codes,
+/// dates and counts; never the engine's message). Warnings never block.
+pub(crate) fn date_check_lines(dc: &cl_api::imports::DateCheck) -> Vec<String> {
+    use cl_api::imports::DateWarningCode;
+    let d = |x: Option<cl_core::CalendarDate>| x.map(show_date).unwrap_or_default();
+    let mut out: Vec<String> = dc
+        .warnings
+        .iter()
+        .map(|w| match w.code {
+            DateWarningCode::HistoryGap if w.days == Some(1) => t_with(
+                "imports.datecheck.gap_one",
+                &[
+                    ("first", &d(w.first_journal_date)),
+                    ("opening", &d(w.opening_balance_date)),
+                ],
+            ),
+            DateWarningCode::HistoryGap => t_with(
+                "imports.datecheck.gap",
+                &[
+                    ("first", &d(w.first_journal_date)),
+                    ("days", &w.days.unwrap_or(0).to_string()),
+                    ("opening", &d(w.opening_balance_date)),
+                ],
+            ),
+            DateWarningCode::JournalBeforeOpening => t_with(
+                "imports.datecheck.before_opening",
+                &[("opening", &d(w.opening_balance_date))],
+            ),
+        })
+        .collect();
+    if dc.history_skipped > 0
+        && let Some(from) = dc.history_from
+    {
+        out.push(t_with(
+            "imports.datecheck.skipped",
+            &[
+                ("n", &dc.history_skipped.to_string()),
+                ("from", &show_date(from)),
+            ],
+        ));
+    }
+    out
+}
+
+/// What a committed batch brought in, beyond the plain counts: names on
+/// both lists, jobs, inactive names, items left out, classes, the opening
+/// stock and the history skip. Counts add across files; the valuation's
+/// total is the engine's own, one line per valuation file (amounts are
+/// never added here).
+pub(crate) fn result_lines(b: &ImportBatch) -> Vec<String> {
+    let results: Vec<&cl_api::imports::CommitSummary> =
+        b.files.iter().filter_map(|f| f.result.as_ref()).collect();
+    let sum = |f: fn(&cl_api::imports::CommitSummary) -> u64| -> u64 {
+        results.iter().map(|r| f(r)).sum()
+    };
+    let mut out = Vec::new();
+    let mut count = |key: &str, n: u64| {
+        if n > 0 {
+            out.push(t_with(key, &[("n", &n.to_string())]));
+        }
+    };
+    count("imports.result.merged", sum(|r| r.merged_to_both));
+    count("imports.result.jobs", sum(|r| r.jobs_folded));
+    count("imports.result.inactive", sum(|r| r.inactive));
+    count(
+        "imports.result.items_skipped",
+        sum(|r| r.items_skipped.map_or(0, |s| s.total())),
+    );
+    count("imports.result.classes", sum(|r| r.classes_mapped));
+    count(
+        "imports.result.skipped_history",
+        sum(|r| r.skipped_before_history.unwrap_or(0)),
+    );
+    for r in &results {
+        if r.items_valued > 0
+            && let Some(total) = r.valuation_total
+        {
+            out.push(t_with(
+                "imports.result.valued",
+                &[
+                    ("n", &r.items_valued.to_string()),
+                    ("total", &total.format(cl_core::MoneyStyle::default())),
+                ],
+            ));
+        }
+    }
+    out
 }
 
 /// What blocks an undo, in plain words.
@@ -850,6 +1041,28 @@ pub(crate) fn trouble_text(tr: &Trouble) -> String {
 }
 
 impl ImportScreen {
+    /// One file of a date mismatch, by the report's name on its card (the
+    /// engine's file name is never read).
+    pub(crate) fn mismatch_text(&self, f: &cl_api::imports::DateMismatchFile) -> String {
+        use cl_api::imports::DateMismatchReason;
+        let report = f
+            .session
+            .and_then(|id| {
+                self.uploads
+                    .iter()
+                    .find(|(_, v)| v.iter().any(|x| x.session() == Some(id)))
+                    .map(|(k, _)| slot_name(k))
+            })
+            .unwrap_or_else(|| t("imports.slot.unknown"));
+        let date = f.report_date.map(show_date).unwrap_or_default();
+        let key = match f.reason {
+            Some(DateMismatchReason::NoDate) => "imports.refusal.date_mismatch.file_no_date",
+            Some(DateMismatchReason::AfterConversion) => "imports.refusal.date_mismatch.file_after",
+            _ => "imports.refusal.date_mismatch.file",
+        };
+        t_with(key, &[("report", &report), ("date", &date)])
+    }
+
     fn backup_running(&self) -> bool {
         self.waiting.is_some()
     }

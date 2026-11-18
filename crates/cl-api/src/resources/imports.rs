@@ -526,10 +526,14 @@ pub struct FilePreview {
     pub account_matches: Vec<AccountMatch>,
 }
 
-/// How the engine matched an account a file names (E2b, `qbd-mapping-v1`).
-/// ASSUMED shape until E2b lands: `{sourceKey, number?, name?, match:
-/// "existing"|"create"|"unmatched", accountId?}`. Unmatched accounts never
-/// go to suspense (Q-P31c): the owner picks one (`accountMap`).
+/// How the engine matched an account a file names (E2b, `qbd-mapping-v1`):
+/// `{sourceKey, number?, name?, match, accountId?, matchedBy?, rows,
+/// systemRole?}`, one per source key over every row of the file.
+///
+/// The engine matches each file against the chart as it is now: a trial
+/// balance or journal names an account the batch's own chart file creates
+/// as `unmatched`. The screen combines the files (and the batch's
+/// `accountMap`). Unmatched accounts never go to suspense (Q-P31c).
 #[derive(Clone, PartialEq, Eq)]
 pub struct AccountMatch {
     /// The key the batch's `accountMap` uses (the source number, else name).
@@ -542,13 +546,75 @@ pub struct AccountMatch {
     pub status: MatchStatus,
     /// The company account it matched (`Existing`).
     pub account: Option<AccountId>,
+    /// How an existing account was found.
+    pub matched_by: Option<MatchedBy>,
+    /// Rows (chart, trial balance, item) or journal lines naming it.
+    pub rows: u64,
+    /// A chart row of type A/R or A/P (merged into the company's own,
+    /// Q-P31k).
+    pub system_role: Option<SystemRole>,
 }
 
 impl fmt::Debug for AccountMatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AccountMatch")
             .field("status", &self.status)
+            .field("matched_by", &self.matched_by)
+            .field("rows", &self.rows)
+            .field("system_role", &self.system_role)
             .finish_non_exhaustive()
+    }
+}
+
+wire_enum!(
+    /// How an existing account was found ([`AccountMatch::matched_by`]).
+    MatchedBy {
+        /// By account number.
+        Number => "number",
+        /// By name (the oldest account of that name and type).
+        Name => "name",
+    }
+);
+
+wire_enum!(
+    /// The system account a chart row merges into.
+    SystemRole {
+        /// Accounts receivable.
+        AccountsReceivable => "accounts_receivable",
+        /// Accounts payable.
+        AccountsPayable => "accounts_payable",
+    }
+);
+
+/// What a source account becomes (a value of the batch's `accountMap`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AccountTarget {
+    /// Post to this company account (a chart row mapped here is not
+    /// created).
+    Account(AccountId),
+    /// Create it from the batch's chart file even when an account of that
+    /// name exists (`"create"`). Only for keys a chart row of the batch has:
+    /// any other key fails the commit with `IMPORT_UNMAPPED_ACCOUNT`.
+    Create,
+}
+
+impl AccountTarget {
+    fn wire(self) -> String {
+        match self {
+            AccountTarget::Account(a) => a.to_string(),
+            AccountTarget::Create => "create".to_string(),
+        }
+    }
+}
+
+/// Source account keys from the engine (account numbers or names: owner
+/// data). `Debug` shows the count only.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct SourceKeys(pub Vec<String>);
+
+impl fmt::Debug for SourceKeys {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SourceKeys({})", self.0.len())
     }
 }
 
@@ -625,10 +691,14 @@ pub struct BatchOptions {
     /// History before this date is skipped (Q-142 "two years"); `None` is
     /// "All".
     pub history_from: Option<CalendarDate>,
+    /// The conversion date (E2c): reference trial balances, open items and
+    /// the valuation must be dated it; journal rows after it are refused.
+    pub conversion_date: Option<CalendarDate>,
     /// Refuse the commit unless the company is empty (QBD, Q-P31h).
     pub require_empty_company: bool,
-    /// Source account key → account (the mapping review's choices).
-    pub account_map: BTreeMap<String, AccountId>,
+    /// Source account key → account or "create" (the mapping review's
+    /// choices). Options can't change once the batch exists.
+    pub account_map: BTreeMap<String, AccountTarget>,
     /// Source class → tag.
     pub class_map: BTreeMap<String, ClassTarget>,
 }
@@ -638,6 +708,7 @@ impl fmt::Debug for BatchOptions {
         f.debug_struct("BatchOptions")
             .field("fiscal_year_start_month", &self.fiscal_year_start_month)
             .field("history_from", &self.history_from)
+            .field("conversion_date", &self.conversion_date)
             .field("require_empty_company", &self.require_empty_company)
             .field("account_map", &self.account_map.len())
             .field("class_map", &self.class_map.len())
@@ -661,15 +732,21 @@ impl BatchOptions {
         if let Some(d) = self.history_from {
             m.insert("historyFrom".into(), json!(d.to_wire()));
         }
+        if let Some(d) = self.conversion_date {
+            m.insert("conversionDate".into(), json!(d.to_wire()));
+        }
         m.insert(
             "requireEmptyCompany".into(),
             json!(self.require_empty_company),
         );
         if !self.account_map.is_empty() {
+            if self.account_map.keys().any(|k| k.trim().is_empty()) {
+                return Err(LocalValidation::InvalidValue);
+            }
             let am: Map<String, Value> = self
                 .account_map
                 .iter()
-                .map(|(k, a)| (k.clone(), json!(a.to_string())))
+                .map(|(k, a)| (k.clone(), json!(a.wire())))
                 .collect();
             m.insert("accountMap".into(), Value::Object(am));
         }
@@ -693,7 +770,7 @@ impl BatchOptions {
 
     fn capabilities(&self) -> Vec<&'static str> {
         let mut caps = vec![Capabilities::IMPORTS_BATCH];
-        if self.history_from.is_some() {
+        if self.history_from.is_some() || self.conversion_date.is_some() {
             caps.push(Capabilities::QBD_DATES);
         }
         if !self.account_map.is_empty() || !self.class_map.is_empty() {
@@ -770,6 +847,140 @@ pub struct ImportBatch {
     pub created_at: Option<String>,
     /// When it was committed (engine text).
     pub committed_at: Option<String>,
+    /// Its files, in commit order, with what each commit did.
+    pub files: Vec<BatchFile>,
+    /// What the batch's dates mean (E2c; on create and on reading one
+    /// batch, not in the History list).
+    pub date_check: Option<DateCheck>,
+    /// Why its last job failed (a failed batch, or a committed one whose
+    /// undo failed).
+    pub error: Option<BatchFailure>,
+}
+
+/// One file of a batch (`batch.sessions[]`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BatchFile {
+    /// The file.
+    pub id: ImportSessionId,
+    /// What it holds.
+    pub kind: Option<ImportKind>,
+    /// Posted or reference.
+    pub role: Option<FileRole>,
+    /// Where it stands.
+    pub status: Option<SessionStatus>,
+    /// Its report date.
+    pub report_date: Option<CalendarDate>,
+    /// What its commit did (once committed).
+    pub result: Option<CommitSummary>,
+}
+
+/// Which item rows were listed but not imported (`itemsSkipped`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ItemsSkipped {
+    /// Sales tax items.
+    pub sales_tax: u64,
+    /// Item groups.
+    pub group: u64,
+    /// Payment items.
+    pub payment: u64,
+    /// Already in the company.
+    pub exists: u64,
+    /// No income account (or a part with no asset or cost account).
+    pub no_account: u64,
+}
+
+impl ItemsSkipped {
+    /// All of them.
+    #[must_use]
+    pub const fn total(&self) -> u64 {
+        self.sales_tax + self.group + self.payment + self.exists + self.no_account
+    }
+}
+
+/// One file's commit result (`commitResult`): counts, and the valuation's
+/// exact total. `Debug` hides the total.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct CommitSummary {
+    /// Rows or documents created.
+    pub created: u64,
+    /// Rows skipped (already there, or mapped to an existing account).
+    pub skipped: u64,
+    /// Names on both lists made one customer-and-vendor (E2b, Q-77).
+    pub merged_to_both: u64,
+    /// Customer:Job rows folded into their customer (no projects yet).
+    pub jobs_folded: u64,
+    /// Names or items brought in inactive.
+    pub inactive: u64,
+    /// Item rows listed but not imported, by reason.
+    pub items_skipped: Option<ItemsSkipped>,
+    /// Classes made tags through the batch's class map.
+    pub classes_mapped: u64,
+    /// Items given opening stock.
+    pub items_valued: u64,
+    /// The valuation's exact total (the engine's string; never summed here).
+    pub valuation_total: Option<Money>,
+    /// Journal rows before the history start, not posted (present whenever
+    /// the batch has a history start).
+    pub skipped_before_history: Option<u64>,
+}
+
+impl fmt::Debug for CommitSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("CommitSummary")
+            .field("created", &self.created)
+            .field("skipped", &self.skipped)
+            .field("merged_to_both", &self.merged_to_both)
+            .field("jobs_folded", &self.jobs_folded)
+            .field("inactive", &self.inactive)
+            .field("items_skipped", &self.items_skipped)
+            .field("classes_mapped", &self.classes_mapped)
+            .field("items_valued", &self.items_valued)
+            .field("skipped_before_history", &self.skipped_before_history)
+            .finish_non_exhaustive()
+    }
+}
+
+wire_enum!(
+    /// A date warning of a batch (never blocks).
+    DateWarningCode {
+        /// The journal starts later than the day after the opening
+        /// balances: anything in between is missing.
+        HistoryGap => "IMPORT_HISTORY_GAP",
+        /// Journal rows on or before the opening balance date (they count
+        /// twice).
+        JournalBeforeOpening => "IMPORT_JOURNAL_BEFORE_OPENING",
+    }
+);
+
+/// One date warning (codes, dates and a day count; the engine's message is
+/// never read).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DateWarning {
+    /// Which warning.
+    pub code: DateWarningCode,
+    /// The opening balances' date.
+    pub opening_balance_date: Option<CalendarDate>,
+    /// The first journal row that posts.
+    pub first_journal_date: Option<CalendarDate>,
+    /// Whole days with no rows between them (`HistoryGap`).
+    pub days: Option<u64>,
+}
+
+/// What the batch's dates mean for the commit (`batch.dateCheck`, E2c).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct DateCheck {
+    /// The conversion date.
+    pub conversion_date: Option<CalendarDate>,
+    /// The history start.
+    pub history_from: Option<CalendarDate>,
+    /// Journal rows before the history start (never posted).
+    pub history_skipped: u64,
+    /// The earliest posted trial balance (the opening balances).
+    pub opening_balance_date: Option<CalendarDate>,
+    /// The first journal row that posts.
+    pub first_journal_date: Option<CalendarDate>,
+    /// Warnings (unknown codes from a newer engine are left out).
+    pub warnings: Vec<DateWarning>,
 }
 
 impl ImportBatch {
@@ -792,7 +1003,7 @@ pub struct Progress {
 }
 
 /// Why a commit or undo job failed (nothing was posted, S1).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct BatchFailure {
     /// The engine code.
     pub code: String,
@@ -800,13 +1011,16 @@ pub struct BatchFailure {
     pub row_number: Option<u64>,
     /// The file it was in.
     pub session: Option<ImportSessionId>,
+    /// The engine's `details` (unmapped account keys, the accounts a
+    /// valuation is needed for). `Debug` names the keys only.
+    pub details: crate::ConflictDetails,
 }
 
 impl BatchFailure {
     /// The failure as a refusal the screen explains, when it is one.
     #[must_use]
     pub fn refusal(&self) -> Option<ImportRefusal> {
-        refusal_from(&self.code, None)
+        refusal_from(&self.code, Some(&self.details))
     }
 }
 
@@ -1052,11 +1266,55 @@ pub enum ImportRefusal {
     /// 403 `IMPORT_ADMIN_REQUIRED`: commit, undo and verify are the
     /// company Admin's.
     AdminRequired,
-    /// 422 `IMPORT_DATE_MISMATCH`: a reference file is not dated the
-    /// conversion date.
+    /// 422 `IMPORT_DATE_MISMATCH`: files not dated the conversion date
+    /// (every one listed).
     DateMismatch {
-        /// The file.
-        session: Option<ImportSessionId>,
+        /// The conversion date.
+        conversion_date: Option<CalendarDate>,
+        /// The files.
+        files: Vec<DateMismatchFile>,
+    },
+    /// 422 `IMPORT_JOURNAL_AFTER_CONVERSION`: journal rows dated after the
+    /// conversion date.
+    JournalAfterConversion {
+        /// The conversion date.
+        conversion_date: Option<CalendarDate>,
+        /// How many rows.
+        row_count: u64,
+        /// The first rows (file, row number).
+        rows: Vec<(Option<ImportSessionId>, u64)>,
+    },
+    /// 400 `IMPORT_BAD_DATE`: the history start is after the conversion
+    /// date, or a report has no date the engine can use.
+    BadDate,
+    /// 422 `IMPORT_UNMAPPED_ACCOUNT` (a failed commit): accounts the
+    /// files name that match nothing and have no account picked.
+    UnmappedAccount {
+        /// Their source keys (owner data).
+        keys: SourceKeys,
+        /// How many in all.
+        count: u64,
+    },
+    /// 400 `IMPORT_ACCOUNT_MAP_INVALID`: a picked account is not in this
+    /// company (any more).
+    AccountMapInvalid {
+        /// The source keys mapped to it.
+        keys: SourceKeys,
+    },
+    /// 409 `IMPORT_INVENTORY_OFF`: the files bring in inventory while the
+    /// company's inventory is off.
+    InventoryOff,
+    /// 409 `INVENTORY_PERIOD_CLOSED`: the opening stock is dated on or
+    /// before the closing date. No password lifts it.
+    InventoryPeriodClosed {
+        /// The closing date.
+        closing_date: Option<CalendarDate>,
+    },
+    /// 422 `IMPORT_VALUATION_REQUIRED` (a failed commit): the trial balance
+    /// shows inventory, so the Inventory Valuation Summary is needed.
+    ValuationRequired {
+        /// The inventory accounts' source keys (owner data).
+        keys: SourceKeys,
     },
     /// 422 `IMPORT_AMOUNT_INVALID`: amounts the engine will not read
     /// (exponents, more than 4 decimals, `1.234,56`).
@@ -1088,6 +1346,48 @@ pub enum ImportRefusal {
     /// 409/422 `IMPORT_SOURCE_MISMATCH`: a file was read for another
     /// program than the batch's.
     SourceMismatch,
+}
+
+wire_enum!(
+    /// Why a file's date does not fit the conversion date.
+    DateMismatchReason {
+        /// Dated another day.
+        NotConversionDate => "not_conversion_date",
+        /// The report has no date.
+        NoDate => "no_date",
+        /// A posted trial balance dated after the conversion date.
+        AfterConversion => "after_conversion",
+    }
+);
+
+/// One file of an `IMPORT_DATE_MISMATCH` (ids, kinds and dates only: the
+/// engine's file name is never read).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DateMismatchFile {
+    /// The file.
+    pub session: Option<ImportSessionId>,
+    /// What it holds.
+    pub kind: Option<ImportKind>,
+    /// Its report date.
+    pub report_date: Option<CalendarDate>,
+    /// Why.
+    pub reason: Option<DateMismatchReason>,
+}
+
+/// String entries of the list under `key` (`unmappedAccountKeys`), or the
+/// `field` of each object entry (`accounts[].sourceKey`).
+fn details_keys(d: Option<&crate::ConflictDetails>, key: &str, field: &str) -> SourceKeys {
+    SourceKeys(
+        d.and_then(|d| d.raw(key))
+            .and_then(Value::as_array)
+            .map(|l| {
+                l.iter()
+                    .filter_map(|v| v.as_str().or_else(|| v.get(field)?.as_str()))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+    )
 }
 
 fn details_id<T: std::str::FromStr>(d: Option<&crate::ConflictDetails>, key: &str) -> Option<T> {
@@ -1132,9 +1432,6 @@ fn refusal_from(code: &str, details: Option<&crate::ConflictDetails>) -> Option<
         "IMPORT_SESSION_IN_BATCH" => ImportRefusal::SessionInBatch,
         "IMPORT_FISCAL_YEAR_LOCKED" => ImportRefusal::FiscalYearLocked,
         "IMPORT_ADMIN_REQUIRED" => ImportRefusal::AdminRequired,
-        "IMPORT_DATE_MISMATCH" => ImportRefusal::DateMismatch {
-            session: details_id(details, "sessionId"),
-        },
         "IMPORT_AMOUNT_INVALID" => {
             let mut rows: Vec<u64> = details
                 .and_then(|d| d.raw("rows"))
@@ -1159,6 +1456,70 @@ fn refusal_from(code: &str, details: Option<&crate::ConflictDetails>) -> Option<
         "IMPORT_BATCH_NOT_COMMITTED" => ImportRefusal::BatchNotCommitted,
         "IMPORT_BATCH_EMPTY" => ImportRefusal::BatchEmpty,
         "IMPORT_SOURCE_MISMATCH" => ImportRefusal::SourceMismatch,
+        _ => return mapping_or_date_refusal(code, details),
+    })
+}
+
+/// The E2b and E2c codes (mapping, inventory, dates).
+fn mapping_or_date_refusal(
+    code: &str,
+    details: Option<&crate::ConflictDetails>,
+) -> Option<ImportRefusal> {
+    let day = |k: &str| {
+        details
+            .and_then(|d| d.text(k))
+            .and_then(|d| CalendarDate::parse_wire(d.get(..10)?).ok())
+    };
+    let list = |k: &str| -> Vec<Value> {
+        details
+            .and_then(|d| d.raw(k))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    };
+    Some(match code {
+        "IMPORT_DATE_MISMATCH" => ImportRefusal::DateMismatch {
+            conversion_date: day("conversionDate"),
+            files: list("files")
+                .iter()
+                .map(|f| DateMismatchFile {
+                    session: opt_id(&f["sessionId"]),
+                    kind: f["kind"].as_str().and_then(ImportKind::from_wire),
+                    report_date: date(&f["reportDate"]),
+                    reason: f["reason"].as_str().and_then(DateMismatchReason::from_wire),
+                })
+                .collect(),
+        },
+        "IMPORT_JOURNAL_AFTER_CONVERSION" => ImportRefusal::JournalAfterConversion {
+            conversion_date: day("conversionDate"),
+            row_count: details
+                .and_then(|d| d.raw("rowCount"))
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            rows: list("rows")
+                .iter()
+                .filter_map(|r| Some((opt_id(&r["sessionId"]), r["rowNumber"].as_u64()?)))
+                .collect(),
+        },
+        "IMPORT_BAD_DATE" => ImportRefusal::BadDate,
+        "IMPORT_UNMAPPED_ACCOUNT" => {
+            let keys = details_keys(details, "unmappedAccountKeys", "sourceKey");
+            let count = details
+                .and_then(|d| d.raw("unmappedCount"))
+                .and_then(Value::as_u64)
+                .unwrap_or_else(|| u64::try_from(keys.0.len()).unwrap_or(u64::MAX));
+            ImportRefusal::UnmappedAccount { keys, count }
+        }
+        "IMPORT_ACCOUNT_MAP_INVALID" => ImportRefusal::AccountMapInvalid {
+            keys: details_keys(details, "keys", "sourceKey"),
+        },
+        "IMPORT_INVENTORY_OFF" => ImportRefusal::InventoryOff,
+        "INVENTORY_PERIOD_CLOSED" => ImportRefusal::InventoryPeriodClosed {
+            closing_date: day("closingDate"),
+        },
+        "IMPORT_VALUATION_REQUIRED" => ImportRefusal::ValuationRequired {
+            keys: details_keys(details, "accounts", "sourceKey"),
+        },
         _ => return None,
     })
 }
@@ -1283,6 +1644,9 @@ fn account_matches_from(v: &Value) -> Vec<AccountMatch> {
                         name,
                         status: m["match"].as_str().and_then(MatchStatus::from_wire)?,
                         account: opt_id(&m["accountId"]),
+                        matched_by: m["matchedBy"].as_str().and_then(MatchedBy::from_wire),
+                        rows: count(&m["rows"]),
+                        system_role: m["systemRole"].as_str().and_then(SystemRole::from_wire),
                     })
                 })
                 .collect()
@@ -1308,16 +1672,107 @@ fn spot_check_from(v: &Value) -> Vec<SpotCheckItem> {
         .collect()
 }
 
+fn summary_from(r: &Value) -> Result<CommitSummary, ApiError> {
+    let s = &r["itemsSkipped"];
+    Ok(CommitSummary {
+        created: count(&r["created"]),
+        skipped: count(&r["skipped"]),
+        merged_to_both: count(&r["mergedToBoth"]),
+        jobs_folded: count(&r["jobsFolded"]),
+        inactive: count(&r["inactive"]),
+        items_skipped: s.is_object().then(|| ItemsSkipped {
+            sales_tax: count(&s["sales_tax"]),
+            group: count(&s["group"]),
+            payment: count(&s["payment"]),
+            exists: count(&s["exists"]),
+            no_account: count(&s["no_account"]),
+        }),
+        classes_mapped: count(&r["classesMapped"]),
+        items_valued: count(&r["itemsValued"]),
+        valuation_total: opt_money(&r["valuationTotal"])?,
+        skipped_before_history: r["skippedBeforeHistory"].as_u64(),
+    })
+}
+
+/// `batch.sessions[]` (E1 as built), with each file's `commitResult`.
+fn files_from(v: &Value) -> Result<Vec<BatchFile>, ApiError> {
+    let Some(list) = v.as_array() else {
+        return Ok(Vec::new());
+    };
+    list.iter()
+        .filter_map(|s| {
+            let id = opt_id::<ImportSessionId>(&s["id"])?;
+            let r = &s["commitResult"];
+            Some(
+                (if r.is_object() {
+                    summary_from(r).map(Some)
+                } else {
+                    Ok(None)
+                })
+                .map(|result| BatchFile {
+                    id,
+                    kind: s["kind"].as_str().and_then(ImportKind::from_wire),
+                    role: s["role"].as_str().and_then(FileRole::from_wire),
+                    status: s["status"].as_str().and_then(SessionStatus::from_wire),
+                    report_date: date(&s["reportDate"]),
+                    result,
+                }),
+            )
+        })
+        .collect()
+}
+
+/// `batch.dateCheck` (create, GET), else the committed `result.dateCheck`.
+fn date_check_from(b: &Value) -> Option<DateCheck> {
+    let d = if b["dateCheck"].is_object() {
+        &b["dateCheck"]
+    } else {
+        &b["result"]["dateCheck"]
+    };
+    d.is_object().then(|| DateCheck {
+        conversion_date: date(&d["conversionDate"]),
+        history_from: date(&d["historyFrom"]),
+        history_skipped: count(&d["historySkipped"]),
+        opening_balance_date: date(&d["openingBalanceDate"]),
+        first_journal_date: date(&d["firstJournalDate"]),
+        warnings: d["warnings"]
+            .as_array()
+            .map(|l| {
+                l.iter()
+                    .filter_map(|w| {
+                        // `message` is never read.
+                        Some(DateWarning {
+                            code: w["code"].as_str().and_then(DateWarningCode::from_wire)?,
+                            opening_balance_date: date(&w["openingBalanceDate"]),
+                            first_journal_date: date(&w["firstJournalDate"]),
+                            days: w["days"].as_u64(),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+    })
+}
+
 fn batch_from(b: &Value) -> Result<ImportBatch, ApiError> {
+    let files = files_from(&b["sessions"])?;
+    let sessions = if files.is_empty() {
+        b["sessionIds"]
+            .as_array()
+            .map(|l| l.iter().filter_map(opt_id).collect())
+            .unwrap_or_default()
+    } else {
+        files.iter().map(|f| f.id).collect()
+    };
     Ok(ImportBatch {
         id: ImportBatchId::parse(b["id"].as_str().ok_or_else(decode_err)?)?,
         source: wire(&b["sourceSystem"], SourceSystem::from_wire)?,
         kind: wire(&b["kind"], BatchKind::from_wire)?,
         status: wire(&b["status"], BatchStatus::from_wire)?,
-        sessions: b["sessionIds"]
-            .as_array()
-            .map(|l| l.iter().filter_map(opt_id).collect())
-            .unwrap_or_default(),
+        sessions,
+        files,
+        date_check: date_check_from(b),
+        error: failure_from(&b["error"]),
         backup_ref: text(&b["backupRef"]),
         company_was_empty: b["companyWasEmpty"].as_bool(),
         conversion_date: date(&b["conversionDate"]),
@@ -1340,6 +1795,17 @@ pub(crate) fn one_batch_from(body: &[u8]) -> Result<ImportBatch, ApiError> {
     }
 }
 
+/// A job's `error` object (`None` when absent or null).
+fn failure_from(e: &Value) -> Option<BatchFailure> {
+    e.is_object().then(|| BatchFailure {
+        code: e["code"].as_str().unwrap_or_default().to_string(),
+        row_number: e["rowNumber"].as_u64(),
+        session: opt_id(&e["sessionId"]),
+        // `message` is never read: it can name accounts and people.
+        details: crate::ConflictDetails::new(e["details"].clone()),
+    })
+}
+
 /// Reads `{batch, progress, error?}`.
 pub(crate) fn state_from(body: &[u8]) -> Result<BatchState, ApiError> {
     let v = parse_json(body)?;
@@ -1350,16 +1816,7 @@ pub(crate) fn state_from(body: &[u8]) -> Result<BatchState, ApiError> {
         done: count(&p["done"]),
         total: count(&p["total"]),
     });
-    let e = if v["error"].is_object() {
-        &v["error"]
-    } else {
-        &v["batch"]["error"]
-    };
-    let error = e.is_object().then(|| BatchFailure {
-        code: e["code"].as_str().unwrap_or_default().to_string(),
-        row_number: e["rowNumber"].as_u64(),
-        session: opt_id(&e["sessionId"]),
-    });
+    let error = failure_from(&v["error"]).or_else(|| batch.error.clone());
     Ok(BatchState {
         batch,
         progress,

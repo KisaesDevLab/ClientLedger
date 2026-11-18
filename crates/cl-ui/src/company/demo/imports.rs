@@ -30,11 +30,11 @@
 use std::collections::BTreeMap;
 
 use cl_api::imports::{
-    AccountMatch, BalanceKey, BalanceRow, BatchFailure, BatchPage, BatchState, BatchStatus,
-    CommitRequest, FilePreview, FileRole, ImportBatch, ImportBatchId, ImportKind, ImportSession,
-    ImportSessionId, JobAccepted, MatchStatus, NewBatch, Progress, RowProblem, SessionStatus,
-    SourceSystem, SpotCheckItem, TieOut, TieOutAccount, TieOutItem, TieOutTotals, UndoBlocker,
-    UploadOutcome, UploadRequest,
+    AccountMatch, BalanceKey, BalanceRow, BatchFailure, BatchFile, BatchPage, BatchState,
+    BatchStatus, CommitRequest, FilePreview, FileRole, ImportBatch, ImportBatchId, ImportKind,
+    ImportSession, ImportSessionId, JobAccepted, MatchStatus, NewBatch, Progress, RowProblem,
+    SessionStatus, SourceSystem, SpotCheckItem, TieOut, TieOutAccount, TieOutItem, TieOutTotals,
+    UndoBlocker, UploadOutcome, UploadRequest,
 };
 use cl_api::{
     ApiError, ConflictDetails, ConflictReason, ErrorCode, IdempotencyKey, UserText, ValidationError,
@@ -508,21 +508,29 @@ impl DemoImports {
         }
     }
 
-    /// The accounts a file names, as the engine would match them: every
-    /// account of the set's reference trial balance comes from the account
-    /// list (`create`); a journal also names the scenario's unmatched ones.
+    /// The accounts a file names, as the engine matches them (E2b): each
+    /// file against the chart as it is now (the demo company has none of the
+    /// set's accounts). The account list makes every account of the set's
+    /// reference trial balance (`create`); a trial balance or journal names
+    /// them `unmatched` (the screen combines it with the account list), and
+    /// a journal also names the scenario's unmatched ones.
     fn account_matches(&self, set: &Set, kind: ImportKind) -> Vec<AccountMatch> {
-        if !matches!(kind, ImportKind::GlTransactions | ImportKind::TrialBalance) {
-            return Vec::new();
-        }
+        let status = match kind {
+            ImportKind::Coa => MatchStatus::Create,
+            ImportKind::GlTransactions | ImportKind::TrialBalance => MatchStatus::Unmatched,
+            _ => return Vec::new(),
+        };
         let mut out: Vec<AccountMatch> = section(set.base, "reference_tb")
             .into_keys()
             .map(|k| AccountMatch {
                 source_key: k.clone(),
                 number: Some(k.clone()),
                 name: k,
-                status: MatchStatus::Create,
+                status,
                 account: None,
+                matched_by: None,
+                rows: 1,
+                system_role: None,
             })
             .collect();
         if kind == ImportKind::GlTransactions {
@@ -532,9 +540,84 @@ impl DemoImports {
                 name: k.clone(),
                 status: MatchStatus::Unmatched,
                 account: None,
+                matched_by: None,
+                rows: 1,
+                system_role: None,
             }));
         }
+        out.sort_by(|a, b| a.source_key.cmp(&b.source_key));
         out
+    }
+
+    /// What the batch's dates mean (E2c): the posted trial balance's date,
+    /// the first journal day on or after the history start, and a gap
+    /// warning between them.
+    fn date_check(
+        &self,
+        set: &Set,
+        sessions: &[ImportSessionId],
+        options: &cl_api::imports::BatchOptions,
+    ) -> cl_api::imports::DateCheck {
+        let mine = || {
+            sessions
+                .iter()
+                .filter_map(|sid| self.sessions.iter().find(|s| s.id == *sid))
+                .filter(|s| s.role == FileRole::Post)
+        };
+        let opening = mine()
+            .filter(|s| s.kind == ImportKind::TrialBalance)
+            .filter_map(|s| report_date(set, s.kind, s.role))
+            .min();
+        let first = mine()
+            .filter(|s| s.kind == ImportKind::GlTransactions)
+            .filter_map(|s| self.period(s.id))
+            .filter(|(_, to)| options.history_from.is_none_or(|f| *to >= f))
+            .map(|(from, _)| options.history_from.map_or(from, |f| from.max(f)))
+            .min();
+        let mut warnings = Vec::new();
+        if let (Some(o), Some(f)) = (opening, first) {
+            let gap = o.days_until(f) - 1;
+            if gap > 0 {
+                warnings.push(cl_api::imports::DateWarning {
+                    code: cl_api::imports::DateWarningCode::HistoryGap,
+                    opening_balance_date: Some(o),
+                    first_journal_date: Some(f),
+                    days: u64::try_from(gap).ok(),
+                });
+            } else if gap < 0 {
+                warnings.push(cl_api::imports::DateWarning {
+                    code: cl_api::imports::DateWarningCode::JournalBeforeOpening,
+                    opening_balance_date: Some(o),
+                    first_journal_date: Some(f),
+                    days: None,
+                });
+            }
+        }
+        cl_api::imports::DateCheck {
+            conversion_date: options.conversion_date,
+            history_from: options.history_from,
+            history_skipped: 0,
+            opening_balance_date: opening,
+            first_journal_date: first,
+            warnings,
+        }
+    }
+
+    /// The batch's files as the engine lists them (no results until
+    /// committed).
+    fn batch_files(&self, set: &Set, sessions: &[ImportSessionId]) -> Vec<BatchFile> {
+        sessions
+            .iter()
+            .filter_map(|sid| self.sessions.iter().find(|s| s.id == *sid))
+            .map(|s| BatchFile {
+                id: s.id,
+                kind: Some(s.kind),
+                role: Some(s.role),
+                status: Some(SessionStatus::Uploaded),
+                report_date: report_date(set, s.kind, s.role),
+                result: None,
+            })
+            .collect()
     }
 
     /// Something that keeps `batch` from being undone (a payment applied
@@ -790,12 +873,15 @@ impl DemoImports {
         }
         self.check_overlap(&new.sessions, new.source, None)?;
         let set = set.ok_or_else(decode)?;
-        let id = ImportBatchId::parse(&self.next_id(2))?;
         let company = section(SETS[set].base, "company");
         let conversion = SETS[set]
             .qbd
             .then(|| company.get("conversion_date").and_then(|d| day(d)))
             .flatten();
+        self.check_dates(&SETS[set], &new.sessions, &new.options, conversion)?;
+        let id = ImportBatchId::parse(&self.next_id(2))?;
+        let files = self.batch_files(&SETS[set], &new.sessions);
+        let date_check = Some(self.date_check(&SETS[set], &new.sessions, &new.options));
         let batch = ImportBatch {
             id,
             source: new.source,
@@ -811,6 +897,9 @@ impl DemoImports {
             spot_check: Vec::new(),
             created_at: Some("2026-10-27T11:00:00.000Z".into()),
             committed_at: None,
+            files,
+            date_check,
+            error: None,
         };
         for sid in &new.sessions {
             if let Some(s) = self.sessions.iter_mut().find(|s| s.id == *sid) {
@@ -829,6 +918,61 @@ impl DemoImports {
             emptied: false,
         });
         Ok(batch)
+    }
+
+    /// The E2c refusals at create: 400 `IMPORT_BAD_DATE` for a history
+    /// start after the conversion date; 422 `IMPORT_DATE_MISMATCH` naming
+    /// every reference, open-item and valuation file not dated the
+    /// conversion date the owner gave (the set's own date is what the files
+    /// carry).
+    fn check_dates(
+        &self,
+        set: &Set,
+        sessions: &[ImportSessionId],
+        options: &cl_api::imports::BatchOptions,
+        carried: Option<CalendarDate>,
+    ) -> Result<(), ApiError> {
+        let Some(conv) = options.conversion_date else {
+            return Ok(());
+        };
+        if options.history_from.is_some_and(|f| f > conv) {
+            return Err(refused(
+                "IMPORT_BAD_DATE",
+                json!({"historyFrom": options.history_from.map(CalendarDate::to_wire), "conversionDate": conv.to_wire()}),
+            ));
+        }
+        let files: Vec<Value> = sessions
+            .iter()
+            .filter_map(|sid| self.sessions.iter().find(|s| s.id == *sid))
+            .filter(|s| {
+                (s.kind == ImportKind::TrialBalance && s.role == FileRole::Reference)
+                    || matches!(
+                        s.kind,
+                        ImportKind::OpenInvoices
+                            | ImportKind::UnpaidBills
+                            | ImportKind::InventoryValuation
+                    )
+            })
+            .filter_map(|s| {
+                let date = report_date(set, s.kind, s.role).or(carried);
+                (date != Some(conv)).then(|| {
+                    json!({
+                        "sessionId": s.id.to_string(),
+                        "kind": s.kind.as_wire(),
+                        "role": s.role.as_wire(),
+                        "reportDate": date.map(CalendarDate::to_wire),
+                        "reason": if date.is_some() { "not_conversion_date" } else { "no_date" },
+                    })
+                })
+            })
+            .collect();
+        if files.is_empty() {
+            return Ok(());
+        }
+        Err(refused(
+            "IMPORT_DATE_MISMATCH",
+            json!({"conversionDate": conv.to_wire(), "files": files}),
+        ))
     }
 
     /// The earliest day the batch posts on (what the closed-period check
@@ -1047,20 +1191,47 @@ impl DemoImports {
         me.job = None;
         match job {
             Job::Commit if self.fail_next_commit.is_some() => {
-                // The job stopped: nothing posted, the batch can be retried.
+                // The job stopped: nothing posted, the batch can be retried
+                // (or, for an unmapped account or a missing valuation, its
+                // files go in a new batch: options are fixed, E2b).
                 me.batch.status = BatchStatus::Failed;
                 me.error = self.fail_next_commit.take().map(|code| BatchFailure {
                     code: code.to_string(),
-                    row_number: None,
-                    session: None,
+                    details: cl_api::ConflictDetails::new(match code {
+                        "IMPORT_UNMAPPED_ACCOUNT" => {
+                            json!({"unmappedAccountKeys": ["6999"], "unmappedCount": 1})
+                        }
+                        "IMPORT_VALUATION_REQUIRED" => {
+                            json!({"accounts": [{"sourceKey": "1300", "balance": "0.00"}]})
+                        }
+                        _ => json!({}),
+                    }),
+                    ..BatchFailure::default()
                 });
+                me.batch.error.clone_from(&me.error);
             }
             Job::Commit => {
                 me.batch.status = BatchStatus::Committed;
                 me.batch.committed_at = Some(COMMITTED_AT.to_string());
                 me.batch.company_was_empty = Some(self.company_empty);
+                me.batch.error = None;
                 me.emptied = self.company_empty;
                 self.company_empty = false;
+                let set = &SETS[me.set];
+                let history = me.batch.history_from.is_some();
+                let rows: BTreeMap<ImportSessionId, u64> =
+                    self.sessions.iter().map(|s| (s.id, s.row_count)).collect();
+                for f in &mut me.batch.files {
+                    f.status = Some(SessionStatus::Committed);
+                    if f.role != Some(FileRole::Post) {
+                        continue;
+                    }
+                    let created = rows.get(&f.id).copied().unwrap_or(0);
+                    f.result = Some(demo_result(set, f.kind, created, history));
+                }
+                if let Some(dc) = &mut me.batch.date_check {
+                    dc.history_skipped = 0;
+                }
             }
             Job::Undo => {
                 me.batch.status = BatchStatus::Undone;
@@ -1153,6 +1324,32 @@ impl DemoImports {
         self.batches[i].batch.spot_check = items.to_vec();
         Ok(())
     }
+}
+
+/// One posted file's result as the engine reports it: counts, and the
+/// valuation's exact total from `EXPECTED.toml` (never summed here).
+fn demo_result(
+    set: &Set,
+    kind: Option<ImportKind>,
+    created: u64,
+    history: bool,
+) -> cl_api::imports::CommitSummary {
+    let mut r = cl_api::imports::CommitSummary {
+        created,
+        ..cl_api::imports::CommitSummary::default()
+    };
+    match kind {
+        Some(ImportKind::InventoryValuation) => {
+            r.items_valued = created;
+            r.valuation_total = money(section(set.base, "totals").get("inventory_valuation"));
+        }
+        Some(ImportKind::Items) => {
+            r.items_skipped = Some(cl_api::imports::ItemsSkipped::default());
+        }
+        Some(ImportKind::GlTransactions) if history => r.skipped_before_history = Some(0),
+        _ => {}
+    }
+    r
 }
 
 fn overlap_refusal(

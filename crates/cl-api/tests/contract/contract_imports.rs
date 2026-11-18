@@ -10,9 +10,10 @@
 //! fixtures' `EXPECTED.toml` (worked out by hand; `tests/imports_fixtures.rs`
 //! re-sums them offline), never from the engine.
 //!
-//! PENDING until the pinned engine advertises the P31 capabilities
-//! (`imports-amounts-v1`, `imports-batch-v1`, `qbd-open-items-v1`,
-//! `qbd-mapping-v1`, `qbd-dates-v1`, `imports-tieout-v1`).
+//! Upload, batch, commit and undo run once the pin has the merged P31
+//! capabilities (`imports-amounts-v1`, `imports-batch-v1`,
+//! `qbd-open-items-v1`, `qbd-mapping-v1`, `qbd-dates-v1`); the tie-out and
+//! verify checks stay PENDING(U-267) until `imports-tieout-v1`.
 
 use std::time::{Duration, Instant};
 
@@ -30,9 +31,13 @@ use crate::support::{Harness, unique};
 
 const QBD: &str = "qbd/shoal-creek";
 
-/// The capability each P31 engine PR adds, with its U-row.
+/// The capability each P31 engine PR adds, with its U-row: everything the
+/// flow needs except the tie-out (E3), which [`tieout`] gates.
 fn caps(h: &Harness, flow: Flow) -> bool {
     flow.capabilities().iter().all(|c| {
+        if *c == Capabilities::IMPORTS_TIEOUT {
+            return true;
+        }
         let u = match *c {
             Capabilities::IMPORTS_AMOUNTS => "U-260",
             Capabilities::IMPORTS_BATCH => "U-261",
@@ -44,6 +49,11 @@ fn caps(h: &Harness, flow: Flow) -> bool {
         };
         h.require_cap(c, u)
     })
+}
+
+/// The tie-out and verify (E3, U-267).
+fn tieout(h: &Harness) -> bool {
+    h.require_cap(Capabilities::IMPORTS_TIEOUT, "U-267")
 }
 
 fn day(s: &str) -> CalendarDate {
@@ -65,6 +75,16 @@ fn fresh_company(h: &Harness, name: &str) -> (Session, cl_core::ids::TenantId) {
     let s = h.s3();
     h.run(s.open_company(tenant))
         .unwrap_or_else(|e| panic!("open {name}: {e}"));
+    (s, tenant)
+}
+
+/// A new company for the QBD set: inventory on (the set has inventory
+/// parts and a valuation; the engine refuses them otherwise,
+/// `IMPORT_INVENTORY_OFF`).
+fn qbd_company(h: &Harness, name: &str) -> (Session, cl_core::ids::TenantId) {
+    let (s, tenant) = fresh_company(h, name);
+    h.run(s.set_inventory_enabled(true, IdempotencyKey::new()))
+        .unwrap_or_else(|e| panic!("inventory on {name}: {e}"));
     (s, tenant)
 }
 
@@ -139,7 +159,24 @@ fn files(set: &str, replace: &[(&str, std::path::PathBuf)]) -> Vec<FileSpec> {
 fn qbo_xlsx(csv: &str) -> Vec<u8> {
     let mut wb = rust_xlsxwriter::Workbook::new();
     let ws = wb.add_worksheet();
-    for (r, row) in fx::read_csv(csv).iter().enumerate() {
+    let rows = fx::read_csv(csv);
+    // A QBO Journal shows Date and Transaction Type on an entry's first line
+    // only (the engine starts an entry on a row with both); the CSV fixture
+    // repeats them on every line.
+    let header = rows
+        .iter()
+        .position(|r| r.iter().any(|c| c == "Transaction Type"));
+    let mut last_entry: Option<(String, String, String)> = None;
+    for (r, row) in rows.iter().enumerate() {
+        let mut row = row.clone();
+        if header.is_some_and(|h| r > h) && row.len() >= 3 {
+            let entry = (row[0].clone(), row[1].clone(), row[2].clone());
+            if last_entry.as_ref() == Some(&entry) {
+                row[0].clear();
+                row[1].clear();
+            }
+            last_entry = Some(entry);
+        }
         let r = u32::try_from(r).expect("row");
         for (c, cell) in row.iter().enumerate() {
             let c = u16::try_from(c).expect("col");
@@ -213,6 +250,8 @@ fn batch_of(
         options: BatchOptions {
             fiscal_year_start_month: Some(1),
             history_from,
+            // E2c: the QBD reference files must be dated it.
+            conversion_date: qbd.then(|| day(&fx::section(&e, "company")["conversion_date"])),
             require_empty_company: qbd,
             ..BatchOptions::default()
         },
@@ -327,13 +366,20 @@ pub fn qbd_conversion_ties_out(h: &Harness) {
     let e = fx::expected(QBD);
     let two_years = day(&fx::section(&e, "company")["history_from_two_years"]);
     for history_from in [Some(two_years), None] {
-        let (s, _) = fresh_company(h, "Shoal Creek");
+        let (s, _) = qbd_company(h, "Shoal Creek");
         let id = batch_of(h, &s, QBD, &[], history_from);
+        let created = h.run(s.imports().batch(id)).expect("draft");
+        let dc = created.batch.date_check.expect("date check (E2c)");
+        assert_eq!(dc.opening_balance_date, Some(day("2023-12-31")));
+        assert_eq!(dc.history_from, history_from);
+        assert_eq!(dc.history_skipped, 0, "the journals start in 2024");
         let st = commit(h, &s, id);
-        assert_eq!(
-            st.batch.conversion_date,
-            Some(day(&fx::section(&e, "company")["conversion_date"]))
-        );
+        let conversion = day(&fx::section(&e, "company")["conversion_date"]);
+        assert_eq!(st.batch.conversion_date, Some(conversion));
+        assert_conversion_results(&st, &e, history_from);
+        if !tieout(h) {
+            continue;
+        }
         let t = h.run(s.imports().tieout(id)).expect("tieout");
         assert_ties_out(&t, &format!("history from {history_from:?}"));
         for key in [
@@ -372,6 +418,54 @@ pub fn qbd_conversion_ties_out(h: &Harness) {
     }
 }
 
+/// The committed QBD batch's per-file results (E2b, E2c): names, items, the
+/// valuation total exactly as `EXPECTED.toml` has it, the journals' history
+/// skip count. Counts only; the screen never adds amounts across files.
+fn assert_conversion_results(st: &BatchState, e: &Expected, history_from: Option<CalendarDate>) {
+    let of = |kind: ImportKind| {
+        st.batch
+            .files
+            .iter()
+            .filter(|f| f.kind == Some(kind) && f.role == Some(FileRole::Post))
+            .filter_map(|f| f.result.clone())
+            .collect::<Vec<_>>()
+    };
+    let valuation = of(ImportKind::InventoryValuation);
+    assert_eq!(valuation.len(), 1, "one valuation result");
+    assert_eq!(
+        valuation[0].valuation_total.map(cl_core::Money::as_decimal),
+        Some(fx::dec(&fx::section(e, "totals")["inventory_valuation"]))
+    );
+    assert_eq!(
+        valuation[0].items_valued,
+        u64::try_from(fx::section(e, "inventory_valuation").len()).expect("count")
+    );
+    let items = of(ImportKind::Items);
+    assert_eq!(items.len(), 1);
+    assert!(items[0].created > 0, "items made");
+    // One name is on both lists (Q-77).
+    let contacts = of(ImportKind::Contacts);
+    assert!(
+        contacts.iter().map(|r| r.merged_to_both).sum::<u64>() >= 1,
+        "{contacts:?}"
+    );
+    for j in of(ImportKind::GlTransactions) {
+        assert_eq!(
+            j.skipped_before_history.is_some(),
+            history_from.is_some(),
+            "{j:?}"
+        );
+    }
+    for f in &st.batch.files {
+        assert!(
+            f.status
+                .is_some_and(|s| s == cl_api::imports::SessionStatus::Committed),
+            "{:?}",
+            f.kind
+        );
+    }
+}
+
 fn altered(set: &str, stem: &str) -> Vec<(&'static str, std::path::PathBuf)> {
     let e = fx::expected(set);
     let file = &fx::section(&e, "replaces")[stem];
@@ -391,9 +485,12 @@ pub fn altered_repointed_two_accounts(h: &Harness) {
         return;
     }
     let set = "qbd/shoal-creek-altered/repointed";
-    let (s, _) = fresh_company(h, "Shoal Creek repointed");
+    let (s, _) = qbd_company(h, "Shoal Creek repointed");
     let id = batch_of(h, &s, QBD, &altered(set, "journal-2025-2026"), None);
     commit(h, &s, id);
+    if !tieout(h) {
+        return;
+    }
     let t = h.run(s.imports().tieout(id)).expect("tieout");
     assert!(!t.all_zero);
     assert_eq!(account_diffs(&t), fx::amounts(&fx::expected(set), "diffs"));
@@ -412,9 +509,12 @@ pub fn altered_open_item_ar_and_history(h: &Harness) {
     }
     let set = "qbd/shoal-creek-altered/open-item";
     let e = fx::expected(set);
-    let (s, _) = fresh_company(h, "Shoal Creek open item");
+    let (s, _) = qbd_company(h, "Shoal Creek open item");
     let id = batch_of(h, &s, QBD, &altered(set, "open-invoices"), None);
     commit(h, &s, id);
+    if !tieout(h) {
+        return;
+    }
     let t = h.run(s.imports().tieout(id)).expect("tieout");
     assert!(!t.all_zero);
     assert_eq!(account_diffs(&t), fx::amounts(&e, "diffs"));
@@ -431,7 +531,7 @@ pub fn undo_restores_snapshot(h: &Harness) {
     if !caps(h, Flow::QbdConversion) {
         return;
     }
-    let (s, _) = fresh_company(h, "Shoal Creek undo");
+    let (s, _) = qbd_company(h, "Shoal Creek undo");
     let before = snapshot(h, &s);
     let id = batch_of(h, &s, QBD, &[], None);
     commit(h, &s, id);
@@ -445,7 +545,7 @@ pub fn recommit_after_undo(h: &Harness) {
     if !caps(h, Flow::QbdConversion) {
         return;
     }
-    let (s, _) = fresh_company(h, "Shoal Creek recommit");
+    let (s, _) = qbd_company(h, "Shoal Creek recommit");
     let first = batch_of(h, &s, QBD, &[], None);
     commit(h, &s, first);
     let posted = snapshot(h, &s);
@@ -453,6 +553,9 @@ pub fn recommit_after_undo(h: &Harness) {
     let second = batch_of(h, &s, QBD, &[], None);
     commit(h, &s, second);
     assert_eq!(snapshot(h, &s), posted, "all of it again");
+    if !tieout(h) {
+        return;
+    }
     assert_ties_out(
         &h.run(s.imports().tieout(second)).expect("tieout"),
         "re-commit",
@@ -466,7 +569,7 @@ pub fn kill_mid_commit(h: &Harness) {
     if !caps(h, Flow::QbdConversion) {
         return;
     }
-    let (s, tenant) = fresh_company(h, "Shoal Creek kill");
+    let (s, tenant) = qbd_company(h, "Shoal Creek kill");
     let before = snapshot(h, &s);
     let id = batch_of(h, &s, QBD, &[], None);
     let req = CommitRequest {
@@ -487,6 +590,9 @@ pub fn kill_mid_commit(h: &Harness) {
         BatchStatus::Committed => {}
         other => panic!("after restart: {other:?}"),
     }
+    if !tieout(h) {
+        return;
+    }
     assert_ties_out(
         &h.run(s.imports().tieout(id)).expect("tieout"),
         "posted once",
@@ -500,6 +606,9 @@ fn system_ties_out(h: &Harness, set: &str) {
     let (s, _) = fresh_company(h, set);
     let id = batch_of(h, &s, set, &[], None);
     commit(h, &s, id);
+    if !tieout(h) {
+        return;
+    }
     assert_ties_out(&h.run(s.imports().tieout(id)).expect("tieout"), set);
 }
 
@@ -532,6 +641,9 @@ pub fn generic_altered(h: &Harness) {
     let (s, _) = fresh_company(h, "Generic altered");
     let id = batch_of(h, &s, "imports/generic", &altered(set, "gl"), None);
     commit(h, &s, id);
+    if !tieout(h) {
+        return;
+    }
     let t = h.run(s.imports().tieout(id)).expect("tieout");
     assert!(!t.all_zero);
     assert_eq!(account_diffs(&t), fx::amounts(&fx::expected(set), "diffs"));
@@ -576,7 +688,7 @@ pub fn overlap_refused_409(h: &Harness) {
     if !caps(h, Flow::QbdConversion) {
         return;
     }
-    let (s, _) = fresh_company(h, "Overlap");
+    let (s, _) = qbd_company(h, "Overlap");
     let id = batch_of(h, &s, QBD, &[], None);
     commit(h, &s, id);
     let attempt = || -> Result<ImportBatchId, cl_api::ApiError> {
@@ -624,6 +736,223 @@ pub fn overlap_refused_409(h: &Harness) {
         }
     }
 }
+/// Uploads the QBD set's files `keep` picks and groups them (no fiscal
+/// year, no empty-company check).
+fn qbd_subset(
+    h: &Harness,
+    s: &Session,
+    keep: impl Fn(&FileSpec) -> bool,
+    options: BatchOptions,
+) -> Result<cl_api::imports::ImportBatch, cl_api::ApiError> {
+    let sessions = files(QBD, &[])
+        .iter()
+        .filter(|f| keep(f))
+        .map(|f| upload(h, s, SourceSystem::QuickBooksDesktop, f))
+        .collect();
+    h.run(s.imports().create_batch(&NewBatch {
+        source: SourceSystem::QuickBooksDesktop,
+        kind: BatchKind::Conversion,
+        sessions,
+        options,
+    }))
+}
+
+/// E2c: with a conversion date, every reference and open-item file of
+/// another date is named (and nothing is grouped); a history start after
+/// the conversion date is refused; the opening balances and the first
+/// journal row are reported, with no warning for this set.
+pub fn dates_are_checked_before_any_commit(h: &Harness) {
+    if !caps(h, Flow::QbdConversion) {
+        return;
+    }
+    let (s, _) = qbd_company(h, "Shoal Creek dates");
+    let dated = |f: &FileSpec| {
+        matches!(
+            f.kind,
+            ImportKind::OpenInvoices | ImportKind::UnpaidBills | ImportKind::InventoryValuation
+        ) || (f.kind == ImportKind::TrialBalance && f.role == FileRole::Reference)
+    };
+    let wrong = BatchOptions {
+        conversion_date: Some(day("2026-10-26")),
+        ..BatchOptions::default()
+    };
+    let e = qbd_subset(h, &s, dated, wrong).expect_err("not the conversion date");
+    let Some(ImportRefusal::DateMismatch {
+        conversion_date,
+        files,
+    }) = import_refusal(&e)
+    else {
+        panic!("date mismatch: {e:?}")
+    };
+    assert_eq!(conversion_date, Some(day("2026-10-26")));
+    assert_eq!(files.len(), 4, "every file named: {files:?}");
+    assert!(files.iter().all(|f| f.session.is_some()
+        && f.reason == Some(cl_api::imports::DateMismatchReason::NotConversionDate)));
+    let (s, _) = qbd_company(h, "Shoal Creek history");
+    let late = BatchOptions {
+        conversion_date: Some(day("2026-10-27")),
+        history_from: Some(day("2026-11-01")),
+        ..BatchOptions::default()
+    };
+    let e = qbd_subset(h, &s, |f| f.kind == ImportKind::GlTransactions, late)
+        .expect_err("history after conversion");
+    assert_eq!(import_refusal(&e), Some(ImportRefusal::BadDate), "{e:?}");
+}
+
+/// E2b: a trial balance and journals with no chart file name accounts the
+/// company lacks. The upload says so (`unmatched`, with row counts); the
+/// commit fails with `IMPORT_UNMAPPED_ACCOUNT` and nothing posts. The retry
+/// is a new batch: the failed batch's files are deleted, uploaded again,
+/// and grouped with an `accountMap`; it then commits.
+pub fn unmapped_accounts_fail_then_a_mapped_retry_posts(h: &Harness) {
+    if !caps(h, Flow::QbdConversion) {
+        return;
+    }
+    let (s, _) = fresh_company(h, "Shoal Creek unmapped");
+    let before = snapshot(h, &s);
+    let history = |f: &FileSpec| {
+        f.kind == ImportKind::GlTransactions
+            || (f.kind == ImportKind::TrialBalance && f.role == FileRole::Post)
+    };
+    let specs: Vec<FileSpec> = files(QBD, &[]).into_iter().filter(history).collect();
+    let mut unmatched = std::collections::BTreeSet::new();
+    let mut sessions = Vec::new();
+    for f in &specs {
+        let raw = std::fs::read(&f.path).expect("file");
+        let out = h
+            .run(s.imports().upload(&UploadRequest {
+                kind: f.kind,
+                source: SourceSystem::QuickBooksDesktop,
+                role: f.role,
+                bytes: raw,
+                file_name: "report.csv".into(),
+                contact_kind: None,
+                tb_column: None,
+                tb_report_date: None,
+            }))
+            .expect("upload");
+        for m in &out.preview.account_matches {
+            assert!(m.rows > 0, "{m:?}");
+            if m.status == cl_api::imports::MatchStatus::Unmatched {
+                unmatched.insert(m.source_key.clone());
+            }
+        }
+        sessions.push(out.session.id);
+    }
+    assert!(
+        !unmatched.is_empty(),
+        "no chart file: accounts are unmatched"
+    );
+    let first = h
+        .run(s.imports().create_batch(&NewBatch {
+            source: SourceSystem::QuickBooksDesktop,
+            kind: BatchKind::Conversion,
+            sessions: sessions.clone(),
+            options: BatchOptions::default(),
+        }))
+        .expect("batch");
+    let req = CommitRequest {
+        backup_ref: unique("contract-before-import"),
+        ..CommitRequest::default()
+    };
+    h.run(s.imports().commit(first.id, &req, IdempotencyKey::new()))
+        .expect("accepted");
+    let st = wait(h, &s, first.id);
+    assert_eq!(st.batch.status, BatchStatus::Failed);
+    let Some(ImportRefusal::UnmappedAccount { keys, count }) = st
+        .error
+        .as_ref()
+        .and_then(cl_api::imports::BatchFailure::refusal)
+    else {
+        panic!("unmapped: {:?}", st.error)
+    };
+    assert!(count > 0 && !keys.0.is_empty());
+    assert!(
+        keys.0.iter().all(|k| unmatched.contains(k)),
+        "the commit names only keys the uploads called unmatched"
+    );
+    assert_eq!(snapshot(h, &s), before, "nothing posted");
+    // Retry: options can't change, so the files go in a new batch.
+    for id in &sessions {
+        h.run(s.imports().discard(*id))
+            .expect("discard a failed batch's file");
+    }
+    // Two plain accounts of the company take every key, alternately.
+    let targets: Vec<cl_core::ids::AccountId> = [
+        (cl_api::AccountType::Expense, "Mapped costs"),
+        (cl_api::AccountType::Revenue, "Mapped sales"),
+    ]
+    .into_iter()
+    .map(|(t, n)| {
+        h.run(
+            s.accounts()
+                .create(&crate::common::account_fields(t, n), IdempotencyKey::new()),
+        )
+        .unwrap_or_else(|e| panic!("account: {e}"))
+        .record
+        .id
+    })
+    .collect();
+    let map = unmatched
+        .iter()
+        .enumerate()
+        .map(|(i, k)| {
+            (
+                k.clone(),
+                cl_api::imports::AccountTarget::Account(targets[i % 2]),
+            )
+        })
+        .collect();
+    let again = qbd_subset(
+        h,
+        &s,
+        history,
+        BatchOptions {
+            account_map: map,
+            ..BatchOptions::default()
+        },
+    )
+    .expect("new batch");
+    let st = commit(h, &s, again.id);
+    assert!(
+        st.batch
+            .files
+            .iter()
+            .filter_map(|f| f.result.as_ref())
+            .all(|r| r.created > 0),
+        "every file posted: {:?}",
+        st.batch.files
+    );
+}
+
+/// E2b: inventory parts while the company's inventory is off are refused
+/// before the job starts (the desktop turns inventory on first).
+pub fn inventory_off_is_refused(h: &Harness) {
+    if !caps(h, Flow::QbdConversion) {
+        return;
+    }
+    let (s, _) = fresh_company(h, "Shoal Creek inventory off");
+    let b = qbd_subset(
+        h,
+        &s,
+        |f| matches!(f.kind, ImportKind::Coa | ImportKind::Items),
+        BatchOptions::default(),
+    )
+    .expect("batch");
+    let req = CommitRequest {
+        backup_ref: unique("contract-before-import"),
+        ..CommitRequest::default()
+    };
+    let e = h
+        .run(s.imports().commit(b.id, &req, IdempotencyKey::new()))
+        .expect_err("inventory off");
+    assert_eq!(
+        import_refusal(&e),
+        Some(ImportRefusal::InventoryOff),
+        "{e:?}"
+    );
+}
+
 /// Acceptance 4: after an undo the same file imports again.
 pub fn reimport_after_undo_allowed(h: &Harness) {
     if !caps(h, Flow::OtherSystem) {

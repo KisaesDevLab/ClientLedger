@@ -66,7 +66,7 @@ fn source_text(m: &AccountMatch) -> String {
 
 /// Draws the step.
 pub fn mapping_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
-    let matches: Vec<AccountMatch> = s.matches().into_iter().cloned().collect();
+    let matches: Vec<AccountMatch> = s.matches();
     let c = counts(&matches, |k| s.account_map.contains_key(k));
     ui.add(
         egui::Label::new(RichText::new(t("imports.mapping.intro")).color(tokens.text_secondary))
@@ -85,6 +85,12 @@ pub fn mapping_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
             ("unmatched", &c.unmatched.to_string()),
         ],
     ));
+    if !s.unmapped_failed.is_empty() {
+        ui.add(
+            egui::Label::new(RichText::new(t("imports.mapping.failed")).color(tokens.warn_text))
+                .wrap(),
+        );
+    }
     if c.open > 0 {
         ui.add(
             egui::Label::new(
@@ -163,6 +169,9 @@ mod tests {
             name: key.into(),
             status,
             account: None,
+            matched_by: None,
+            rows: 1,
+            system_role: None,
         }
     }
 

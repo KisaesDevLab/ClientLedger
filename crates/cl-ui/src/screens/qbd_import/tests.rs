@@ -423,6 +423,7 @@ fn every_model_key_is_in_the_catalog() {
         Trouble::BackupFailed,
         Trouble::Failed,
         Trouble::Gone,
+        Trouble::AddAgain,
         Trouble::Other,
     ] {
         check(format!("imports.trouble.{}", tr.code()));
@@ -444,8 +445,7 @@ fn an_undo_blocked_after_it_started_offers_the_restore() {
     assert_eq!(st.batch.status, cl_api::imports::BatchStatus::Committed);
     st.error = Some(cl_api::imports::BatchFailure {
         code: "IMPORT_UNDO_BLOCKED".into(),
-        row_number: None,
-        session: None,
+        ..cl_api::imports::BatchFailure::default()
     });
     s.undo_pending = Some(id);
     s.held = Some(Held {
@@ -868,4 +868,296 @@ fn report_text(r: &cl_print::reports::Report) -> String {
         }
     }
     out
+}
+
+// ---- E1-E2c as built ------------------------------------------------------
+
+fn m(key: &str, status: MatchStatus, rows: u64) -> AccountMatch {
+    AccountMatch {
+        source_key: key.into(),
+        number: Some(key.into()),
+        name: String::new(),
+        status,
+        account: None,
+        matched_by: None,
+        rows,
+        system_role: None,
+    }
+}
+
+/// E2b: the engine matches each file against the chart as it is now, so a
+/// trial balance's account the account list creates reads `unmatched`
+/// there. Combined: existing beats create beats unmatched; rows add up; a
+/// key a failed commit named is unmatched whatever the files said.
+#[test]
+fn matches_combine_the_files_and_the_account_list() {
+    let list = [
+        m("1000", MatchStatus::Unmatched, 4),
+        m("1000", MatchStatus::Create, 1),
+        m("2000", MatchStatus::Unmatched, 2),
+        m("3000", MatchStatus::Existing, 1),
+        m("3000", MatchStatus::Unmatched, 5),
+    ];
+    let none = std::collections::BTreeSet::new();
+    let got = merge_matches(&list, &none);
+    let by: Vec<(&str, MatchStatus, u64)> = got
+        .iter()
+        .map(|x| (x.source_key.as_str(), x.status, x.rows))
+        .collect();
+    assert_eq!(
+        by,
+        vec![
+            ("1000", MatchStatus::Create, 5),
+            ("2000", MatchStatus::Unmatched, 2),
+            ("3000", MatchStatus::Existing, 6),
+        ]
+    );
+    let failed: std::collections::BTreeSet<String> =
+        ["1000".to_string(), "9999".to_string()].into();
+    let got = merge_matches(&list, &failed);
+    assert_eq!(got.len(), 4);
+    assert!(
+        got.iter()
+            .filter(|x| x.source_key == "1000" || x.source_key == "9999")
+            .all(|x| x.status == MatchStatus::Unmatched)
+    );
+}
+
+/// The demo's chart file makes the accounts the trial balance and journal
+/// name: the walk to Import needs no pick (as with the real engine).
+#[test]
+fn the_account_list_resolves_the_trial_balance_accounts() {
+    let f = fixture();
+    let mut s = screen(&f);
+    s.next();
+    cmd(&mut s, "dev.imports_demo_file_all");
+    for _ in 0..3 {
+        s.poll();
+    }
+    let raw: usize = s
+        .uploads
+        .values()
+        .flatten()
+        .filter_map(|x| x.outcome.as_ref())
+        .flat_map(|o| o.preview.account_matches.iter())
+        .filter(|x| x.status == MatchStatus::Unmatched)
+        .count();
+    assert!(raw > 0, "the files alone name unmatched accounts");
+    assert_eq!(s.unmapped(), 0, "{}", s.state());
+}
+
+/// E2c: the batch carries the conversion date and the history start; its
+/// date check comes back with it and is kept for the Import and Done steps.
+#[test]
+fn the_batch_is_made_with_the_conversion_date_and_keeps_its_date_check() {
+    let f = fixture();
+    let mut s = screen(&f);
+    to_import(&mut s);
+    s.next();
+    s.poll();
+    let dc = s.date_check.clone().expect("date check");
+    assert_eq!(
+        dc.conversion_date,
+        CalendarDate::parse_wire("2026-10-27").ok()
+    );
+    assert!(dc.history_from.is_some(), "two years (Q-142)");
+    assert!(dc.opening_balance_date.is_some());
+    finish(&mut s);
+    assert!(s.wizard.imported);
+    let st = s.state.clone().expect("state");
+    assert!(
+        st.batch.files.iter().any(|f| f.result.is_some()),
+        "committed files carry their results"
+    );
+    for l in draw::result_lines(&st.batch) {
+        assert!(!l.contains('{'), "{l}");
+    }
+}
+
+/// E2b retry: an account the commit found with no match fails the batch;
+/// its options are fixed, so "Fix it and import again" deletes its files,
+/// uploads the kept bytes as new ones, returns to Review matches with the
+/// key unmatched, and the next Import makes a new batch (new backup, new
+/// key).
+#[test]
+fn an_unmapped_account_failure_rebuilds_a_new_batch() {
+    let f = fixture();
+    let mut s = screen(&f);
+    to_import(&mut s);
+    f.link.demo_state().expect("demo").imports.fail_next_commit = Some("IMPORT_UNMAPPED_ACCOUNT");
+    s.next();
+    finish(&mut s);
+    assert_eq!(s.trouble, Some(Trouble::Failed), "{}", s.state());
+    assert!(matches!(
+        s.failure,
+        Some(ImportRefusal::UnmappedAccount { count: 1, .. })
+    ));
+    let first = s.batch.expect("first batch");
+    let old: Vec<ImportSessionId> = s
+        .uploads
+        .values()
+        .flatten()
+        .filter_map(SlotFile::session)
+        .collect();
+    s.rebuild_after_failure();
+    for _ in 0..3 {
+        s.poll();
+    }
+    assert_eq!(s.wizard.step, Step::Mapping, "{}", s.state());
+    assert!(s.batch.is_none());
+    let new: Vec<ImportSessionId> = s
+        .uploads
+        .values()
+        .flatten()
+        .filter_map(SlotFile::session)
+        .collect();
+    assert_eq!(new.len(), old.len(), "every file went up again");
+    assert!(new.iter().all(|n| !old.contains(n)), "as new files");
+    assert_eq!(s.unmapped(), 1, "the key the commit named");
+    assert!(!s.can_next());
+    let acct = s.chart.first().expect("chart").id;
+    s.account_map.insert("6999".into(), acct);
+    s.sync_mapping();
+    assert!(s.can_next(), "{}", s.state());
+    s.next();
+    assert_eq!(s.wizard.step, Step::Dates);
+    s.next();
+    assert_eq!(s.wizard.step, Step::Import);
+    let jobs_before = jobs(&f);
+    s.next();
+    finish(&mut s);
+    assert!(s.wizard.imported, "{}", s.state());
+    assert_ne!(s.batch, Some(first), "a new batch");
+    assert_eq!(jobs(&f), jobs_before + 1);
+}
+
+/// A failed batch in History whose options can't succeed is not committed
+/// again: the window asks for the files.
+#[test]
+fn history_retry_of_an_unmapped_failure_asks_for_the_files() {
+    let f = fixture();
+    let mut s = screen(&f);
+    to_import(&mut s);
+    f.link.demo_state().expect("demo").imports.fail_next_commit = Some("IMPORT_UNMAPPED_ACCOUNT");
+    s.next();
+    finish(&mut s);
+    let b = s.state.clone().expect("state").batch;
+    assert!(b.error.is_some());
+    let jobs_before = jobs(&f);
+    s.retry_batch(&b);
+    s.poll();
+    assert_eq!(jobs(&f), jobs_before, "nothing sent");
+    assert_eq!(s.trouble, Some(Trouble::AddAgain));
+    assert_eq!(s.wizard.step, Step::Files);
+    assert!(s.unmapped_failed.contains("6999"));
+}
+
+/// E2c: the demo refuses reference files not dated the conversion date the
+/// owner gave, naming each report by its card.
+#[test]
+fn a_date_mismatch_names_each_report() {
+    let f = fixture();
+    let mut s = screen(&f);
+    to_import(&mut s);
+    s.wizard.step = Step::Dates;
+    s.date_text = "10/26/2026".into();
+    s.sync_dates();
+    s.wizard.step = Step::Import;
+    s.next();
+    s.poll();
+    let Some(Trouble::Refused(ImportRefusal::DateMismatch { files, .. })) = s.trouble.clone()
+    else {
+        panic!("{}", s.state())
+    };
+    assert_ne!(files.len(), 0);
+    for x in &files {
+        let text = s.mismatch_text(x);
+        assert!(!text.starts_with(&t("imports.slot.unknown")), "{text}");
+    }
+    assert!(s.batch.is_none(), "no batch: the files are free");
+}
+
+#[test]
+fn every_e2_message_resolves_with_a_fix() {
+    use cl_api::imports::{DateCheck, DateWarning, DateWarningCode, SourceKeys};
+    for r in [
+        ImportRefusal::DateMismatch {
+            conversion_date: None,
+            files: Vec::new(),
+        },
+        ImportRefusal::JournalAfterConversion {
+            conversion_date: None,
+            row_count: 0,
+            rows: Vec::new(),
+        },
+        ImportRefusal::BadDate,
+        ImportRefusal::UnmappedAccount {
+            keys: SourceKeys::default(),
+            count: 0,
+        },
+        ImportRefusal::AccountMapInvalid {
+            keys: SourceKeys::default(),
+        },
+        ImportRefusal::InventoryOff,
+        ImportRefusal::InventoryPeriodClosed { closing_date: None },
+        ImportRefusal::ValuationRequired {
+            keys: SourceKeys::default(),
+        },
+    ] {
+        let key = format!("imports.refusal.{}", refusal_code(&r));
+        assert!(crate::i18n::has(&key), "{key}");
+        let text = draw::refusal_text(&r);
+        assert!(text.matches(". ").count() >= 1, "{key}: {text}");
+        assert!(!text.contains('{'), "{key}: {text}");
+    }
+    let d = CalendarDate::parse_wire("2026-10-27").ok();
+    for r in [
+        ImportRefusal::DateMismatch {
+            conversion_date: d,
+            files: Vec::new(),
+        },
+        ImportRefusal::JournalAfterConversion {
+            conversion_date: d,
+            row_count: 3,
+            rows: Vec::new(),
+        },
+        ImportRefusal::UnmappedAccount {
+            keys: SourceKeys::default(),
+            count: 2,
+        },
+        ImportRefusal::InventoryPeriodClosed { closing_date: d },
+    ] {
+        let text = draw::refusal_text(&r);
+        assert!(!text.contains('{'), "{text}");
+    }
+    let dc = DateCheck {
+        history_from: d,
+        history_skipped: 12,
+        warnings: vec![
+            DateWarning {
+                code: DateWarningCode::HistoryGap,
+                opening_balance_date: d,
+                first_journal_date: d,
+                days: Some(2),
+            },
+            DateWarning {
+                code: DateWarningCode::HistoryGap,
+                opening_balance_date: d,
+                first_journal_date: d,
+                days: Some(1),
+            },
+            DateWarning {
+                code: DateWarningCode::JournalBeforeOpening,
+                opening_balance_date: d,
+                first_journal_date: d,
+                days: None,
+            },
+        ],
+        ..DateCheck::default()
+    };
+    let lines = draw::date_check_lines(&dc);
+    assert_eq!(lines.len(), 4);
+    assert!(lines.iter().all(|l| !l.contains('{')), "{lines:?}");
+    assert!(lines[1].contains("one day"), "{}", lines[1]);
+    assert!(crate::i18n::has("imports.trouble.add_again"));
 }

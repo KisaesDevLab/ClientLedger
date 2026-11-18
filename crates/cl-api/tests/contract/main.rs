@@ -1129,6 +1129,18 @@ fn main() -> std::process::ExitCode {
             "imports::reimport_after_undo_allowed",
             contract_imports::reimport_after_undo_allowed,
         ),
+        (
+            "imports::dates_are_checked_before_any_commit",
+            contract_imports::dates_are_checked_before_any_commit,
+        ),
+        (
+            "imports::unmapped_accounts_fail_then_a_mapped_retry_posts",
+            contract_imports::unmapped_accounts_fail_then_a_mapped_retry_posts,
+        ),
+        (
+            "imports::inventory_off_is_refused",
+            contract_imports::inventory_off_is_refused,
+        ),
         // P30 payroll import (U-242 to U-251): PENDING until the pin has
         // the three payroll capabilities.
         (

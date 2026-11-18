@@ -4,9 +4,9 @@
 //! runs, Check status, the closing-date password, the tie-out and verify.
 
 use cl_api::imports::{
-    BatchKind, BatchOptions, BatchState, BatchStatus, CommitRequest, ContactKind, FileRole,
-    ImportBatch, ImportBatchId, ImportKind, ImportRefusal, JobAccepted, NewBatch, SourceSystem,
-    UploadOutcome, UploadRequest,
+    AccountTarget, BatchKind, BatchOptions, BatchState, BatchStatus, CommitRequest, ContactKind,
+    FileRole, ImportBatch, ImportBatchId, ImportKind, ImportRefusal, JobAccepted, NewBatch,
+    SourceSystem, UploadOutcome, UploadRequest,
 };
 use cl_api::{ApiError, ClosedPeriodAuthorization, IdempotencyKey};
 use cl_model::imports::wizard::{FileSlot, Step};
@@ -125,6 +125,7 @@ impl ImportScreen {
             });
             return;
         }
+        f.bytes = Some(std::sync::Arc::new(req.bytes.clone()));
         f.job = Some(self.write(
             "orphan.import_upload",
             None,
@@ -241,8 +242,20 @@ impl ImportScreen {
         let dates = self.wizard.dates().ok();
         let options = BatchOptions {
             history_from: dates.and_then(|d| d.history_from),
+            // E2c: the switch date the reference reports must carry (a QBD
+            // conversion; other programs' files carry the owner's dates).
+            conversion_date: self
+                .wizard
+                .source
+                .is_conversion()
+                .then_some(self.wizard.conversion_date)
+                .flatten(),
             require_empty_company: self.wizard.source.requires_empty_company(),
-            account_map: self.account_map.clone(),
+            account_map: self
+                .account_map
+                .iter()
+                .map(|(k, a)| (k.clone(), AccountTarget::Account(*a)))
+                .collect(),
             ..BatchOptions::default()
         };
         let new = NewBatch {
@@ -265,11 +278,88 @@ impl ImportScreen {
     pub(crate) fn after_batch_created(&mut self, r: Result<ImportBatch, ApiError>) {
         match r {
             Ok(b) => {
+                tracing::info!(target: "imports", warnings = b.date_check.as_ref().map_or(0, |d| d.warnings.len()), "import batch made");
                 self.batch = Some(b.id);
+                self.date_check = b.date_check;
                 self.start_backup(Running::Commit, b.id);
             }
+            // Refused at create (dates, a picked account gone): no batch
+            // exists and the files are free; Back fixes it.
             Err(e) => self.refused(&e),
         }
+    }
+
+    /// "Import again" after a failure the batch can't recover from (an
+    /// account with no match, a missing valuation): its files are deleted
+    /// and go up again, then the wizard returns to the step that fixes it.
+    /// The next Import makes a new batch, a new backup and a new key.
+    pub(crate) fn rebuild_after_failure(&mut self) {
+        let Some(step) = self.failure.as_ref().and_then(super::rebuild_step) else {
+            return;
+        };
+        if self.locked() || self.rebuild.is_some() {
+            return;
+        }
+        if let Some(ImportRefusal::UnmappedAccount { keys, .. }) = &self.failure {
+            self.unmapped_failed.extend(keys.0.iter().cloned());
+        }
+        tracing::info!(target: "imports", step = ?step, "import rebuilt after a failure");
+        let ids: Vec<_> = self
+            .uploads
+            .values()
+            .flatten()
+            .filter_map(SlotFile::session)
+            .collect();
+        let jobs = ids
+            .into_iter()
+            .map(|id| {
+                self.write(
+                    "orphan.import_discard",
+                    None,
+                    move |d| d.imports.discard(id),
+                    move |s| async move { s.imports().discard(id).await },
+                )
+            })
+            .collect();
+        self.rebuild = Some((jobs, step));
+        self.batch = None;
+        self.state = None;
+        self.held = None;
+        self.trouble = None;
+        self.status_answer = None;
+        self.date_check = None;
+    }
+
+    /// The deletes of a rebuild: once every one answered (a file already
+    /// gone counts), the kept bytes go up again as new files.
+    pub(crate) fn poll_rebuild(&mut self) {
+        let Some((jobs, _)) = &mut self.rebuild else {
+            return;
+        };
+        jobs.retain_mut(|j| j.take().is_none());
+        if !jobs.is_empty() {
+            return;
+        }
+        let Some((_, step)) = self.rebuild.take() else {
+            return;
+        };
+        let slots: Vec<&'static str> = self.uploads.keys().copied().collect();
+        for slot in slots {
+            let old = self.uploads.remove(slot).unwrap_or_default();
+            let mut again = Vec::new();
+            for o in old {
+                let mut f = SlotFile::new(o.name);
+                match o.bytes {
+                    Some(b) => self.upload(slot, &mut f, b.as_ref().clone()),
+                    None => f.problem = Some("imports.file.add_again"),
+                }
+                again.push(f);
+            }
+            self.uploads.insert(slot, again);
+        }
+        self.failure = None;
+        self.wizard.step = step;
+        self.sync_files();
     }
 
     /// The verified backup before a commit or undo, off the egui thread.
@@ -604,6 +694,9 @@ impl ImportScreen {
         let what = self.held_what();
         let status = st.batch.status;
         let failed = st.error.is_some() || status == BatchStatus::Failed;
+        if st.batch.date_check.is_some() {
+            self.date_check.clone_from(&st.batch.date_check);
+        }
         self.state = Some(st);
         match (what, status) {
             (_, BatchStatus::Committing | BatchStatus::Undoing) => {
@@ -782,6 +875,23 @@ impl ImportScreen {
     /// first and a new key (a new attempt, never the failed one's key).
     pub(crate) fn retry_batch(&mut self, b: &ImportBatch) {
         if !self.allowed() || b.status != BatchStatus::Failed || self.locked() {
+            return;
+        }
+        // A batch whose options can't succeed (an account with no match, a
+        // missing valuation) is not committed again: its files go in a new
+        // import (the window has no bytes for them here).
+        let failure = b
+            .error
+            .as_ref()
+            .and_then(cl_api::imports::BatchFailure::refusal);
+        if failure.as_ref().and_then(super::rebuild_step).is_some() {
+            self.take_batch(b);
+            self.batch = None;
+            if let Some(ImportRefusal::UnmappedAccount { keys, .. }) = &failure {
+                self.unmapped_failed.extend(keys.0.iter().cloned());
+            }
+            self.wizard.step = Step::Files;
+            self.trouble = Some(Trouble::AddAgain);
             return;
         }
         self.take_batch(b);

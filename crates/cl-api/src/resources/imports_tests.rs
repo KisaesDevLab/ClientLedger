@@ -185,19 +185,25 @@ fn account_matches_are_read_with_their_keys() {
     let body = UPLOADED.replace(
         r#""preview":{"#,
         r#""preview":{"accountMatches":[
-            {"sourceKey":"1000","number":"1000","name":"Checking","match":"existing","accountId":"7b3f6f0e-1c2d-4e5f-8a9b-0c1d2e3f4a5b"},
+            {"sourceKey":"1000","number":"1000","name":"Checking","match":"existing","accountId":"7b3f6f0e-1c2d-4e5f-8a9b-0c1d2e3f4a5b","matchedBy":"number","rows":14},
+            {"sourceKey":"1200","number":"1200","name":"Accounts Receivable","match":"create","rows":1,"systemRole":"accounts_receivable"},
             {"number":"6100","name":"Feed","match":"create"},
             {"name":"Mystery","match":"unmatched"},
             {"name":"Odd","match":"later"}],"#,
     );
     let u = upload_from(body.as_bytes()).expect("read");
     let m = &u.preview.account_matches;
-    assert_eq!(m.len(), 3, "{m:?}");
+    assert_eq!(m.len(), 4, "{m:?}");
     assert_eq!(m[0].status, MatchStatus::Existing);
     assert!(m[0].account.is_some());
-    assert_eq!(m[1].source_key, "6100", "the number when no key");
-    assert_eq!(m[2].source_key, "Mystery", "else the name");
-    assert_eq!(m[2].status, MatchStatus::Unmatched);
+    assert_eq!(m[0].matched_by, Some(MatchedBy::Number));
+    assert_eq!(m[0].rows, 14);
+    assert_eq!(m[1].system_role, Some(SystemRole::AccountsReceivable));
+    assert_eq!(m[1].matched_by, None);
+    assert_eq!(m[2].source_key, "6100", "the number when no key");
+    assert_eq!(m[2].rows, 0);
+    assert_eq!(m[3].source_key, "Mystery", "else the name");
+    assert_eq!(m[3].status, MatchStatus::Unmatched);
     let dbg = format!("{m:?}");
     assert!(!dbg.contains("Mystery") && !dbg.contains("Feed"), "{dbg}");
     let none = upload_from(UPLOADED.as_bytes()).expect("read");
@@ -225,7 +231,11 @@ fn wire_names_round_trip() {
 }
 
 const BATCH_JSON: &str = r#"{"id":"4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b03","sourceSystem":"quickbooks_desktop",
- "kind":"conversion","status":"draft","sessionIds":["3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b01","3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b02"],
+ "kind":"conversion","status":"draft",
+ "sessions":[{"id":"3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b01","kind":"contacts","sourceSystem":"quickbooks_desktop","role":"post","status":"uploaded","originalFilename":"Riverside Cafe.csv","rowCount":4,"errorCount":0,"reportDate":null,"commitResult":null},
+  {"id":"3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9b02","kind":"trial_balance","sourceSystem":"quickbooks_desktop","role":"reference","status":"uploaded","originalFilename":"tb.csv","rowCount":30,"errorCount":0,"reportDate":"2026-10-27","commitResult":null}],
+ "dateCheck":{"conversionDate":"2026-10-27","historyFrom":"2024-01-01","historySkipped":12,"openingBalanceDate":"2023-12-31","firstJournalDate":"2024-01-03",
+  "warnings":[{"code":"IMPORT_HISTORY_GAP","message":"Riverside Cafe","openingBalanceDate":"2023-12-31","firstJournalDate":"2024-01-03","days":2},{"code":"IMPORT_LATER","message":"x"}]},
  "backupRef":null,"companyWasEmpty":true,"conversionDate":"2026-10-27","historyFrom":"2024-01-01",
  "verifiedAt":null,"verifiedBy":null,"spotCheck":[{"key":"bank:1000","label":"Checking balance","done":true,"note":""}],
  "createdAt":"2026-11-18T10:00:00.000Z"}"#;
@@ -245,9 +255,14 @@ async fn create_batch_sends_sessions_and_options() {
         require_empty_company: true,
         ..BatchOptions::default()
     };
+    options.conversion_date = Some(day("2026-10-27"));
+    options.account_map.insert(
+        "1200".into(),
+        AccountTarget::Account(ACCOUNT.parse().expect("account")),
+    );
     options
         .account_map
-        .insert("1200".into(), ACCOUNT.parse().expect("account"));
+        .insert("Repairs".into(), AccountTarget::Create);
     options.class_map.insert(
         "Enterprise:Commercial".into(),
         ClassTarget {
@@ -265,7 +280,20 @@ async fn create_batch_sends_sessions_and_options() {
     assert_eq!(b.id, bid());
     assert_eq!(b.status, BatchStatus::Draft);
     assert_eq!(b.sessions.len(), 2);
+    assert_eq!(b.files[1].role, Some(FileRole::Reference));
+    assert_eq!(b.files[1].report_date, Some(day("2026-10-27")));
+    assert_eq!(b.files[0].result, None);
     assert_eq!(b.history_from, Some(day("2024-01-01")));
+    let dc = b.date_check.clone().expect("date check");
+    assert_eq!(dc.history_skipped, 12);
+    assert_eq!(dc.opening_balance_date, Some(day("2023-12-31")));
+    assert_eq!(dc.warnings.len(), 1, "an unknown warning is left out");
+    assert_eq!(dc.warnings[0].code, DateWarningCode::HistoryGap);
+    assert_eq!(dc.warnings[0].days, Some(2));
+    assert!(
+        !format!("{b:?}").contains("Riverside"),
+        "no file names or messages"
+    );
     assert_eq!(b.spot_check[0].key, "bank:1000");
     assert!(b.spot_check[0].done);
     assert!(!b.is_verified());
@@ -277,6 +305,8 @@ async fn create_batch_sends_sessions_and_options() {
     assert_eq!(sent["options"]["historyFrom"], "2024-01-01");
     assert_eq!(sent["options"]["requireEmptyCompany"], true);
     assert_eq!(sent["options"]["accountMap"]["1200"], ACCOUNT);
+    assert_eq!(sent["options"]["accountMap"]["Repairs"], "create");
+    assert_eq!(sent["options"]["conversionDate"], "2026-10-27");
     assert_eq!(
         sent["options"]["classMap"]["Enterprise:Commercial"]["group"],
         "Enterprise"
@@ -514,18 +544,6 @@ async fn refusals_keep_codes_and_ids_never_messages() {
     assert_eq!(import_refusal(&e), Some(ImportRefusal::AdminRequired));
     let e = refusal(
         422,
-        "IMPORT_DATE_MISMATCH",
-        &format!(r#"{{"sessionId":"{SESSION}"}}"#),
-    )
-    .await;
-    assert_eq!(
-        import_refusal(&e),
-        Some(ImportRefusal::DateMismatch {
-            session: Some(SESSION.parse().expect("id"))
-        })
-    );
-    let e = refusal(
-        422,
         "IMPORT_AMOUNT_INVALID",
         r#"{"rows":[{"rowNumber":9},{"rowNumber":3},9]}"#,
     )
@@ -558,12 +576,183 @@ async fn the_batch_codes_of_e1_are_refusals() {
     // A batch's failure code reads the same way (Check status).
     let f = BatchFailure {
         code: "IMPORT_INTERRUPTED".into(),
-        row_number: None,
-        session: None,
+        ..BatchFailure::default()
     };
     assert_eq!(f.refusal(), Some(ImportRefusal::Interrupted));
 }
 
+/// E2b and E2c as built: the mapping, inventory and date codes, with their
+/// details read as keys, ids, dates and counts (never messages or names
+/// in `Debug`).
+#[tokio::test]
+async fn the_mapping_inventory_and_date_codes_are_refusals() {
+    let e = refusal(
+        400,
+        "IMPORT_ACCOUNT_MAP_INVALID",
+        r#"{"keys":["Riverside Repairs","1200"]}"#,
+    )
+    .await;
+    let Some(ImportRefusal::AccountMapInvalid { keys }) = import_refusal(&e) else {
+        panic!("map invalid: {e:?}")
+    };
+    assert_eq!(keys.0, vec!["Riverside Repairs".to_string(), "1200".into()]);
+    assert_eq!(format!("{keys:?}"), "SourceKeys(2)");
+    let e = refusal(
+        422,
+        "IMPORT_DATE_MISMATCH",
+        &format!(
+            r#"{{"conversionDate":"2026-10-27","files":[{{"sessionId":"{SESSION}","kind":"open_invoices","role":"post","originalFilename":"Riverside.csv","reportDate":"2026-10-26","reason":"not_conversion_date"}},{{"sessionId":"{SESSION2}","kind":"unpaid_bills","role":"post","reportDate":null,"reason":"no_date"}}]}}"#
+        ),
+    )
+    .await;
+    assert_eq!(
+        import_refusal(&e),
+        Some(ImportRefusal::DateMismatch {
+            conversion_date: Some(day("2026-10-27")),
+            files: vec![
+                DateMismatchFile {
+                    session: Some(SESSION.parse().expect("id")),
+                    kind: Some(ImportKind::OpenInvoices),
+                    report_date: Some(day("2026-10-26")),
+                    reason: Some(DateMismatchReason::NotConversionDate),
+                },
+                DateMismatchFile {
+                    session: Some(SESSION2.parse().expect("id")),
+                    kind: Some(ImportKind::UnpaidBills),
+                    report_date: None,
+                    reason: Some(DateMismatchReason::NoDate),
+                },
+            ],
+        })
+    );
+    assert!(!format!("{:?}", import_refusal(&e)).contains("Riverside"));
+    let e = refusal(409, "IMPORT_INVENTORY_OFF", "{}").await;
+    assert_eq!(import_refusal(&e), Some(ImportRefusal::InventoryOff));
+    let e = refusal(
+        409,
+        "INVENTORY_PERIOD_CLOSED",
+        &format!(r#"{{"closingDate":"2026-09-30","sessionId":"{SESSION}"}}"#),
+    )
+    .await;
+    assert!(
+        !matches!(e, ApiError::ClosedPeriod(_)),
+        "no password lifts it"
+    );
+    assert_eq!(
+        import_refusal(&e),
+        Some(ImportRefusal::InventoryPeriodClosed {
+            closing_date: Some(day("2026-09-30"))
+        })
+    );
+    let e = refusal(
+        422,
+        "IMPORT_JOURNAL_AFTER_CONVERSION",
+        &format!(
+            r#"{{"conversionDate":"2026-10-27","rowCount":3,"rows":[{{"sessionId":"{SESSION}","rowNumber":41,"date":"2026-10-28","code":"IMPORT_JOURNAL_AFTER_CONVERSION","message":"Riverside"}}]}}"#
+        ),
+    )
+    .await;
+    assert_eq!(
+        import_refusal(&e),
+        Some(ImportRefusal::JournalAfterConversion {
+            conversion_date: Some(day("2026-10-27")),
+            row_count: 3,
+            rows: vec![(Some(SESSION.parse().expect("id")), 41)],
+        })
+    );
+    let e = refusal(
+        400,
+        "IMPORT_BAD_DATE",
+        r#"{"historyFrom":"2026-11-01","conversionDate":"2026-10-27"}"#,
+    )
+    .await;
+    assert_eq!(import_refusal(&e), Some(ImportRefusal::BadDate));
+}
+
+/// A commit that failed after the 202 keeps the engine's details: the
+/// unmapped keys, the accounts a valuation is needed for. A committed
+/// batch's files carry their results; the valuation total stays exact.
+#[tokio::test]
+async fn a_failed_batch_keeps_its_details_and_a_committed_one_its_results() {
+    let failure = |details: &str| BatchFailure {
+        code: String::new(),
+        details: crate::ConflictDetails::new(serde_json::from_str(details).expect("json")),
+        ..BatchFailure::default()
+    };
+    let f = BatchFailure {
+        code: "IMPORT_UNMAPPED_ACCOUNT".into(),
+        ..failure(r#"{"unmappedAccountKeys":["6999","Riverside Supplies"],"unmappedCount":7}"#)
+    };
+    let Some(ImportRefusal::UnmappedAccount { keys, count }) = f.refusal() else {
+        panic!("unmapped")
+    };
+    assert_eq!(keys.0.len(), 2);
+    assert_eq!(count, 7);
+    assert!(!format!("{f:?}").contains("Riverside"), "{f:?}");
+    let f = BatchFailure {
+        code: "IMPORT_VALUATION_REQUIRED".into(),
+        ..failure(&format!(
+            r#"{{"sessionId":"{SESSION}","accounts":[{{"sourceKey":"1300","balance":"18250.00"}}]}}"#
+        ))
+    };
+    assert_eq!(
+        f.refusal(),
+        Some(ImportRefusal::ValuationRequired {
+            keys: SourceKeys(vec!["1300".into()])
+        })
+    );
+
+    let server = MockServer::start().await;
+    let committed = BATCH_JSON
+        .replace(r#""status":"draft""#, r#""status":"committed""#)
+        .replace(
+            r#""commitResult":null},
+  {"#,
+            r#""commitResult":{"created":11,"skipped":1,"mergedToBoth":2,"jobsFolded":3,"inactive":1}},
+  {"#,
+        )
+        .replace(
+            r#""reportDate":"2026-10-27","commitResult":null"#,
+            r#""reportDate":"2026-10-27","commitResult":{"created":4,"itemsValued":4,"valuationTotal":"18250.0050","itemsSkipped":{"sales_tax":2,"group":1},"skippedBeforeHistory":0}"#,
+        );
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/imports/batches/{BATCH}")))
+        .respond_with(json(
+            200,
+            &format!(
+                r#"{{"batch":{committed},"progress":null,
+                "error":{{"code":"IMPORT_UNMAPPED_ACCOUNT","message":"Riverside","status":422,"sessionId":"{SESSION2}","details":{{"unmappedAccountKeys":["Riverside"],"unmappedCount":1}}}}}}"#
+            ),
+        ))
+        .mount(&server)
+        .await;
+    let s = session_with_caps(&server, &ALL).await;
+    let st = s.imports().batch(bid()).await.expect("state");
+    let names = st.batch.files[0].result.clone().expect("result");
+    assert_eq!(
+        (
+            names.created,
+            names.merged_to_both,
+            names.jobs_folded,
+            names.inactive
+        ),
+        (11, 2, 3, 1)
+    );
+    let stock = st.batch.files[1].result.clone().expect("result");
+    assert_eq!(stock.items_valued, 4);
+    assert_eq!(
+        stock.valuation_total,
+        Some(m("18250.0050")),
+        "exact, never rounded"
+    );
+    assert_eq!(stock.items_skipped.map(|i| i.total()), Some(3));
+    assert_eq!(stock.skipped_before_history, Some(0));
+    assert!(!format!("{stock:?}").contains("18250"));
+    assert!(matches!(
+        st.error.expect("failure").refusal(),
+        Some(ImportRefusal::UnmappedAccount { count: 1, .. })
+    ));
+}
 #[tokio::test]
 async fn closed_period_password_and_rate_limit_are_the_shared_errors() {
     let e = refusal(
