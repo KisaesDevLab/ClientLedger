@@ -1075,6 +1075,9 @@ pub(crate) const IMPORT_BATCH_VERIFY: Operation = op(
 /// Saves the batch's spot-check list (Q-144).
 pub(crate) const IMPORT_BATCH_SPOT_CHECK: Operation =
     write(Method::Put, "/api/v1/imports/batches/{id}/spot-check");
+/// The transactions a batch created, paged (U-271; the spot-check sample).
+pub(crate) const IMPORT_BATCH_TRANSACTIONS: Operation =
+    read("/api/v1/imports/batches/{id}/transactions");
 /// One account's reconciliations, newest statement first.
 pub(crate) const RECONCILIATIONS: Operation = read("/api/v1/banking/reconciliations");
 /// Imported bank statements.
@@ -2119,7 +2122,7 @@ const NEVER_RETRIED: [(&str, &str); 7] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 468] = [
+pub const OPERATIONS: [Operation; 469] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2612,6 +2615,7 @@ pub const OPERATIONS: [Operation; 468] = [
     IMPORT_BATCH_TIEOUT,
     IMPORT_BATCH_VERIFY,
     IMPORT_BATCH_SPOT_CHECK,
+    IMPORT_BATCH_TRANSACTIONS,
 ];
 
 /// Looks up a covered operation.
