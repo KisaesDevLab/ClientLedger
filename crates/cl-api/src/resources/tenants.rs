@@ -137,7 +137,7 @@ pub struct ArchiveRequest {
     /// [`DOCUMENT_DRAFTS_OMITTED`] in `omitted`. Needs `document-drafts-v1`;
     /// only written when `true`.
     pub omit_document_drafts: bool,
-    /// A transfer file for the accountant's MyBooks (U-284, P32): users as
+    /// A transfer file for the accountant's `MyBooks` (U-284, P32): users as
     /// names only, secrets left out. Needs `tenant-archive-transfer-v1`
     /// ([`Tenants::export_archive`] refuses it otherwise, because an older
     /// engine would drop the flag and write a full backup); only written

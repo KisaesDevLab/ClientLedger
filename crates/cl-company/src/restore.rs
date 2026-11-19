@@ -25,7 +25,7 @@ pub const ARCHIVE_FORMAT: &str = "mybooks-tenant-archive";
 /// same commit as the engine pin bump past U-282 (P32 R7), never before.
 pub const MAX_FORMAT_VERSION: u64 = 1;
 
-/// The extension of a transfer file for the accountant's MyBooks (P32).
+/// The extension of a transfer file for the accountant's `MyBooks` (P32).
 pub const TRANSFER_EXTENSION: &str = "clxfer";
 
 /// True for a `.clxfer` path (any case): a transfer file, never a backup
@@ -477,6 +477,7 @@ async fn swap_names(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use cl_core::OwnerFacing as _;
     use cl_settings::BackupKind;
 
     fn id(n: u8) -> TenantId {
@@ -685,7 +686,6 @@ mod tests {
         let newer = envelope_with(dir.path(), "n.clbackup", MAX_FORMAT_VERSION + 1);
         let e = inspect_archive(&newer, &list).expect_err("version");
         assert!(matches!(e, CompanyError::ArchiveTooNew), "{e:?}");
-        use cl_core::OwnerFacing as _;
         assert_eq!(e.owner_message().key, "error.company.too_new");
         let zero = envelope_with(dir.path(), "z.clbackup", 0);
         assert!(matches!(
@@ -707,7 +707,6 @@ mod tests {
         }
         assert!(!is_transfer_file(Path::new("a.clbackup")));
         assert!(!is_transfer_file(Path::new("clxfer")));
-        use cl_core::OwnerFacing as _;
         assert_eq!(
             CompanyError::JobFailed {
                 code: "TRANSFER_NOT_A_BACKUP".into()

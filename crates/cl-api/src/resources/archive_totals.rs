@@ -152,6 +152,11 @@ impl Tenants<'_> {
         id: TenantId,
         as_of: CalendarDate,
     ) -> Result<VerificationTotals, ApiError> {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Wrapped {
+            verification_totals: VerificationTotals,
+        }
         if !self
             .0
             .client()
@@ -169,11 +174,6 @@ impl Tenants<'_> {
         );
         call.query = vec![("asOf".into(), as_of.to_wire())];
         let reply = self.0.send(&TENANT_VERIFICATION_TOTALS, call, None).await?;
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Wrapped {
-            verification_totals: VerificationTotals,
-        }
         if let Ok(w) = serde_json::from_slice::<Wrapped>(&reply.body) {
             return Ok(w.verification_totals);
         }

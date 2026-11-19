@@ -55,7 +55,7 @@ pub enum CompanyError {
     /// than [`crate::restore::MAX_FORMAT_VERSION`]): update first.
     #[error("archive made by a newer version")]
     ArchiveTooNew,
-    /// A transfer file for the accountant's MyBooks was chosen for Restore
+    /// A transfer file for the accountant's `MyBooks` was chosen for Restore
     /// (Q-P32n): `.clxfer` by extension, or the engine's
     /// `TRANSFER_NOT_A_BACKUP`.
     #[error("a transfer file is not a backup")]

@@ -118,7 +118,6 @@ GET     /api/v1/tenants                         idempotent
 POST    /api/v1/tenants                         never
 PATCH   /api/v1/tenants/{id}                    pre-handler-only
 POST    /api/v1/tenants/{id}/archives           pre-handler-only
-GET     /api/v1/tenants/{id}/verification-totals idempotent
 GET     /api/v1/tenant-archives/jobs/{jobId}    idempotent
 GET     /api/v1/tenant-archives/{fileName}/download idempotent
 POST    /api/v1/tenant-archives/import          pre-handler-only
