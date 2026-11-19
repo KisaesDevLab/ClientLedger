@@ -65,7 +65,7 @@ Cutoff mode (Q-360). One opening journal entry dated the day before the cutoff c
 
 ## Architecture
 
-The import is two programs joined by one file: a Windows-only extractor that asks QuickBooks for the data, and a cross-platform importer that posts it through the engine. The package is the only thing that crosses between the two sides, so both can sit on one Windows PC or on two different machines. The tie-out compares the new company to QuickBooks' own totals, which travel inside the package.
+The import is two programs joined by one file: a Windows-only extractor that asks QuickBooks for the data, and a cross-platform importer that posts it through the engine. The package is the only thing that crosses between the two sides, so both can sit on one Windows PC or on two different machines. The tie-out compares the company's imported batch to QuickBooks' own totals, which travel inside the package.
 
 | Part | Where it lives | Language |
 | --- | --- | --- |
