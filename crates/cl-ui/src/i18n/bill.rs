@@ -31,6 +31,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("bill.problem.item_qty_not_positive", "The quantity must be more than zero."),
     ("bill.problem.item_rate_negative", "The cost can't be below zero."),
     ("bill.problem.item_amount_too_large", "Quantity times cost is too large. Check both."),
+    ("bill.problem.item_negative_with_qty", "A discount or credit on the Items tab can't have a quantity. Clear the quantity, or enter the discount on the Expenses tab."),
     ("bill.problem.read_not_accepted", "Some values were read from the document. Check them, then choose Accept these values."),
 
     // WP4: the Enter Bill form.

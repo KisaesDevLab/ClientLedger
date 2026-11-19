@@ -1413,6 +1413,50 @@ pub fn negative_bill_line_posts_the_net_live(h: &Harness) {
     assert_eq!(after.balance_due, Some(m("0.0000")));
     assert!(after.has_payments());
     moved("0.00");
+
+    // An item line can be the discount too: a service item with a typed
+    // negative amount and no quantity posts like the expense line.
+    let item = h
+        .run(s.items().create(
+            &cl_api::ItemFields {
+                purchase: cl_api::ItemPurchase::default(),
+                name: unique("Q-P31ae early-pay discount"),
+                description: None,
+                unit_price: None,
+                income_account_id: account(h, s, AccountType::Revenue, "Q-P31ae income").id,
+                is_taxable: false,
+                item_type: cl_api::ItemType::Service,
+                discount_percent: None,
+                tax_code_id: None,
+            },
+            key(),
+        ))
+        .expect("item")
+        .record
+        .id;
+    let mut third = draft("100.00", "-5.00", "95.00");
+    third.lines[1].item = Some(item);
+    let saved = h
+        .run(s.bills().create(&third, &PostingOptions::default(), key()))
+        .unwrap_or_else(|e| panic!("item discount: {e:?}"));
+    assert_eq!(saved.record.txn.total, Some(m("95.0000")));
+    assert_eq!(saved.record.lines[1].item, Some(item));
+    assert_eq!(saved.record.lines[1].amount, m("-5.00"));
+    assert_eq!(
+        postings(h, s, saved.record.txn.id),
+        vec![
+            (supplies.id, "100.0000".into(), "0.0000".into()),
+            (discount.id, "-5.0000".into(), "0.0000".into()),
+            (ap, "0.0000".into(), "95.0000".into()),
+        ]
+    );
+    h.run(s.bills().void(
+        saved.record.txn.id,
+        "contract clean-up",
+        &ApWriteOptions::default(),
+        key(),
+    ))
+    .expect("void");
 }
 
 /// Q-P31ae: the same for a vendor credit. A negative line posts as a

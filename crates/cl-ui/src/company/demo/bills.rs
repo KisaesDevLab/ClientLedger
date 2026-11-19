@@ -346,6 +346,12 @@ fn save(
         // Q-P31ae: negative lines (discounts, credits) post as the engine
         // posts them; a zero line is refused.
         || doc.lines.iter().any(|l| l.amount.is_zero())
+        // Q-P31af: no negative line with a quantity (the desktop refuses
+        // it before sending).
+        || doc
+            .lines
+            .iter()
+            .any(|l| l.amount.is_negative() && l.quantity.is_some())
     {
         return Err(invalid());
     }

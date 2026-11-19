@@ -353,6 +353,9 @@ pub(crate) fn check_doc(p: &DocParts<'_>, caps: &Capabilities) -> Result<(), Api
         if l.billable && l.customer.is_none()
             || l.quantity.is_some_and(|q| !q.is_positive())
             || l.unit_price.is_some_and(Money::is_negative)
+            // Q-P31af: a negative line with a quantity would receive stock
+            // at a negative cost; a discount or credit line has none.
+            || (l.amount.is_negative() && l.quantity.is_some())
         {
             return local(LocalValidation::InvalidValue);
         }

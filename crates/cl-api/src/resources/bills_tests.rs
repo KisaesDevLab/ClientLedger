@@ -500,6 +500,15 @@ async fn local_rules_refuse_before_sending() {
     d.lines[1].amount = d.lines[0].amount.checked_neg().expect("neg");
     d.amount_due = Money::ZERO;
     assert_eq!(refused(d).await, LocalValidation::NonPositiveAmount);
+    // Q-P31af: a negative item line with a quantity is refused.
+    let mut d = draft();
+    d.lines.push(BillLineDraft {
+        unit_price: None,
+        amount: m("-1.00"),
+        ..item_line()
+    });
+    d.amount_due = m("1479.00");
+    assert_eq!(refused(d).await, LocalValidation::InvalidValue);
     let mut d = draft();
     d.vendor_invoice_number = Some("x".repeat(101));
     assert_eq!(refused(d).await, LocalValidation::InvalidValue);
