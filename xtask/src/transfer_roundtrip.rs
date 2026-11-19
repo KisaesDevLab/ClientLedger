@@ -56,7 +56,7 @@ pub fn transfer_roundtrip(args: &[String]) -> Result<()> {
             "--test-threads=1",
         ])
         .env("CL_OFFLINE_TESTS", "1")
-        .env("CL_HOST_REQUIRE", "1")
+        .env("CL_API_REQUIRE", "1")
         .env("CL_TRANSFER_OUT", &out)
         .env("CL_TRANSFER_PASSPHRASE", PASSPHRASE)
         .current_dir(&root)

@@ -614,20 +614,14 @@ pub fn plan(books: &Books, opts: Options) -> Result<Plan, IifError> {
         fallbacks += u64::from(fell_back);
         let seg = f.clean(&a.name, FieldKind::ListName, ACCOUNT_SEGMENT_MAX);
         let parent = a.parent_id.as_deref().and_then(|p| full.get(p)).cloned();
-        let base = match &parent {
-            Some(p) => format!("{p}:{seg}"),
-            None => seg.clone(),
-        };
-        // Uniqueness of the last segment under its parent (the full name).
-        let name = if taken_accounts.contains(&base.to_lowercase()) {
-            renamed += 1;
-            let unique_seg = unique_under(&seg, parent.as_deref(), &taken_accounts);
-            match &parent {
-                Some(p) => format!("{p}:{unique_seg}"),
-                None => unique_seg,
-            }
-        } else {
-            base
+        // Every segment goes through `unique` (review M4): a name that
+        // cleans to nothing becomes `?`, never an empty segment, and the
+        // last segment is unique under its parent (the full name).
+        let unique_seg = unique_under(&seg, parent.as_deref(), &taken_accounts);
+        renamed += u64::from(unique_seg != seg);
+        let name = match &parent {
+            Some(p) => format!("{p}:{unique_seg}"),
+            None => unique_seg,
         };
         taken_accounts.insert(name.to_lowercase());
         full.insert(a.id.clone(), name.clone());

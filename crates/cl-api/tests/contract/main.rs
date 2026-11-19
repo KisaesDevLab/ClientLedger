@@ -45,6 +45,7 @@ mod contract_finance_charges;
 mod contract_harness;
 mod contract_home;
 mod contract_idempotency;
+mod contract_iif;
 mod contract_imports;
 mod contract_inventory;
 mod contract_invoices;
@@ -1026,6 +1027,9 @@ fn main() -> std::process::ExitCode {
         (
             "transfer::export_preview_and_refusal_u284",
             contract_transfer::transfer_export_preview_and_refusal_u284,
+        ),        (
+            "iif::transaction_list_ties_to_the_trial_balance_t9",
+            contract_iif::transaction_list_ties_to_the_trial_balance_t9,
         ),
         // P23 WP-4: sales tax, in one company of its own. The cash-basis
         // tests run last, on the fullest company (U-155: cash reports stay

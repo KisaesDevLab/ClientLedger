@@ -1846,3 +1846,41 @@ fn the_control_channel_sees_only_locked_behind_the_idle_lock() {
         serde_json::json!({ "locked": true })
     );
 }
+
+/// P32 review S6: Close Company and Sign Out wait for a running transfer
+/// whoever asks (the idle lock calls `sign_out()` directly); the lock
+/// stays up, and both run once the transfer ends.
+#[test]
+fn close_and_sign_out_wait_for_a_running_transfer() {
+    let ctx = context();
+    let mut shell = demo();
+    settle(&ctx, &mut shell, WIDE);
+    assert!(shell.company.is_some(), "the demo company is open");
+    // The idle lock offers Sign Out only with nothing unsaved.
+    for id in shell.windows.dirty_ids() {
+        shell.windows.close_now(id);
+    }
+    let sending = crate::screens::send_to_accountant::Sending::start();
+    shell.close_company();
+    settle(&ctx, &mut shell, WIDE);
+    assert!(shell.company.is_some(), "not closed while sending");
+    assert_eq!(shell.after_transfer, Some(super::AfterTransfer::Close));
+    // The idle lock's Sign Out.
+    shell.idle.lock_now();
+    shell.sign_out();
+    assert_eq!(shell.after_transfer, Some(super::AfterTransfer::SignOut));
+    shell.resume_after_transfer();
+    assert!(shell.idle.locked(), "still locked while sending");
+    assert!(shell.company.is_some());
+    // The transfer ends: the sign-out runs.
+    drop(sending);
+    shell.resume_after_transfer();
+    assert_eq!(shell.after_transfer, None);
+    assert!(!shell.idle.locked());
+    settle(&ctx, &mut shell, WIDE);
+    assert!(shell.company.is_none(), "signed out after the transfer");
+    assert!(
+        !shell.company_link.as_ref().is_some_and(|l| l.signed_in()),
+        "the session ended"
+    );
+}

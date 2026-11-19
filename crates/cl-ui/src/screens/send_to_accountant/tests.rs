@@ -100,6 +100,26 @@ fn a_post_after_the_preview_shows_the_file_totals_differ() {
     assert_eq!(s.state()["totals_differ"], true);
 }
 
+/// Review B1: the audit rows the backup and the payroll discard write
+/// between the preview and the file are not "your books changed".
+#[test]
+fn audit_rows_alone_do_not_show_the_books_changed() {
+    let (_d, mut s) = screen();
+    fill(&mut s, "ABCD-EFGH-JKLM-NPQR-STUV");
+    s.save(None);
+    assert_eq!(s.state()["done"], true, "{}", s.state());
+    let mut file = s.preview.clone().expect("preview");
+    file.counts.audit_entries += 7;
+    for c in &mut file.companies {
+        c.counts.audit_entries += 7;
+    }
+    s.outcome.as_mut().expect("outcome").totals = Some(file.clone());
+    assert_eq!(s.state()["totals_differ"], false);
+    file.counts.transactions += 1;
+    s.outcome.as_mut().expect("outcome").totals = Some(file);
+    assert_eq!(s.state()["totals_differ"], true);
+}
+
 /// S1: a held transfer blocks every way out of the company until it ends.
 #[test]
 fn a_held_transfer_blocks_leaving_the_company() {

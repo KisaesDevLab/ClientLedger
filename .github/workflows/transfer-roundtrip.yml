@@ -12,7 +12,18 @@ on:
   pull_request:
     paths:
       - crates/cl-company/src/transfer.rs
+      - crates/cl-company/src/backup.rs
+      - crates/cl-company/src/restore.rs
+      - crates/cl-company/tests/transfer_live.rs
+      - crates/cl-api/src/resources/archive_totals.rs
+      - crates/cl-api/src/resources/tenants.rs
+      - crates/cl-host/**
+      - crates/cl-pg/**
+      - crates/cl-settings/src/recent.rs
+      - xtask/src/transfer_roundtrip.rs
       - engine
+      - pg-binaries.lock
+      - Cargo.lock
       - .github/workflows/transfer-roundtrip.yml
   workflow_dispatch:
 

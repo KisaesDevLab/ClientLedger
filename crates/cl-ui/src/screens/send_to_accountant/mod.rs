@@ -105,10 +105,10 @@ pub fn transfer_running() -> bool {
 }
 
 /// Counts a running transfer for as long as it lives.
-struct Sending;
+pub(crate) struct Sending;
 
 impl Sending {
-    fn start() -> Sending {
+    pub(crate) fn start() -> Sending {
         running_add(1);
         Sending
     }
@@ -331,7 +331,7 @@ impl SendScreen {
                 }
                 Err(e) => {
                     tracing::warn!(detail = %cl_core::OwnerFacing::scrubbed_detail(&e), "transfer refused");
-                    self.scroll_result = matches!(e, TransferError::MissingFiles(_));
+                    self.scroll_result = matches!(e.kind(), TransferError::MissingFiles(_));
                     self.error = Some(e);
                 }
             }
@@ -601,7 +601,7 @@ impl Screen for SendScreen {
     }
 
     fn state(&self) -> Value {
-        let missing = match &self.error {
+        let missing = match self.error.as_ref().map(TransferError::kind) {
             Some(TransferError::MissingFiles(f)) => f.len(),
             _ => 0,
         };
@@ -623,6 +623,7 @@ impl Screen for SendScreen {
             "totals_differ": self.totals_differ(),
             "error": self.error_key(),
             "missing_files": missing,
+            "discarded_before_error": self.error.as_ref().and_then(TransferError::discarded).map(|d| d.count),
             "history": self.history.len(),
             "blocked": transfer_running(),
         })
@@ -639,14 +640,30 @@ impl SendScreen {
         ));
         self.poll();
     }
-    /// Q-P32l: the file's totals differ from the preview shown before.
+    /// Q-P32l: the books in the file differ from the preview shown before
+    /// (money and counts; the audit entries the backup and the payroll
+    /// discard add are not a change, review B1).
     fn totals_differ(&self) -> bool {
         match (
             self.preview.as_ref(),
             self.outcome.as_ref().and_then(|o| o.totals.as_ref()),
         ) {
-            (Some(p), Some(f)) => p != f,
+            (Some(p), Some(f)) => p.books_differ(f),
             _ => false,
         }
     }
+}
+
+/// Review S7: "N payroll imports were already discarded; the backup made
+/// at <time> still holds them."
+pub(super) fn discard_note(d: &cl_company::transfer::Discarded) -> String {
+    let local = d.backup_at.as_utc().with_timezone(&chrono::Local);
+    crate::i18n::t_count(
+        "send.error.discarded",
+        usize::try_from(d.count).unwrap_or(usize::MAX),
+        &[
+            ("n", &d.count.to_string()),
+            ("time", &local.format("%m/%d/%Y %I:%M %p").to_string()),
+        ],
+    )
 }

@@ -7,7 +7,15 @@
 //! - the engine honoured transfer mode and the file's totals equal the
 //!   preview (money and transaction counts; the backup taken first adds
 //!   its own audit rows, so audit counts are not compared);
-//! - the raw file holds none of the planted canaries (secrets scan (d));
+//! - the secrets plan §5 names that the desktop can plant (the SMTP host
+//!   and login, the check bank and routing numbers, an intake folder path)
+//!   are planted in the seed and listed in `expected.json` as `canaries`,
+//!   for the engine's own proof: its `transfer-secrets` suite (T5, scan
+//!   (a)) decrypts every part, and the CI `transfer-external` import
+//!   (E5, scan (b)) scans every destination table and the upload folder.
+//!   The desktop can't decrypt a `.clxfer` (the engine's format), so here
+//!   only the plaintext parts — the zip entry names, the envelope and the
+//!   zip comment — are scanned (review S8);
 //! - desktop Restore refuses the `.clxfer` by extension (Q-P32n), and the
 //!   engine refuses it renamed to `.clbackup` (`TRANSFER_NOT_A_BACKUP`);
 //! - a format 2 backup made by this engine restores (R7);
@@ -38,6 +46,12 @@ use cl_settings::{MemorySecrets, RecentStore, SecretStore};
 
 const OWNER: &str = "transfer-owner@example.test";
 const BACKUP_CANARY: &str = "backup-canary-passphrase-2026";
+// Review S8: plan §5 canaries the seed plants through the engine API.
+const SMTP_HOST: &str = "smtp-canary-host.example.test";
+const SMTP_USER: &str = "smtp-canary-login@example.test";
+const CHECK_ROUTING: &str = "011401533";
+const CHECK_ACCOUNT: &str = "86753090011223";
+const INTAKE_FOLDER_ID: &str = "6e0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a77";
 
 fn require() -> bool {
     std::env::var("CL_API_REQUIRE").as_deref() == Ok("1")
@@ -95,9 +109,17 @@ fn today() -> CalendarDate {
 }
 
 /// The figures the engine's import must reproduce, as decimal strings.
-fn expected_json(t: &VerificationTotals, passphrase_is_synthetic: bool) -> serde_json::Value {
+fn expected_json(
+    t: &VerificationTotals,
+    passphrase_is_synthetic: bool,
+    canaries: &[String],
+) -> serde_json::Value {
     serde_json::json!({
         "definition": t.definition,
+        // Review S8: strings that must not be found anywhere in the
+        // destination (E5 `transfer-external` scans every table and the
+        // upload folder for each).
+        "canaries": canaries,
         "asOf": t.as_of.to_wire(),
         "synthetic": passphrase_is_synthetic,
         "companies": t.companies.iter().map(|c| serde_json::json!({
@@ -138,6 +160,27 @@ fn same_money(a: &VerificationTotals, b: &VerificationTotals) -> bool {
         && a.counts.vendors == b.counts.vendors
 }
 
+/// Every plaintext part of a `.clxfer` zip: entry names, `envelope.json`
+/// and the archive comment.
+fn plaintext_parts(file: &Path) -> String {
+    use std::io::Read as _;
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(file).expect("open")).expect("zip");
+    let mut out = String::from_utf8_lossy(zip.comment()).into_owned();
+    for i in 0..zip.len() {
+        let mut entry = zip.by_index(i).expect("entry");
+        let name = entry.name().expect("entry name").into_owned();
+        out.push('\n');
+        out.push_str(&name);
+        if name == "envelope.json" {
+            let mut text = String::new();
+            entry.read_to_string(&mut text).expect("envelope");
+            out.push('\n');
+            out.push_str(&text);
+        }
+    }
+    out
+}
+
 async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     let s = match client.login(OWNER, password).await {
         Ok(LoginOutcome::Session(s)) => s,
@@ -166,6 +209,67 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     .expect("the practice company loads");
     let tenant = created.tenant_id;
     let as_of = today();
+
+    // Review S8: plant the secrets the desktop can set (plan §5).
+    s.update_smtp_settings(
+        &cl_api::SmtpSettingsUpdate {
+            host: SMTP_HOST.into(),
+            port: 587,
+            user: SMTP_USER.into(),
+            from: "books@example.test".into(),
+            from_name: String::new(),
+        },
+        cl_api::IdempotencyKey::new(),
+    )
+    .await
+    .expect("smtp canaries");
+    assert_eq!(s.smtp_settings().await.expect("smtp").smtp_user, SMTP_USER);
+    let checks = s
+        .raw(
+            cl_api::Method::Put,
+            "/api/v1/checks/settings",
+            &[],
+            Some(&serde_json::json!({"routingNumber": CHECK_ROUTING, "accountNumber": CHECK_ACCOUNT})),
+        )
+        .await
+        .expect("check settings");
+    assert_eq!(
+        checks.status, 200,
+        "check bank numbers planted: {}",
+        checks.body
+    );
+    let intake_dir = std::path::absolute(scratch.join("intake-canary-folder")).expect("abs");
+    std::fs::create_dir_all(&intake_dir).expect("intake dir");
+    let intake_path = intake_dir.display().to_string();
+    if caps.has(cl_api::Capabilities::INTAKE_SETTINGS) {
+        let now = s.intake().get().await.expect("intake");
+        s.intake()
+            .put(
+                &[cl_core::intake::IntakeFolder {
+                    id: cl_core::ids::IntakeFolderId::parse(INTAKE_FOLDER_ID).expect("id"),
+                    name: "Canary inbox".into(),
+                    path: intake_path.clone(),
+                    default_kind: cl_core::intake::IntakeKind::Bills,
+                    auto_read: false,
+                    keep_originals: true,
+                }],
+                now.updated_at.as_deref(),
+            )
+            .await
+            .expect("intake canary");
+    }
+    let canaries: Vec<String> = [
+        SMTP_HOST,
+        SMTP_USER,
+        CHECK_ROUTING,
+        CHECK_ACCOUNT,
+        intake_path.as_str(),
+        OWNER,
+        BACKUP_CANARY,
+    ]
+    .iter()
+    .map(ToString::to_string)
+    .collect();
 
     // The preview, with the file's own options.
     let preview = s
@@ -208,18 +312,33 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
         same_money(&preview, &file_totals),
         "a quiet company's preview equals the file's totals"
     );
+    // Review B1: the backup taken first writes audit rows, so the structs
+    // differ, yet the screen's "your books changed" stays off.
+    assert!(
+        file_totals.counts.audit_entries > preview.counts.audit_entries,
+        "the backup moved the audit count (else this proves nothing)"
+    );
+    assert_ne!(preview, file_totals);
+    assert!(
+        !preview.books_differ(&file_totals),
+        "a quiet company: totals_differ() is false"
+    );
 
-    // (d) No canary in the raw bytes: the backup passphrase, the owner's
-    // sign-in, the transfer passphrase, the scratch path.
-    let bytes = std::fs::read(&req.dest).expect("read");
-    let text = String::from_utf8_lossy(&bytes);
-    for canary in [
-        BACKUP_CANARY,
-        OWNER,
-        pass.as_str(),
-        &scratch.display().to_string(),
-    ] {
-        assert!(!text.contains(canary), "a canary in the transfer file");
+    // (d) The plaintext parts of the file (the zip entry names, the
+    // envelope, the zip comment) hold no canary, no passphrase and no
+    // path. The encrypted parts are the engine's to check (T5, E5): the
+    // desktop can't decrypt them (review S8).
+    let plain = plaintext_parts(&req.dest);
+    assert!(plain.contains("formatVersion"), "the envelope was read");
+    for canary in canaries
+        .iter()
+        .map(String::as_str)
+        .chain([pass.as_str(), &scratch.display().to_string()])
+    {
+        assert!(
+            !plain.contains(canary),
+            "a canary in the transfer file's plaintext"
+        );
     }
 
     // Sent before.
@@ -235,7 +354,7 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     if let Some(dir) = &out {
         std::fs::write(
             dir.join("expected.json"),
-            serde_json::to_vec_pretty(&expected_json(&file_totals, true)).expect("json"),
+            serde_json::to_vec_pretty(&expected_json(&file_totals, true, &canaries)).expect("json"),
         )
         .expect("expected.json");
     }

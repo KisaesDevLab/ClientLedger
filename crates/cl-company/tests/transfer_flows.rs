@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use cl_api::{Client, ClientConfig, EndpointSource, FixedEndpoint, LoginOutcome, Session};
 use cl_company::transfer::{
-    MIN_PASSPHRASE_CHARS, TransferError, TransferRequest, check_passphrase, generate_passphrase,
-    make_transfer, partial_path, preflight, suggested_file_name,
+    Discarded, EngineFile, MIN_PASSPHRASE_CHARS, TransferError, TransferRequest, check_passphrase,
+    generate_passphrase, make_transfer, partial_path, preflight, suggested_file_name,
 };
 use cl_core::ids::TenantId;
 use cl_core::{CalendarDate, Secret};
@@ -360,8 +360,17 @@ async fn transfer_fails_closed() {
         .await
         .expect_err("not honoured");
     assert!(
-        matches!(e, TransferError::NotHonoured { left: None }),
+        matches!(
+            e,
+            TransferError::NotHonoured {
+                file: EngineFile::Removed
+            }
+        ),
         "{e:?}"
+    );
+    assert_eq!(
+        cl_core::OwnerFacing::owner_message(&e).suggestion_key,
+        Some("fix.transfer.not_honoured")
     );
     assert!(!engine_file.exists(), "the full archive is removed");
     assert!(!req.dest.exists() && !partial_path(&req.dest).exists());
@@ -496,6 +505,172 @@ async fn a_busy_engine_is_busy() {
         cl_core::OwnerFacing::owner_message(&e).key,
         "error.company.busy"
     );
+}
+
+/// An engine with one unposted payroll import that discards it.
+async fn engine_with_a_draft() -> MockServer {
+    let mut caps = vec!["tenant-archive-v1", "tenant-archive-transfer-v1"];
+    caps.extend(PAYROLL_CAPS);
+    let server = engine(&caps).await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/payroll-import/sessions"))
+        .respond_with(json_reply(
+            200,
+            json!({"data":[{"id":DRAFT,"status":"validated"}],"total":1}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(path(format!("/api/v1/payroll-import/sessions/{DRAFT}")))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// Review S7: every error after the payroll discard says how many imports
+/// were discarded and which backup still holds them; the error itself is
+/// unchanged underneath (`kind()`), and its owner message is the same.
+#[tokio::test]
+async fn errors_after_the_payroll_discard_say_so() {
+    let failed_missing = json!({"status":"failed","error":{"code":"FILE_MISSING","message":"x","details":{"files":[
+        {"table":"attachments","rowId":"8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02","reason":"FILE_MISSING"}]}}});
+    let failed_other =
+        json!({"status":"failed","error":{"code":"ARCHIVE_WRITE_FAILED","message":"x"}});
+    let not_honoured =
+        json!({"status":"succeeded","result":{"archiveId":"arch-t","fileName":"t.zip"}});
+    for case in [
+        "busy",
+        "missing",
+        "failed",
+        "not_honoured",
+        "no_path",
+        "hash",
+    ] {
+        let dir = tempfile::tempdir().expect("tmp");
+        let server = engine_with_a_draft().await;
+        match case {
+            "busy" => {
+                Mock::given(method("POST"))
+                    .and(path_regex(r"^/api/v1/tenants/[^/]+/archives$"))
+                    .and(body_string_contains("\"transfer\":true"))
+                    .respond_with(json_reply(
+                        409,
+                        json!({"error":{"code":"TENANT_BUSY","message":"busy"}}),
+                    ))
+                    .with_priority(1)
+                    .mount(&server)
+                    .await;
+                mount_jobs(&server, dir.path(), honoured()).await;
+            }
+            "missing" => {
+                mount_jobs(&server, dir.path(), failed_missing.clone()).await;
+            }
+            "failed" => {
+                mount_jobs(&server, dir.path(), failed_other.clone()).await;
+            }
+            "not_honoured" => {
+                mount_jobs(&server, dir.path(), not_honoured.clone()).await;
+            }
+            "no_path" | "hash" => {
+                // The transfer job's own reply, ahead of `mount_jobs`'s.
+                let body = if case == "no_path" {
+                    // A result that names no file at all.
+                    let mut b = not_honoured.clone();
+                    b["result"]["sha256"] = json!(sha256(b"transfer-bytes"));
+                    b
+                } else {
+                    let mut h = honoured();
+                    h["result"]["sha256"] = json!(sha256(b"other-bytes"));
+                    h
+                };
+                let (_, t_file) = mount_jobs(&server, dir.path(), honoured()).await;
+                let mut body = body;
+                if case == "hash" {
+                    body["result"]["path"] = json!(t_file.to_string_lossy());
+                }
+                Mock::given(method("GET"))
+                    .and(path("/api/v1/tenant-archives/jobs/job_t"))
+                    .respond_with(json_reply(200, body))
+                    .with_priority(1)
+                    .mount(&server)
+                    .await;
+            }
+            _ => unreachable!(),
+        }
+        let s = session(&server).await;
+        let (store, secrets) = stores(dir.path());
+        let req = request(dir.path(), true);
+        let e = make_transfer(&s, &store, &secrets, &req, &silent())
+            .await
+            .expect_err(case);
+        let d: &Discarded = e.discarded().unwrap_or_else(|| panic!("{case}: {e:?}"));
+        assert_eq!(d.count, 1, "{case}");
+        let backup = store.load().expect("load").get(t(T1)).expect("co").backups[0].clone();
+        assert_eq!(
+            d.backup_at, backup.created_at,
+            "{case}: the backup's own time"
+        );
+        let kind_ok = match case {
+            "busy" => matches!(e.kind(), TransferError::Busy),
+            "missing" => matches!(e.kind(), TransferError::MissingFiles(f) if f.len() == 1),
+            "not_honoured" => matches!(
+                e.kind(),
+                TransferError::NotHonoured {
+                    file: EngineFile::Removed
+                }
+            ),
+            "no_path" => matches!(
+                e.kind(),
+                TransferError::NotHonoured {
+                    file: EngineFile::Unknown
+                }
+            ),
+            _ => matches!(e.kind(), TransferError::Company(_)),
+        };
+        assert!(kind_ok, "{case}: {e:?}");
+        // The owner message is the error's own; the detail adds the count.
+        assert_eq!(
+            cl_core::OwnerFacing::owner_message(&e),
+            cl_core::OwnerFacing::owner_message(e.kind()),
+            "{case}"
+        );
+        assert!(
+            cl_core::OwnerFacing::scrubbed_detail(&e).ends_with("payroll drafts discarded: 1"),
+            "{case}"
+        );
+        if case == "no_path" {
+            assert_eq!(
+                cl_core::OwnerFacing::owner_message(&e).suggestion_key,
+                Some("fix.transfer.not_honoured_left"),
+                "M1: an unknown file is not reported as removed"
+            );
+        }
+        assert!(
+            !req.dest.exists() && !partial_path(&req.dest).exists(),
+            "{case}"
+        );
+    }
+}
+
+/// Without drafts, an error is never wrapped.
+#[tokio::test]
+async fn errors_without_a_discard_are_unwrapped() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let server = engine(&["tenant-archive-v1", "tenant-archive-transfer-v1"]).await;
+    mount_jobs(
+        &server,
+        dir.path(),
+        json!({"status":"failed","error":{"code":"ARCHIVE_WRITE_FAILED","message":"x"}}),
+    )
+    .await;
+    let s = session(&server).await;
+    let (store, secrets) = stores(dir.path());
+    let e = make_transfer(&s, &store, &secrets, &request(dir.path(), true), &silent())
+        .await
+        .expect_err("failed");
+    assert!(e.discarded().is_none(), "{e:?}");
+    assert!(matches!(e, TransferError::Company(_)), "{e:?}");
 }
 
 #[test]

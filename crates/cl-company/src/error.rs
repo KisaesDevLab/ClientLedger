@@ -126,6 +126,14 @@ impl OwnerFacing for CompanyError {
                     "fix.company.transfer_not_backup",
                 ),
                 "TENANT_BUSY" => OwnerMessage::with_fix("error.company.busy", "fix.company.busy"),
+                "ARCHIVE_TOTALS_MISMATCH" => OwnerMessage::with_fix(
+                    "error.company.totals_mismatch",
+                    "fix.company.totals_mismatch",
+                ),
+                "NOT_A_TRANSFER_FILE" => OwnerMessage::with_fix(
+                    "error.company.not_a_transfer",
+                    "fix.company.not_a_transfer",
+                ),
                 _ => OwnerMessage::with_fix("error.company.job_failed", "fix.api.try_again_soon"),
             },
             CompanyError::NotABackup => {
@@ -193,5 +201,19 @@ mod tests {
             e.owner_message().suggestion_key,
             Some("fix.company.name_mismatch")
         );
+    }
+
+    /// Review S5: the transfer codes read in plain words, not "try again".
+    #[test]
+    fn transfer_job_codes_have_owner_messages() {
+        for (code, key) in [
+            ("ARCHIVE_TOTALS_MISMATCH", "error.company.totals_mismatch"),
+            ("NOT_A_TRANSFER_FILE", "error.company.not_a_transfer"),
+            ("TRANSFER_NOT_A_BACKUP", "error.company.transfer_not_backup"),
+        ] {
+            let m = CompanyError::JobFailed { code: code.into() }.owner_message();
+            assert_eq!(m.key, key, "{code}");
+            assert_ne!(m.suggestion_key, Some("fix.api.try_again_soon"), "{code}");
+        }
     }
 }

@@ -354,9 +354,14 @@ fn file_card(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<
             payroll_prompt(s, ui, tokens, act);
         }
         if let Some(e) = &s.error
-            && !matches!(e, TransferError::MissingFiles(_))
+            && !matches!(e.kind(), TransferError::MissingFiles(_))
         {
             form::inline_error(ui, tokens, e);
+        }
+        // Review S7: the payroll imports are gone even though the file
+        // wasn't made; say so, and which backup still holds them.
+        if let Some(d) = s.error.as_ref().and_then(TransferError::discarded) {
+            ui.label(RichText::new(super::discard_note(d)).color(tokens.warn_text));
         }
         ui.add_space(8.0);
         if running {
@@ -415,7 +420,7 @@ fn payroll_prompt(s: &SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option
 /// the frame they arrive (S2).
 fn result(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<Act>) {
     let mut shown: Option<egui::Response> = None;
-    if let Some(TransferError::MissingFiles(files)) = &s.error {
+    if let Some(TransferError::MissingFiles(files)) = s.error.as_ref().map(TransferError::kind) {
         ui.add_space(8.0);
         let r = form::card_tight(ui, tokens, |ui| {
             ui.label(RichText::new(t("send.missing.title")).strong());

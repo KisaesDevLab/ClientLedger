@@ -36,9 +36,9 @@ pub struct NetIncome {
 /// Debits and credits of the trial balance.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct TrialBalanceTotals {
-    /// Sum of debit balances.
+    /// Sum of every posted debit (gross, not netted per account).
     pub debits: Money,
-    /// Sum of credit balances.
+    /// Sum of every posted credit (gross).
     pub credits: Money,
 }
 
@@ -173,6 +173,57 @@ impl From<WireTotals> for VerificationTotals {
             counts: w.counts,
             companies: w.companies,
         }
+    }
+}
+
+impl TotalsCounts {
+    /// The counts of the books themselves: every count except
+    /// `audit_entries`, which the backup and the payroll-draft discard
+    /// before a transfer always move.
+    fn books(self) -> [u64; 8] {
+        [
+            self.accounts,
+            self.clients,
+            self.vendors,
+            self.items,
+            self.transactions,
+            self.posted_transactions,
+            self.attachments,
+            self.attachment_bytes,
+        ]
+    }
+}
+
+impl CompanyTotals {
+    fn same_books(&self, other: &Self) -> bool {
+        self.company_id == other.company_id
+            && self.total_assets == other.total_assets
+            && self.total_liabilities == other.total_liabilities
+            && self.total_equity == other.total_equity
+            && self.net_income == other.net_income
+            && self.accounts_receivable == other.accounts_receivable
+            && self.accounts_payable == other.accounts_payable
+            && self.trial_balance == other.trial_balance
+            && self.counts.books() == other.counts.books()
+    }
+}
+
+impl VerificationTotals {
+    /// The books these totals describe differ from `other`'s (Q-P32l,
+    /// "your books changed"): any money of any company, or any count
+    /// except the audit entries. The audit trail is left out on purpose:
+    /// the transfer's own backup and payroll-draft discard write audit rows
+    /// between the preview and the file (P32 review B1).
+    #[must_use]
+    pub fn books_differ(&self, other: &Self) -> bool {
+        self.as_of != other.as_of
+            || self.counts.books() != other.counts.books()
+            || self.companies.len() != other.companies.len()
+            || self
+                .companies
+                .iter()
+                .zip(&other.companies)
+                .any(|(a, b)| !a.same_books(b))
     }
 }
 
@@ -326,6 +377,45 @@ pub(crate) mod tests {
         assert!(serde_json::from_str::<VerificationTotals>(&number).is_err());
         let five = TOTALS.replace("12500.1250", "12500.12501");
         assert!(serde_json::from_str::<VerificationTotals>(&five).is_err());
+    }
+
+    #[test]
+    fn books_differ_ignores_the_audit_trail_only() {
+        let a: VerificationTotals = serde_json::from_str(TOTALS).expect("totals");
+        assert!(!a.books_differ(&a.clone()));
+        // The backup and the payroll discard add audit rows: not a change.
+        let audit = TOTALS
+            .replace(r#""auditEntries":4200"#, r#""auditEntries":4209"#)
+            .replace(r#""auditEntries":4210"#, r#""auditEntries":4231"#);
+        let b: VerificationTotals = serde_json::from_str(&audit).expect("audit");
+        assert_ne!(a, b, "the structs differ");
+        assert!(!a.books_differ(&b), "B1: audit entries are not the books");
+        // Money, a tenant count or a company count is a change.
+        for (from, to) in [
+            (
+                r#""totalAssets":"12500.1250""#,
+                r#""totalAssets":"12500.1251""#,
+            ),
+            (r#""amount":"4321.0049""#, r#""amount":"4321.0050""#),
+            (r#""debits":"20000.0000""#, r#""debits":"20000.0001""#),
+            (
+                r#""accountsPayable":"400.0000""#,
+                r#""accountsPayable":"401.0000""#,
+            ),
+            (
+                r#""transactions":1284,"postedTransactions":1270,"attachments":63,"attachmentBytes":1048576,"auditEntries":4210"#,
+                r#""transactions":1285,"postedTransactions":1270,"attachments":63,"attachmentBytes":1048576,"auditEntries":4210"#,
+            ),
+            (
+                r#""clients":7,"vendors":5,"items":3,"transactions":1284,"postedTransactions":1270,"attachments":63,"attachmentBytes":1048576,"auditEntries":4200"#,
+                r#""clients":8,"vendors":5,"items":3,"transactions":1284,"postedTransactions":1270,"attachments":63,"attachmentBytes":1048576,"auditEntries":4200"#,
+            ),
+        ] {
+            let changed = TOTALS.replace(char::is_whitespace, "").replace(from, to);
+            assert_ne!(changed, TOTALS.replace(char::is_whitespace, ""), "{from}");
+            let c: VerificationTotals = serde_json::from_str(&changed).expect("changed");
+            assert!(a.books_differ(&c), "{from}");
+        }
     }
 
     #[test]

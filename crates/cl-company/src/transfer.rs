@@ -125,16 +125,67 @@ pub enum TransferError {
     #[error("{} attachment files can't be read", .0.len())]
     MissingFiles(Vec<MissingAttachment>),
     /// The engine wrote an ordinary backup instead of a transfer file
-    /// (S3). Its file was removed, unless `left` names it.
+    /// (S3). What became of the engine's file is in `file`.
     #[error("the engine did not write a transfer file")]
     NotHonoured {
-        /// The engine's file, when it could not be removed (the owner
-        /// should delete it: it holds sign-ins).
-        left: Option<PathBuf>,
+        /// The engine's file: removed, left (the owner should delete it:
+        /// it holds sign-ins), or not named by the engine at all.
+        file: EngineFile,
+    },
+    /// Any error after unposted payroll imports were discarded (review
+    /// S7): `source` is what went wrong; the screen also says the imports
+    /// are gone and that the backup taken first still holds them.
+    #[error("{source} (after discarding payroll imports)")]
+    AfterDiscard {
+        /// What was discarded and which backup holds it.
+        discarded: Discarded,
+        /// The error itself.
+        source: Box<TransferError>,
     },
     /// Anything else.
     #[error(transparent)]
     Company(#[from] CompanyError),
+}
+
+/// What became of the engine's file when it wrote a full archive (S3).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EngineFile {
+    /// It was removed.
+    Removed,
+    /// It could not be removed; this is where it is.
+    Left(PathBuf),
+    /// The engine's result named no file, so whether one exists is
+    /// unknown (review M1).
+    Unknown,
+}
+
+/// Unposted payroll imports discarded before an error (review S7).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Discarded {
+    /// How many.
+    pub count: u64,
+    /// When the backup that still holds them was made.
+    pub backup_at: cl_core::Timestamp,
+}
+
+impl TransferError {
+    /// The error itself, under any [`TransferError::AfterDiscard`].
+    #[must_use]
+    pub fn kind(&self) -> &TransferError {
+        match self {
+            TransferError::AfterDiscard { source, .. } => source.kind(),
+            other => other,
+        }
+    }
+
+    /// The payroll imports discarded before this error, if any.
+    #[must_use]
+    pub fn discarded(&self) -> Option<&Discarded> {
+        match self {
+            TransferError::AfterDiscard { discarded, .. } => Some(discarded),
+            _ => None,
+        }
+    }
 }
 
 impl From<ApiError> for TransferError {
@@ -176,9 +227,14 @@ impl cl_core::OwnerFacing for TransferError {
             TransferError::MissingFiles(_) => {
                 M::with_fix("error.transfer.missing_files", "fix.transfer.missing_files")
             }
-            TransferError::NotHonoured { .. } => {
-                M::with_fix("error.transfer.not_honoured", "fix.transfer.not_honoured")
-            }
+            TransferError::NotHonoured {
+                file: EngineFile::Removed,
+            } => M::with_fix("error.transfer.not_honoured", "fix.transfer.not_honoured"),
+            TransferError::NotHonoured { .. } => M::with_fix(
+                "error.transfer.not_honoured",
+                "fix.transfer.not_honoured_left",
+            ),
+            TransferError::AfterDiscard { source, .. } => source.owner_message(),
             TransferError::Company(e) => e.owner_message(),
         }
     }
@@ -186,9 +242,19 @@ impl cl_core::OwnerFacing for TransferError {
     fn scrubbed_detail(&self) -> String {
         match self {
             TransferError::MissingFiles(f) => format!("missing files: {}", f.len()),
-            TransferError::NotHonoured { left } => {
-                format!("transfer not honoured; file left: {}", left.is_some())
-            }
+            TransferError::NotHonoured { file } => format!(
+                "transfer not honoured; engine file: {}",
+                match file {
+                    EngineFile::Removed => "removed",
+                    EngineFile::Left(_) => "left",
+                    EngineFile::Unknown => "unknown",
+                }
+            ),
+            TransferError::AfterDiscard { discarded, source } => format!(
+                "{}; payroll drafts discarded: {}",
+                source.scrubbed_detail(),
+                discarded.count
+            ),
             TransferError::PayrollDraftsWaiting(n) => format!("payroll drafts: {n}"),
             TransferError::Company(e) => e.scrubbed_detail(),
             other => format!("{other}"),
@@ -385,7 +451,6 @@ pub fn partial_path(dest: &Path) -> PathBuf {
 /// `Unsupported`, the passphrase errors and `PayrollDraftsWaiting` with
 /// nothing sent; `Busy`; `MissingFiles`; `NotHonoured`; `Company` for the
 /// backup, the job, the copy and the history.
-#[allow(clippy::too_many_lines, reason = "one linear sequence of steps")]
 pub async fn make_transfer(
     session: &Session,
     store: &RecentStore,
@@ -414,7 +479,7 @@ pub async fn make_transfer(
 
     // 2. Backup first.
     tracing::info!("transfer: backup first");
-    crate::backup::backup(
+    let backup = crate::backup::backup(
         session,
         store,
         secrets,
@@ -433,10 +498,41 @@ pub async fn make_transfer(
         other => TransferError::Company(other),
     })?;
 
+    // 3.–7. Every error from here on says what was discarded (S7).
+    let mut discarded = 0u64;
+    let done = after_backup(session, store, req, &rec, &drafts, &mut discarded, progress).await;
+    done.map_err(|e| {
+        if discarded == 0 {
+            e
+        } else {
+            TransferError::AfterDiscard {
+                discarded: Discarded {
+                    count: discarded,
+                    backup_at: backup.record.created_at,
+                },
+                source: Box::new(e),
+            }
+        }
+    })
+}
+
+/// Steps 3 to 7: discard, export, check, place, record. `discarded`
+/// counts the payroll imports gone so far, for the caller's error.
+#[allow(clippy::too_many_lines, reason = "one linear sequence of steps")]
+async fn after_backup(
+    session: &Session,
+    store: &RecentStore,
+    req: &TransferRequest,
+    rec: &cl_settings::CompanyRecord,
+    drafts: &[cl_api::payroll::PayrollSessionId],
+    discarded: &mut u64,
+    progress: &ProgressSink,
+) -> Result<TransferOutcome, TransferError> {
     // 3. Discard unposted payroll imports (the backup holds them).
-    for id in &drafts {
+    for id in drafts {
         match session.payroll().discard(*id).await {
-            Ok(()) | Err(ApiError::NotFound { .. }) => {}
+            Ok(()) => *discarded += 1,
+            Err(ApiError::NotFound { .. }) => {}
             Err(e) => return Err(e.into()),
         }
     }
@@ -490,11 +586,18 @@ pub async fn make_transfer(
     // 5. The engine must have written a transfer file (S3).
     if !result.transfer_honoured() {
         tracing::error!("transfer: the engine wrote a full archive; removing it");
-        let left = result
-            .path
-            .clone()
-            .filter(|p| !matches!(std::fs::remove_file(p), Ok(())) && std::fs::metadata(p).is_ok());
-        return Err(TransferError::NotHonoured { left });
+        let file = match result.path.clone() {
+            None => EngineFile::Unknown,
+            Some(p) => {
+                let _ = std::fs::remove_file(&p);
+                if std::fs::symlink_metadata(&p).is_ok() {
+                    EngineFile::Left(p)
+                } else {
+                    EngineFile::Removed
+                }
+            }
+        };
+        return Err(TransferError::NotHonoured { file });
     }
 
     // 6. Place via `.partial`, check the hash, rename.
@@ -527,10 +630,9 @@ pub async fn make_transfer(
         record,
         totals,
         bytes,
-        discarded_payroll: drafts.len() as u64,
+        discarded_payroll: *discarded,
     })
 }
-
 /// Each missing file with its name and record, as far as the engine can
 /// say (an attachment it can't find keeps only its id).
 async fn resolve_missing(

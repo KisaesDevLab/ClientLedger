@@ -204,6 +204,17 @@ pub struct Shell {
     idle: idle_lock::IdleLock,
     /// P29 WP2: File › Sign Out waits for the company to close.
     sign_out_after_close: bool,
+    /// P32 review S6: a Close Company or Sign Out asked for while a
+    /// transfer file is being made (the idle lock's Sign Out, a close
+    /// prompt's answer) runs when the transfer ends.
+    after_transfer: Option<AfterTransfer>,
+}
+
+/// What waits for a running transfer (review S6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AfterTransfer {
+    Close,
+    SignOut,
 }
 
 impl Shell {
@@ -258,6 +269,7 @@ impl Shell {
             company_role: String::new(),
             idle: idle_lock::IdleLock::default(),
             sign_out_after_close: false,
+            after_transfer: None,
             widths,
             prompt_focused: None,
             demo: options.demo,
@@ -701,6 +713,12 @@ impl Shell {
     /// are asked about), then end the session; the Open Company window
     /// asks for a sign-in. Automatic sign-in waits for the next start.
     fn sign_out(&mut self) {
+        // Review S6: never while a transfer file is being made, whoever
+        // asks (the menu, a shortcut, the idle lock); it runs afterwards.
+        if crate::screens::send_to_accountant::transfer_running() {
+            self.after_transfer = Some(AfterTransfer::SignOut);
+            return;
+        }
         let Some(link) = self.company_link.clone() else {
             return;
         };
@@ -716,6 +734,22 @@ impl Shell {
         self.dispatch_now(CommandId::new("file.open_company"));
     }
 
+    /// Runs the Close Company or Sign Out that waited for a transfer, once
+    /// it has ended (review S6). Called every frame.
+    fn resume_after_transfer(&mut self) {
+        if self.after_transfer.is_none() || crate::screens::send_to_accountant::transfer_running() {
+            return;
+        }
+        match self.after_transfer.take() {
+            Some(AfterTransfer::SignOut) => {
+                self.idle.reset();
+                self.sign_out();
+            }
+            Some(AfterTransfer::Close) => self.close_company(),
+            None => {}
+        }
+    }
+
     fn finish_sign_out(&mut self, link: &Arc<CompanyLink>) {
         link.sign_out();
         self.idle.reset();
@@ -727,6 +761,11 @@ impl Shell {
     /// Close the open company: save or prompt for open forms first, wait
     /// for pending writes, then return to the Open Company window.
     fn close_company(&mut self) {
+        // Review S6: the guard lives here, not only in the dispatcher.
+        if crate::screens::send_to_accountant::transfer_running() {
+            self.after_transfer.get_or_insert(AfterTransfer::Close);
+            return;
+        }
         let Some(link) = self.company_link.clone() else {
             return;
         };
@@ -1535,6 +1574,7 @@ impl Shell {
         let tokens = Tokens::of(&ctx);
 
         self.apply_company_events(Some(&ctx));
+        self.resume_after_transfer();
         // Security review minor 5: a copied secret leaves the clipboard.
         crate::secret_clipboard::tick(&ctx);
         if self.show_idle_lock(ui) {
@@ -1609,8 +1649,14 @@ impl Shell {
         let user = self.signed_in_name.clone();
         match self.idle.show(ui, &link, user.as_deref(), dirty) {
             Some(idle_lock::LockAction::SignOut) if dirty == 0 => {
-                self.idle.reset();
-                self.sign_out();
+                if crate::screens::send_to_accountant::transfer_running() {
+                    // Review S6: stay locked; sign out when the transfer
+                    // ends.
+                    self.sign_out();
+                } else {
+                    self.idle.reset();
+                    self.sign_out();
+                }
             }
             Some(_) | None => {}
         }

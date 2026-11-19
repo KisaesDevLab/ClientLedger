@@ -670,6 +670,70 @@ async fn an_old_portable_copy_still_restores_q268() {
     );
 }
 
+/// P32 review S4: a backup restored as a new company on a computer that
+/// never saw it keeps "Sent before" from the backup's host block, file
+/// names only (the folder never travels).
+#[tokio::test]
+async fn restore_as_a_new_company_keeps_sent_before_from_the_backup() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let server = engine(&["tenant-archive-v1"]).await;
+    let s = session(&server).await;
+    let (store, secrets) = stores(dir.path());
+    let file = write_archive(dir.path(), "arch-9");
+    let sent = cl_settings::TransferRecord {
+        path: dir
+            .path()
+            .join("Private Folder")
+            .join("Ozark-Ridge-2026-11-01.clxfer"),
+        sha256: "a".repeat(64),
+        archive_id: "arch-t".into(),
+        created_at: cl_core::Timestamp::parse_wire("2026-11-01T08:00:00.000Z").expect("ts"),
+        totals: None,
+    };
+    let carried = cl_company::backup::host_transfers(std::slice::from_ref(&sent));
+    let host = json!({"app":"ClientLedger","appVersion":"0.1.0","kind":"backup",
+        "name":"Ozark Ridge Landscaping LLC","accent":"#C23B4A","flags":{},
+        "transfers": carried});
+    assert!(
+        !host.to_string().contains("Private Folder"),
+        "the backup carries no folder"
+    );
+    mount_import(&server, T2, "Ozark Ridge Landscaping LLC", Some(host)).await;
+    mount_tenants_list(&server).await;
+    Mock::given(method("PATCH"))
+        .and(path_regex(r"^/api/v1/tenants/[^/]+$"))
+        .respond_with(json(
+            200,
+            json!({"id":T2,"name":"x","updatedAt":"2026-11-04T08:12:00.000Z"}),
+        ))
+        .mount(&server)
+        .await;
+    let out = restore(
+        &s,
+        &store,
+        &secrets,
+        &RestoreRequest {
+            path: file.clone(),
+            passphrase: None,
+        },
+        &cl_company::backup::silent(),
+        &cl_company::Statistics::none(),
+    )
+    .await
+    .expect("restores as a new company");
+    assert_eq!(out.new_tenant, t(T2));
+    assert!(!out.file_known, "this computer never saw the backup");
+    assert_eq!(out.kept_previous, None);
+    let list = store.load().expect("load");
+    let new = list.get(t(T2)).expect("new");
+    assert_eq!(new.transfers.len(), 1, "Sent before came with the backup");
+    assert_eq!(
+        new.transfers[0].path,
+        PathBuf::from("Ozark-Ridge-2026-11-01.clxfer")
+    );
+    assert_eq!(new.transfers[0].archive_id, "arch-t");
+}
+
 #[tokio::test]
 async fn restore_refuses_a_changed_file_before_anything_is_sent() {
     let dir = tempfile::tempdir().expect("tmp");

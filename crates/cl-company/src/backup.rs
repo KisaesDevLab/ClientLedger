@@ -57,6 +57,34 @@ pub struct HostMetadata {
 /// How many transfer records a backup carries in `manifest.host` (the
 /// engine caps it at 16 KiB).
 pub const HOST_TRANSFERS: usize = 20;
+/// The most the transfer records may take in `manifest.host`, serialized
+/// (review S4): the rest of the 16 KiB host block stays free for the
+/// name, flags and preferences.
+pub const HOST_TRANSFERS_MAX_BYTES: usize = 12 * 1024;
+
+/// The "Sent before" records a backup carries (review S4): the newest
+/// [`HOST_TRANSFERS`], each with its file name only (no folder: the
+/// backup may travel to another computer, and `for_archive` keeps no
+/// paths), dropping the oldest until they fit in
+/// [`HOST_TRANSFERS_MAX_BYTES`].
+#[must_use]
+pub fn host_transfers(records: &[cl_settings::TransferRecord]) -> Vec<cl_settings::TransferRecord> {
+    let skip = records.len().saturating_sub(HOST_TRANSFERS);
+    let mut out: Vec<cl_settings::TransferRecord> = records[skip..]
+        .iter()
+        .map(|r| {
+            let mut r = r.clone();
+            r.path = r.path.file_name().map(PathBuf::from).unwrap_or_default();
+            r
+        })
+        .collect();
+    while !out.is_empty()
+        && serde_json::to_vec(&out).map_or(usize::MAX, |b| b.len()) > HOST_TRANSFERS_MAX_BYTES
+    {
+        out.remove(0);
+    }
+    out
+}
 
 impl HostMetadata {
     /// Builds the metadata for a company.
@@ -360,8 +388,7 @@ pub async fn backup(
         rec.flags,
         rec.prefs.for_archive(),
     );
-    let skip = rec.transfers.len().saturating_sub(HOST_TRANSFERS);
-    host.transfers = rec.transfers[skip..].to_vec();
+    host.transfers = host_transfers(&rec.transfers);
     progress(Progress::Starting);
     let job = session
         .tenants()
@@ -530,6 +557,60 @@ mod tests {
             backup_file_name("x", at, BackupKind::BeforeDelete)
                 .ends_with("-before-delete.clbackup")
         );
+    }
+
+    /// Review S4: the worst case (20 records, long non-ASCII file names in
+    /// deep folders, the largest amounts) stays under 12 KiB of transfers
+    /// and the whole host block under the engine's 16 KiB, with no folder.
+    #[test]
+    fn host_transfers_fit_the_host_limit_and_carry_no_folder() {
+        let big = cl_core::Money::parse_wire("-99999999999999.9999").expect("money");
+        let deep: PathBuf = std::iter::repeat_n("Ünïcödé-földer-名前-📁", 12).collect();
+        let name = format!("{}.clxfer", "Ünïcödé 名前 📁 ".repeat(15));
+        let rec = |i: usize| cl_settings::TransferRecord {
+            path: Path::new("C:\\Users\\owner").join(&deep).join(&name),
+            sha256: "f".repeat(64),
+            archive_id: format!("{:036}", i),
+            created_at: Timestamp::parse_wire("2026-11-04T08:12:00.000Z").expect("ts"),
+            totals: Some(cl_settings::TransferTotals {
+                as_of: cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("d"),
+                total_assets: big,
+                total_liabilities: big,
+                total_equity: big,
+                net_income: big,
+                transactions: u64::MAX,
+                attachments: u64::MAX,
+            }),
+        };
+        let all: Vec<_> = (0..40).map(rec).collect();
+        let kept = host_transfers(&all);
+        assert!(!kept.is_empty() && kept.len() <= HOST_TRANSFERS);
+        let bytes = serde_json::to_vec(&kept).expect("json").len();
+        assert!(bytes <= HOST_TRANSFERS_MAX_BYTES, "{bytes} bytes");
+        // The newest are kept, in order, with the file name only.
+        assert_eq!(
+            kept.last().map(|r| r.archive_id.clone()),
+            Some(format!("{:036}", 39))
+        );
+        for r in &kept {
+            assert_eq!(r.path, PathBuf::from(&name));
+            assert!(!serde_json::to_string(r).expect("json").contains("owner"));
+        }
+        // The whole host block, with every preference, fits the engine's cap.
+        let mut host = HostMetadata::new(
+            BackupKind::Backup,
+            &"N".repeat(255),
+            cl_settings::ACCENT_PALETTE[0],
+            CompanyFlags::default(),
+            cl_settings::CompanyPrefs::default(),
+        );
+        host.transfers = kept;
+        let all = serde_json::to_vec(&host).expect("json").len();
+        assert!(all <= cl_api::HOST_METADATA_MAX_BYTES, "{all} bytes");
+        // A short history is kept whole.
+        let short: Vec<_> = (0..3).map(rec).collect();
+        assert_eq!(host_transfers(&short).len(), 3);
+        assert!(host_transfers(&[]).is_empty());
     }
 
     #[test]
