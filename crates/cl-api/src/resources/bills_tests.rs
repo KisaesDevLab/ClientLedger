@@ -107,7 +107,8 @@ fn signed_record(kind: &str) -> String {
         )
     };
     let ap_order = if kind == "bill" { 2 } else { 0 };
-    let first = if kind == "bill" { 0 } else { 1 };
+    // A vendor credit's A/P line comes first.
+    let first = u8::from(kind != "bill");
     format!(
         r#"{{"id":"{ID}","txnType":"{kind}","txnNumber":"B-1","txnDate":"2026-11-03","status":"posted",
         "basis":"both","contactId":"{VENDOR}","memo":null,"total":"200.0000","balanceDue":"200.0000",
