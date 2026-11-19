@@ -260,6 +260,18 @@ impl Capabilities {
     /// paths never in audit rows, and `omitIntakeSettings` on the tenant
     /// archive export.
     pub const INTAKE_SETTINGS: &'static str = "intake-settings-v1";
+    /// U-282 (P32): archives are written as format 2 and formats 1-2 are
+    /// read; a newer format is refused with 409 `ARCHIVE_TOO_NEW`.
+    pub const TENANT_ARCHIVE_V2: &'static str = "tenant-archive-v2";
+    /// U-283 (P32): readable verification totals in the manifest, the
+    /// export result and `GET /tenants/{id}/verification-totals`; the
+    /// import recomputes and compares them.
+    pub const ARCHIVE_VERIFICATION_TOTALS: &'static str = "archive-verification-totals-v1";
+    /// U-284 (P32): `transfer: true` on the tenant export (users as names
+    /// only, secrets left out), echoed in the result's
+    /// `manifestSummary.options.transfer`; 409 `TENANT_BUSY` while a
+    /// transfer runs.
+    pub const TENANT_ARCHIVE_TRANSFER: &'static str = "tenant-archive-transfer-v1";
 
     // ---- A03: document drafts (engine U-92; client-declared until the pin has it)
     /// U-92, U-92b: `/document-drafts` (claim an uploaded draft file, list,

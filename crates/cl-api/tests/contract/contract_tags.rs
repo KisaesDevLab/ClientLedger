@@ -540,6 +540,8 @@ pub fn number_archive_round_trip_u75(h: &Harness) {
                 include_audit: true,
                 omit_intake_settings: false,
                 omit_document_drafts: false,
+                transfer: false,
+                as_of: None,
                 host: json!({"app": "ClientLedger", "appVersion": "test", "kind": "backup"}),
                 passphrase: passphrase.clone(),
             },

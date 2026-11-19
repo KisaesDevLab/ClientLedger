@@ -57,6 +57,7 @@
   {"method":"POST","path":"/api/v1/tenants","inSpec":true,"fragmentHash":"8da8b5f4605183f5519ef52422b1d240dcacfa07ff27502c5aed51bd7f911362"},
   {"method":"PATCH","path":"/api/v1/tenants/{id}","inSpec":true,"fragmentHash":"be138edc4cb213ffd459d59574f076e54e428cecee353d1a3699a3f995798541"},
   {"method":"POST","path":"/api/v1/tenants/{id}/archives","inSpec":true,"fragmentHash":"66da5facb94e20543a14aa7302cd1680a3e6e73ca6840fde2efec0d53d5d9a25"},
+  {"method":"GET","path":"/api/v1/tenants/{id}/verification-totals","inSpec":false,"fragmentHash":null},
   {"method":"GET","path":"/api/v1/tenant-archives/jobs/{jobId}","inSpec":true,"fragmentHash":"5824a1cdbedf7bd811ba198597aabc1593b1ab2dc3dfcb543382a3dcbc58856f"},
   {"method":"GET","path":"/api/v1/tenant-archives/{fileName}/download","inSpec":true,"fragmentHash":"ee93fd080edc7dc8c31fbe220c5c98639d5cbfd6a1b740f0b5d6efbebf257208"},
   {"method":"POST","path":"/api/v1/tenant-archives/import","inSpec":true,"fragmentHash":"2ff18fc79418aaa1b020d4a01168f3ada968a6d945942054c09e4be4433a8c2a"},

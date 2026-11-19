@@ -77,6 +77,10 @@ pub use resources::bank_postings::{
     PRINTED_MEMO_MAX, SplitItem, SplitLine, TransferDraft,
 };
 // P13 WP1: write check.
+pub use resources::archive_totals::{
+    ArchiveOptions, ManifestSummary, NetIncome, TOTALS_DEFINITION, TotalsComparison, TotalsCounts,
+    TrialBalanceTotals, VerificationTotals,
+};
 pub use resources::checks::{
     CHECK_PRINTED, CheckEditOptions, CheckPrintState, CheckRecord, CheckSettings, CheckSummary,
     Checks, LINE_BILLED, PrintStatus, PrintedCheckChange, check_settings_from_json,
@@ -162,8 +166,8 @@ pub use resources::team::{
 pub use resources::tenants::{
     ArchiveFileName, ArchiveJob, ArchiveJobStatus, ArchiveRequest, ArchiveResult, CreatedTenant,
     DOCUMENT_DRAFTS_OMITTED, DeleteReceipt, DeleteRequest, HOST_METADATA_MAX_BYTES, ImportJob,
-    ImportRequest, ImportResult, ImportVerification, JobError, JobId, JobState, NewTenant,
-    TenantSummary, Tenants,
+    ImportRequest, ImportResult, ImportVerification, JobError, JobId, JobState, MissingFile,
+    NewTenant, TenantSummary, Tenants,
 };
 pub use resources::transactions::{
     AccountRoles, Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions,

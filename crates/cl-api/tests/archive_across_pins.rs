@@ -111,6 +111,8 @@ fn export(h: &Harness, s: &Session, co: TenantId) -> PathBuf {
                 include_audit: true,
                 omit_intake_settings: false,
                 omit_document_drafts: false,
+                transfer: false,
+                as_of: None,
                 host: json!({"app": "ClientLedger", "appVersion": "test", "kind": "backup"}),
                 passphrase: passphrase(),
             },

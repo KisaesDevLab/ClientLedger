@@ -347,6 +347,8 @@ pub async fn backup(
                 include_audit: true,
                 omit_intake_settings: false,
                 omit_document_drafts: false,
+                transfer: false,
+                as_of: None,
                 host: serde_json::to_value(&host).map_err(|_| CompanyError::Metadata)?,
                 passphrase,
             },
