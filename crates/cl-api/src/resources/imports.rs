@@ -368,6 +368,12 @@ pub struct UploadRequest {
     /// The trial balance date when the file carries none (Accounting Power,
     /// Generic).
     pub tb_report_date: Option<CalendarDate>,
+    /// An account list row whose number the company already has updates
+    /// that account to the file's name and type (engine
+    /// `updateExistingCoa`; the commit remembers the old ones and undo puts
+    /// them back). Account lists only (P31 QA-1, Q-P31ac: a QBD switch
+    /// into a new company uses the `QuickBooks` chart over the starter one).
+    pub update_existing_coa: bool,
 }
 
 impl fmt::Debug for UploadRequest {
@@ -380,6 +386,7 @@ impl fmt::Debug for UploadRequest {
             .field("contact_kind", &self.contact_kind)
             .field("tb_column", &self.tb_column)
             .field("tb_report_date", &self.tb_report_date)
+            .field("update_existing_coa", &self.update_existing_coa)
             .finish_non_exhaustive()
     }
 }
@@ -409,6 +416,7 @@ impl UploadRequest {
         if self.bytes.is_empty()
             || contacts != self.contact_kind.is_some()
             || (!tb && (self.tb_column.is_some() || self.tb_report_date.is_some()))
+            || (self.update_existing_coa && self.kind != ImportKind::Coa)
         {
             return Err(LocalValidation::InvalidValue);
         }
@@ -429,6 +437,9 @@ impl UploadRequest {
         }
         if let Some(d) = self.tb_report_date {
             m.insert("tbReportDate".into(), json!(d.to_wire()));
+        }
+        if self.update_existing_coa {
+            m.insert("updateExistingCoa".into(), json!(true));
         }
         Value::Object(m)
     }

@@ -116,6 +116,12 @@ impl ImportScreen {
             contact_kind: s.contact_kind.and_then(ContactKind::from_wire),
             tb_column: None,
             tb_report_date,
+            // Q-P31ac: a QBD switch (always into a new company) uses the
+            // QuickBooks chart: a starter account with the same number
+            // takes the QuickBooks name and type (Review matches shows each
+            // one for the owner's OK; undo puts the old ones back).
+            update_existing_coa: self.wizard.source == cl_model::imports::wizard::Source::Qbd
+                && kind == ImportKind::Coa,
         };
         if let Err(e) = req.check() {
             f.problem = Some(match e {

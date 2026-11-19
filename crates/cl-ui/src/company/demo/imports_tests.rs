@@ -22,6 +22,7 @@ fn upload(
         contact_kind: (kind == ImportKind::Contacts).then_some(ContactKind::Customer),
         tb_column: None,
         tb_report_date: None,
+        update_existing_coa: false,
     })
 }
 
@@ -194,6 +195,7 @@ fn an_unknown_file_is_unreadable() {
             contact_kind: None,
             tb_column: None,
             tb_report_date: None,
+            update_existing_coa: false,
         })
         .expect_err("unreadable");
     assert!(matches!(e, ApiError::Validation(_)));

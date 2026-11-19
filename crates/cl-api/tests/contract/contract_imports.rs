@@ -247,6 +247,9 @@ fn upload_outcome(
         tb_column: (source == SourceSystem::AccountingPower && f.kind == ImportKind::TrialBalance)
             .then_some(TbColumn::Adjusted),
         tb_report_date: if needs_date { f.report_date } else { None },
+        // As the app sends it (Q-P31ac): a QBD account list takes over a
+        // starter account with its number.
+        update_existing_coa: source == SourceSystem::QuickBooksDesktop && f.kind == ImportKind::Coa,
     };
     let out = h
         .run(s.imports().upload(&req))
@@ -326,6 +329,7 @@ pub fn qbo_csv_reports_are_refused(h: &Harness) {
             contact_kind: f.contact,
             tb_column: None,
             tb_report_date: None,
+            update_existing_coa: false,
         };
         match h.run(s.imports().upload(&req)) {
             Ok(o) if o.is_clean() => {}
@@ -398,22 +402,27 @@ pub fn qbd_into_a_starter_chart(h: &Harness) {
         .iter()
         .map(|f| upload_outcome(h, &s, source, f))
         .collect();
-    let mut map = std::collections::BTreeMap::new();
-    for o in &outcomes {
-        for m in &o.preview.account_matches {
-            eprintln!(
-                "QA-1 match {:?} {} {:?} {:?} role {:?}",
-                o.session.kind, m.source_key, m.status, m.matched_by, m.system_role
-            );
-            if o.session.kind == ImportKind::Coa
-                && m.status == cl_api::imports::MatchStatus::Existing
-                && m.system_role.is_none()
-            {
-                map.insert(m.source_key.clone(), cl_api::imports::AccountTarget::Create);
-            }
-        }
-    }
-    eprintln!("QA-1 create map: {:?}", map.keys().collect::<Vec<_>>());
+    // The account list says which starter numbers it takes over.
+    let taken: Vec<String> = outcomes
+        .iter()
+        .filter(|o| o.session.kind == ImportKind::Coa)
+        .flat_map(|o| o.preview.account_matches.iter())
+        .filter(|m| {
+            m.status == cl_api::imports::MatchStatus::Existing
+                && m.matched_by == Some(cl_api::imports::MatchedBy::Number)
+        })
+        .map(|m| m.source_key.clone())
+        .collect();
+    assert!(taken.contains(&"2200".to_string()), "{taken:?}");
+    let name_of = |n: &str| {
+        h.run(s.accounts().list_all(&cl_api::AccountFilter::default()))
+            .expect("chart")
+            .into_iter()
+            .filter(|a| a.fields.account_number.as_deref() == Some(n))
+            .map(|a| a.fields.name)
+            .collect::<Vec<_>>()
+    };
+    let before = name_of("2200");
     let new = NewBatch {
         source,
         kind: BatchKind::Conversion,
@@ -422,50 +431,24 @@ pub fn qbd_into_a_starter_chart(h: &Harness) {
             fiscal_year_start_month: Some(1),
             conversion_date: Some(day(&fx::section(&e, "company")["conversion_date"])),
             require_empty_company: true,
-            account_map: map,
             ..BatchOptions::default()
         },
     };
-    let id = match h.run(s.imports().create_batch(&new)) {
-        Ok(b) => b.id,
-        Err(err) => {
-            eprintln!("QA-1 batch refused: {err:?}");
-            return;
-        }
-    };
-    let req = CommitRequest {
-        backup_ref: unique("contract-before-import"),
-        ..CommitRequest::default()
-    };
-    h.run(s.imports().commit(id, &req, IdempotencyKey::new()))
-        .expect("commit sent");
-    let st = wait(h, &s, id);
-    eprintln!("QA-1 commit: {:?} {:?}", st.batch.status, st.error);
-    if st.batch.status != BatchStatus::Committed {
-        return;
-    }
-    let chart = h
-        .run(s.accounts().list_all(&cl_api::AccountFilter::default()))
-        .expect("chart");
-    let by_number = |n: &str| {
-        chart
-            .iter()
-            .filter(|a| a.fields.account_number.as_deref() == Some(n))
-            .count()
-    };
-    eprintln!(
-        "QA-1 accounts {} (2200 x{}, 6300 x{})",
-        chart.len(),
-        by_number("2200"),
-        by_number("6300")
+    let id = h.run(s.imports().create_batch(&new)).expect("batch").id;
+    commit(h, &s, id);
+    assert_eq!(
+        name_of("2200"),
+        vec!["Sales Tax Payable".to_string()],
+        "the QuickBooks account takes the starter number"
     );
+    assert_eq!(name_of("6300"), vec!["Payroll Expenses".to_string()]);
     if tieout(h) {
         let t = h.run(s.imports().tieout(id)).expect("tieout");
-        eprintln!("QA-1 tie-out all zero: {}", t.all_zero);
         assert!(t.all_zero, "QA-1: the QuickBooks chart ties out");
     }
+    undo(h, &s, id);
+    assert_eq!(name_of("2200"), before, "undo puts the starter account back");
 }
-
 /// Polls the batch until its job is done.
 fn wait(h: &Harness, s: &Session, id: ImportBatchId) -> BatchState {
     let start = Instant::now();
@@ -962,6 +945,7 @@ fn generic_gl_upload(h: &Harness, s: &Session) -> Result<ImportSessionId, cl_api
         contact_kind: None,
         tb_column: None,
         tb_report_date: None,
+        update_existing_coa: false,
     };
     h.run(s.imports().upload(&req)).map(|o| o.session.id)
 }
@@ -1000,6 +984,7 @@ pub fn overlap_refused_409(h: &Harness) {
             contact_kind: None,
             tb_column: None,
             tb_report_date: None,
+            update_existing_coa: false,
         };
         let overlap = h.run(s.imports().upload(&req))?.session.id;
         let new = NewBatch {
@@ -1128,6 +1113,7 @@ pub fn unmapped_accounts_fail_then_a_mapped_retry_posts(h: &Harness) {
                 contact_kind: None,
                 tb_column: None,
                 tb_report_date: None,
+                update_existing_coa: false,
             }))
             .expect("upload");
         for m in &out.preview.account_matches {
@@ -1310,6 +1296,7 @@ pub fn qbo_xlsx_raw_values_read_exactly(h: &Harness) {
         contact_kind: None,
         tb_column: None,
         tb_report_date: None,
+        update_existing_coa: false,
     };
     let out = h.run(s.imports().upload(&req)).expect("upload");
     assert!(out.is_clean(), "{:?}", out.problems);

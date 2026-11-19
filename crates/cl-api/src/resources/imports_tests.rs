@@ -50,6 +50,7 @@ fn tb_upload() -> UploadRequest {
         contact_kind: None,
         tb_column: None,
         tb_report_date: None,
+        update_existing_coa: false,
     }
 }
 
