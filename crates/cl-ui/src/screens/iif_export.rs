@@ -234,6 +234,17 @@ fn reason_text(r: &StopReason) -> String {
     }
 }
 
+/// Plain words for an engine transaction type.
+#[must_use]
+pub fn type_text(txn_type: &str) -> String {
+    let key = format!("iif.type.{txn_type}");
+    if crate::i18n::has(&key) {
+        t(&key)
+    } else {
+        t("iif.type.other")
+    }
+}
+
 /// Plain words for a limitation.
 #[must_use]
 pub fn limitation_text(l: &Limitation) -> String {
@@ -335,7 +346,7 @@ impl Screen for IifScreen {
                                     ui.end_row();
                                     for s in stops {
                                         ui.label(crate::shell::us_date(s.date));
-                                        ui.label(&s.txn_type);
+                                        ui.label(type_text(&s.txn_type));
                                         ui.label(s.number.clone().unwrap_or_default());
                                         ui.label(reason_text(&s.reason));
                                         if ui.button(t("iif.stop.open")).clicked() {

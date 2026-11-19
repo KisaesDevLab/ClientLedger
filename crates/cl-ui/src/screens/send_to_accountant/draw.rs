@@ -46,20 +46,20 @@ pub(super) fn screen(s: &mut SendScreen, ui: &mut Ui) {
             ui.add_space(10.0);
             ui.columns(2, |cols| {
                 included(s, &mut cols[0], &tokens);
+                cols[0].add_space(10.0);
+                history(s, &mut cols[0], &tokens);
                 totals(s, &mut cols[1], &tokens);
+                cols[1].add_space(10.0);
+                file_card(s, &mut cols[1], &tokens, &mut act);
             });
-            ui.add_space(10.0);
-            file_card(s, ui, &tokens, &mut act);
             result(s, ui, &tokens, &mut act);
-            ui.add_space(10.0);
-            history(s, ui, &tokens);
         });
     let ctx = ui.ctx().clone();
     match act {
         Some(Act::Save) => s.save(Some(&ctx)),
         Some(Act::MakeOne) => s.make_one(),
         Some(Act::Copy) => {
-            ctx.copy_text(s.passphrase.text().to_string());
+            crate::secret_clipboard::copy(&ctx, s.passphrase.text().to_string());
             s.message = Some("send.copied");
         }
         Some(Act::Payroll(discard)) => s.answer_payroll(discard, Some(&ctx)),
@@ -105,14 +105,19 @@ fn steps(ui: &mut Ui, tokens: &Tokens) {
 
 fn included(s: &SendScreen, ui: &mut Ui, tokens: &Tokens) {
     form::card(ui, tokens, |ui| {
+        ui.spacing_mut().item_spacing.y = 4.0;
+        ui.spacing_mut().interact_size.y = 16.0;
         ui.label(RichText::new(t("send.included")).strong());
         let counts = s.preview.as_ref().map(|p| p.counts);
         let n = |v: Option<u64>| v.map_or_else(|| "\u{2026}".to_string(), count_text);
         let yes = |ui: &mut Ui, text: String, tip: Option<String>| {
-            let r = ui.label(RichText::new(format!("\u{2713}  {text}")).color(tokens.text_primary));
-            if let Some(tip) = tip {
-                r.on_hover_text(tip);
-            }
+            ui.horizontal(|ui| {
+                crate::widgets::check_mark(ui, 14.0, tokens.accent, &t("send.included.yes"));
+                let r = ui.label(RichText::new(text).color(tokens.text_primary));
+                if let Some(tip) = tip {
+                    r.on_hover_text(tip);
+                }
+            });
         };
         yes(
             ui,
@@ -136,7 +141,7 @@ fn included(s: &SendScreen, ui: &mut Ui, tokens: &Tokens) {
         yes(ui, t("send.inc.names"), None);
         yes(ui, t("send.inc.hidden"), Some(t("send.inc.hidden.tip")));
         let no = |ui: &mut Ui, text: String| {
-            ui.label(RichText::new(format!("\u{2715}  {text}")).color(tokens.text_secondary));
+            ui.label(RichText::new(format!("\u{d7}  {text}")).color(tokens.text_secondary));
         };
         no(ui, t("send.exc.secrets"));
         if let Some(p) = &s.preflight
@@ -280,15 +285,18 @@ fn file_card(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<
                 _ => t("send.working"),
             };
             form::progress_line(ui, tokens, &text);
-        } else if s.ask != Ask::Payroll
-            && ui
-                .add_enabled(
-                    s.supported(),
-                    egui::Button::new(RichText::new(t("send.save")).strong()),
-                )
-                .clicked()
-        {
-            *act = Some(Act::Save);
+        } else if s.ask != Ask::Payroll {
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(
+                        s.supported(),
+                        egui::Button::new(RichText::new(t("send.save")).strong()),
+                    )
+                    .clicked()
+                {
+                    *act = Some(Act::Save);
+                }
+            });
         }
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(t("send.backup_first")).color(tokens.text_secondary));
@@ -358,9 +366,10 @@ fn result(s: &SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<Act>) {
                 form::hint(
                     ui,
                     tokens,
-                    &t_with(
+                    &crate::i18n::t_count(
                         "send.done.discarded",
-                        &[("n", &count_text(o.discarded_payroll))],
+                        usize::try_from(o.discarded_payroll).unwrap_or(usize::MAX),
+                        &[],
                     ),
                 );
             }

@@ -31,7 +31,7 @@ steps:
   - click: {role: button, label: "Save transfer file…"}
   - wait: {ms: 200}
   - assert_state: {key: screen.error, equals: error.transfer.passphrase_short}
-  - assert_exists: {label_contains: "at least 12 characters"}
+  - assert_exists: {label_contains: "transfer passphrase needs"}
   - screenshot: passphrase-short
   # Make one for me fills both boxes.
   - click: {role: button, label: Make one for me}
@@ -62,7 +62,7 @@ steps:
   - assert_exists: {label: Transfer file saved}
   - assert_exists: {label_contains: "Your books changed while the file was made"}
   - assert_exists: {role: button, label: Open folder}
-  - assert_exists: {label: Transfer file}
+  - assert_exists: {label: Transfer file, index: 0}
   - assert_state: {key: screen.passphrase_filled, equals: false}
   - screenshot: saved
   # Missing files are all listed with Open record.
