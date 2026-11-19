@@ -59,7 +59,7 @@ use crate::company::{CompanyEvent, CompanyLink, Task};
 use crate::i18n::t;
 use crate::windows::Screen;
 
-mod draw;
+pub(crate) mod draw;
 #[cfg(test)]
 mod tests;
 
@@ -394,6 +394,14 @@ pub struct PayrollImportScreen {
     pub(crate) backup_failed: Option<cl_company::CompanyError>,
     /// The owner stopped the post while the backup was being made.
     pub(crate) backup_stopped: bool,
+    /// P31 QA-20: the close prompt is up; a finished backup parks the post.
+    close_asked: bool,
+    /// The post whose backup finished under the close prompt (sent on Keep).
+    parked_post: Option<HeldPost>,
+    /// P31 QA-2 (Q-P31ad): the inline backup passphrase.
+    pub(crate) passphrase: crate::widgets::passphrase::PassphraseAsk,
+    /// No backup passphrase is set: the boxes show above Post.
+    pub(crate) need_passphrase: bool,
     status_job: Option<Job<cl_api::payroll::SessionSummary>>,
     pub(crate) status_answer: Option<bool>,
     pub(crate) trouble: Option<Trouble>,
@@ -618,6 +626,10 @@ impl PayrollImportScreen {
             held_post: None,
             backup_failed: None,
             backup_stopped: false,
+            close_asked: false,
+            parked_post: None,
+            passphrase: crate::widgets::passphrase::PassphraseAsk::default(),
+            need_passphrase: false,
             status_job: None,
             status_answer: None,
             trouble: None,
@@ -634,6 +646,7 @@ impl PayrollImportScreen {
             reversed: None,
             discard_job: None,
         };
+        s.need_passphrase = crate::widgets::passphrase::needed(&s.link);
         if !s.allowed() {
             s.trouble = Some(Trouble::Restricted);
         } else if !s.supported() {
@@ -781,6 +794,9 @@ impl PayrollImportScreen {
         }
         // Q-P30h: a backup passphrase was set (Back Up): "no passphrase"
         // no longer applies. Nothing is posted until Post is pressed.
+        if changes.backup_passphrase {
+            self.need_passphrase = false;
+        }
         if changes.backup_passphrase
             && matches!(
                 self.backup_failed,
@@ -1742,8 +1758,16 @@ impl PayrollImportScreen {
         let Some(id) = self.upload.as_ref().map(|u| u.session) else {
             return;
         };
-        if self.post_job.is_some() || self.backup_job.is_some() {
+        if self.post_job.is_some() || self.backup_job.is_some() || self.parked_post.is_some() {
             return;
+        }
+        // P31 QA-2 (Q-P31ad): no passphrase yet: the one typed in the boxes
+        // is saved first (as Back Up saves it); nothing is sent without it.
+        if self.need_passphrase {
+            if !self.passphrase.save(&self.link) {
+                return;
+            }
+            self.need_passphrase = false;
         }
         self.backup_failed = None;
         self.backup_stopped = false;
@@ -1851,6 +1875,9 @@ impl PayrollImportScreen {
                 .ok()
                 .and_then(|l| l.backup_folder)
                 .unwrap_or(default_dir);
+            // P31: the before-import backups share one retention, so a
+            // payroll post never prunes the one an import still needs.
+            let protected = crate::screens::qbd_import::protected_backups(&session).await;
             cl_company::backup(
                 &session,
                 &store,
@@ -1860,6 +1887,7 @@ impl PayrollImportScreen {
                     kind: cl_settings::BackupKind::BeforeImport,
                     dest_dir,
                     apply_retention: true,
+                    protected,
                 },
                 &cl_company::backup::silent(),
             )
@@ -1883,12 +1911,21 @@ impl PayrollImportScreen {
             (Ok(()), Some(held)) => {
                 tracing::info!(target: "payroll", "backup made before posting");
                 self.backed_up = Some(held.draft.clone());
-                self.send_post(held);
+                if self.close_asked {
+                    // P31 QA-20: the close prompt is up; Close drops this
+                    // unsent, Keep sends it.
+                    self.parked_post = Some(held);
+                } else {
+                    self.send_post(held);
+                }
             }
             // Stopped meanwhile: the backup is kept, nothing is sent.
             (Ok(()), None) => {}
             (Err(e), _) => {
                 tracing::warn!(target: "payroll", detail = %cl_core::OwnerFacing::scrubbed_detail(&e), "backup before posting failed; nothing posted");
+                if matches!(e, cl_company::CompanyError::NoPassphrase) {
+                    self.need_passphrase = true;
+                }
                 self.backup_failed_now(e);
             }
         }
@@ -1897,10 +1934,11 @@ impl PayrollImportScreen {
     /// "Stop, don't post" (or Cancel/Esc) while the backup is made: the
     /// post is dropped; the backup itself finishes and is kept.
     pub(crate) fn stop_backup(&mut self) -> bool {
-        if self.backup_job.is_none() {
+        if self.backup_job.is_none() && self.parked_post.is_none() {
             return false;
         }
         self.backup_job = None;
+        self.parked_post = None;
         self.held_post = None;
         self.backed_up = None;
         self.backup_stopped = true;
@@ -1909,7 +1947,7 @@ impl PayrollImportScreen {
 
     /// The backup is being made before the post.
     pub(crate) fn backing_up(&self) -> bool {
-        self.backup_job.is_some()
+        self.backup_job.is_some() || self.parked_post.is_some()
     }
 
     fn send_post(&mut self, held: HeldPost) {
@@ -2570,12 +2608,21 @@ impl Screen for PayrollImportScreen {
     }
 
     /// QA-13: the payroll wizard's own question (not the bank import's).
-    fn close_words(&self) -> Option<crate::windows::CloseWords> {
+    fn close_words(&self, _quitting: bool) -> Option<crate::windows::CloseWords> {
         Some(crate::windows::CloseWords {
             message: t("payroll.close_prompt"),
             close: t("payroll.close_prompt.discard"),
             keep: t("payroll.close_prompt.keep"),
         })
+    }
+
+    /// P31 QA-20: a post whose backup finished under the close prompt waits
+    /// for the answer (Keep sends it; Close drops the window unsent).
+    fn close_asked(&mut self, asked: bool) {
+        self.close_asked = asked;
+        if !asked && let Some(held) = self.parked_post.take() {
+            self.send_post(held);
+        }
     }
 
     fn ui(&mut self, ui: &mut eframe::egui::Ui) {

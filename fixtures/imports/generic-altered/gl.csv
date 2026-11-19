@@ -1,0 +1,9 @@
+Date,Account,Amount,Offset Account,Description,Name,Reference,Tag
+2026-01-05,1100,2250.00,4010,Wholesale order,Hilltop Grocers,1001,Wholesale
+2026-01-20,1010,1800.00,1100,Customer payment,Hilltop Grocers,DEP1,
+2026-02-02,5010,1125.75,1010,Flour,Flour Mill Co,CHK501,
+2026-02-15,6020,125.50,2300,Office supplies,,CC88,
+2026-03-01,6010,301.20,1010,City Utilities,,CHK502,
+2026-04-10,1010,(950.00),2010,Pay supplier,Sugar Supply Inc,CHK503,
+2026-05-22,1010,"$3,402.33",4010,Cash sales,,DEP2,Retail
+2026-06-15,5010,640.00,2010,Sugar,Sugar Supply Inc,BILL77,

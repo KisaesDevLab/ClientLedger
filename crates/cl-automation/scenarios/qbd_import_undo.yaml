@@ -1,0 +1,92 @@
+# Switch from QuickBooks Desktop (P31): Undo this import. Confirm, a backup,
+# then the books go back as they were: History says Undone and the same
+# files are accepted again (no "imported before" refusal). A second import
+# with something that depends on it (a payment on an imported invoice) can't
+# be undone: the window says what is in the way and offers to restore the
+# backup taken before the import (a new company; the button is not pressed).
+name: qbd_import_undo
+description: Undo after an import - Keep it, Undo, History says Undone, files accepted again; a blocked undo lists why and offers the restore.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: file.import_qbd
+  - command: dev.imports_demo_reset
+  - key: Alt+N
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  # Review B2: mid-import the close and quit prompts tell the truth.
+  - command: dev.imports_demo_job_hold
+  - key: Alt+N
+  - assert_state: {key: screen.running, equals: commit, within_ms: 4000}
+  - command: file.close_window
+  - assert_state: {key: prompt_open, equals: true}
+  - assert_exists: {role: label, label_contains: keeps running after you close this window}
+  - screenshot: close-prompt-running
+  - click: {role: button, label: Keep importing}
+  - assert_state: {key: prompt_open, equals: false}
+  # The quit prompt's words are covered by the unit test (the demo's dirty
+  # Write Check is asked about first, and only in the first theme's run).
+  - command: dev.imports_demo_job_release
+  - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
+  - assert_state: {key: screen.tieout_all_zero, equals: true, within_ms: 4000}
+  # Keep it: nothing happens.
+  - click: {role: link, label: Undo this import}
+  - assert_state: {key: screen.confirm_undo, equals: true}
+  - assert_exists: {role: label, label: Undo this import?}
+  - screenshot: confirm
+  - click: {role: button, label: Keep it}
+  - assert_state: {key: screen.confirm_undo, equals: false}
+  - assert_state: {key: screen.undone, equals: false}
+  # Undo.
+  - click: {role: link, label: Undo this import}
+  - click: {role: button, label: Undo import}
+  - assert_state: {key: screen.undone, equals: true, within_ms: 8000}
+  - screenshot: undone
+  - click: {role: button, label: History}
+  - assert_state: {key: screen.history.undone, equals: 1, within_ms: 4000}
+  - assert_state: {key: screen.history.committed, equals: 0}
+  # D6: the Undone row says why it has no buttons.
+  - assert_exists: {label_contains: "Nothing from it is in your books", index: 0}
+  - screenshot: history-undone
+  # The same files go in again: nothing says they were imported before.
+  # Start over (the demo reset) goes back from History to the wizard.
+  - command: dev.imports_demo_reset
+  - assert_state: {key: screen.view, equals: import}
+  - key: Alt+N
+  # QA-1 (Q-P31ac): 2200 matches an account of another name by number:
+  # shown with both names, and Continue waits for the owner's OK.
+  - command: dev.imports_demo_number_match
+  - command: dev.imports_demo_file_all
+  - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
+  - assert_state: {key: screen.files_refused, equals: 0}
+  - assert_state: {key: screen.can_next, equals: true}
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: mapping}
+  - assert_state: {key: screen.needs_you, equals: 1}
+  - assert_state: {key: screen.can_next, equals: false}
+  - assert_exists: {role: label, label: 'Matched by account number, with another name'}
+  - screenshot: number-match
+  - click: {role: combo_box, label: '2200'}
+  - click: {role: button, label_contains: becomes 2200}
+  - assert_state: {key: screen.needs_you, equals: 0, within_ms: 2000}
+  - assert_state: {key: screen.can_next, equals: true}
+  - key: Alt+N
+  - key: Alt+N
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: tieout, within_ms: 8000}
+  # Something now depends on the import: Undo is refused with the reasons.
+  - command: dev.imports_demo_block_undo
+  - click: {role: link, label: Undo this import}
+  - click: {role: button, label: Undo import}
+  - assert_state: {key: screen.blocked_by, equals: 1, within_ms: 4000}
+  # QA-11: the reason in plain words, once.
+  - assert_exists: {label_contains: A payment is applied to}
+  - assert_state: {key: screen.undone, equals: false}
+  - assert_exists: {role: button, label: Restore the backup taken before the import}
+  - screenshot: blocked
+  - command: dev.imports_demo_reset
+  - command: file.close_window
+  - wait: {ms: 300}

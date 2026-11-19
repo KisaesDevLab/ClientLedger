@@ -236,7 +236,13 @@ pub const COMMANDS: &[Command] = &[
     built("file.backup", "Back Up Company", Some(Menu::File), 1, None),
     cmd("file.restore", "Restore a Backup", Some(Menu::File), 1, None, Scope::Global),
     built("file.export_all", "Export All Data", Some(Menu::File), 1, None),
+    // P31 D5 (Q-125): invoices, bills and journal entries from a spreadsheet.
+    built("file.import_transactions", "Import Transactions from a Spreadsheet", Some(Menu::File), 1, None),
     screen("file.full_backup", "Full Database Backup (Utilities)", Some(Menu::File), 1, None, "P34"),
+    // P31: bring the books over from another program (Admins only; no
+    // submenus, so a group of its own under File).
+    built("file.import_qbd", "Import from QuickBooks Desktop", Some(Menu::File), 6, None),
+    built("file.import_system", "Import from Another Accounting Program", Some(Menu::File), 6, None),
     built("file.delete_company", "Delete Company", Some(Menu::File), 2, None),
     cmd("file.print", "Print", Some(Menu::File), 3, ctrl('P'), Scope::Global),
     // P19: the print queues and the printer's alignment (no shortcut)
@@ -630,6 +636,105 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.demo_bank_import_slow",
         "Slow Demo Bank Import Preparation (developer)",
     ),
+    // P31 D5: the spreadsheet import scenarios run light and dark in one app.
+    dev_action(
+        "dev.txn_import_demo_reset",
+        "Reset Demo Spreadsheet Import (developer)",
+    ),
+    dev_action(
+        "dev.txn_import_demo_file_good",
+        "Demo Spreadsheet: Good File (developer)",
+    ),
+    dev_action(
+        "dev.txn_import_demo_file_bad_rows",
+        "Demo Spreadsheet: File with Problems (developer)",
+    ),
+    dev_action(
+        "dev.txn_import_demo_close_books",
+        "Close Demo Books for Spreadsheet Import (developer)",
+    ),
+    dev_action(
+        "dev.txn_import_demo_lose_answer",
+        "Lose the Next Demo Import Answer (developer)",
+    ),
+    dev_action(
+        "dev.txn_import_demo_backup_fails",
+        "Fail the Next Demo Import Backup (developer)",
+    ),
+    // P31 D6: the import scenarios run light and dark in one app.
+    dev_action("dev.imports_demo_reset", "Reset Demo Import (developer)"),
+    dev_action(
+        "dev.imports_demo_file_all",
+        "Demo Import: Add the Whole Base Set (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_backup_fail",
+        "Fail the Next Demo Import Backup (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_not_empty",
+        "Demo Import: Company Has Transactions (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_unmatched",
+        "Demo Import: One Account Matches Nothing (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_number_match",
+        "Demo Import: One Account Matches Another Name by Number (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_close_books",
+        "Close Demo Books for Import (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_job_hold",
+        "Demo Import: Hold the Running Job (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_job_release",
+        "Demo Import: Release the Running Job (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_block_undo",
+        "Demo Import: Something Blocks Undo (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_no_closing_password",
+        "Demo Import: No Closing-Date Password (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_confirm_closed",
+        "Demo Import: Confirm the Closed Period (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_differences_only",
+        "Demo Import: Toggle Only Differences (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_spot_tick_all",
+        "Demo Import: Tick Every Spot-Check Item (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_fail_commit",
+        "Demo Import: Fail the Next Commit (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_tab_accounts",
+        "Demo Import: Trial Balance Tab (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_tab_receivables",
+        "Demo Import: A/R Tab (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_tab_payables",
+        "Demo Import: A/P Tab (developer)",
+    ),
+    dev_action(
+        "dev.imports_demo_tab_inventory",
+        "Demo Import: Inventory Tab (developer)",
+    ),
     // P30: the payroll scenarios run light and dark in one app.
     dev_action("dev.payroll_demo_reset", "Reset Demo Payroll (developer)"),
     dev_action(
@@ -938,6 +1043,10 @@ mod tests {
             "reports.closing_date_exceptions",
             // P30
             "payroll.import",
+            // P31
+            "file.import_qbd",
+            "file.import_system",
+            "file.import_transactions",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

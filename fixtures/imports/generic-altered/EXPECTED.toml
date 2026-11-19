@@ -1,0 +1,14 @@
+# Bluebonnet Bakery, altered (Generic CSV): the 03/01/2026 utilities row
+# reads 301.20 instead of 310.20 (digits swapped) in gl.csv. Every other file
+# is the generic set's. Worked out by hand. Differences are books minus
+# source (signed, debit positive); every account not listed differs by 0.00.
+
+[company]
+base = "generic"
+
+[replaces]
+gl = "gl.csv"
+
+[diffs]
+"1010" = "9.00"
+"6010" = "-9.00"

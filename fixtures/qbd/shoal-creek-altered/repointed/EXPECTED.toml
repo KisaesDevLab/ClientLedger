@@ -1,0 +1,17 @@
+# Shoal Creek, altered: bill F-131 (09/20/2026, 389.44) is re-pointed from
+# 6100 Fuel to 6200 Repairs in journal-2025-2026.csv. Every other file is the
+# base set's. Worked out by hand. Differences are books minus source
+# (signed, debit positive); every account not listed differs by 0.00.
+
+[replaces]
+journal-2025-2026 = "journal-2025-2026.csv"
+
+[diffs]
+"6100" = "-389.44"
+"6200" = "389.44"
+
+[balance_rows]
+history_ar = "0.00"
+history_ap = "0.00"
+history_inventory = "0.00"
+valuation_vs_asset = "0.00"

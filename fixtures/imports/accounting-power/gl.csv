@@ -1,0 +1,17 @@
+Journal,Date,Reference,Description,Account,Account Name,Debit Amount,Credit Amount,Memo
+AR,01/05/2026,1001,Wholesale order,1100,Accounts Receivable,"2,250.00",0.00,Hilltop Grocers
+AR,01/05/2026,1001,Wholesale order,4010,Bakery Sales,0.00,"2,250.00",Hilltop Grocers
+CR,01/20/2026,DEP1,Customer payment,1010,Operating Cash,"1,800.00",0.00,
+CR,01/20/2026,DEP1,Customer payment,1100,Accounts Receivable,0.00,"1,800.00",
+CD,02/02/2026,CHK501,Flour Mill Co,5010,Ingredients,"1,125.75",0.00,
+CD,02/02/2026,CHK501,Flour Mill Co,1010,Operating Cash,0.00,"1,125.75",
+GJ,02/15/2026,CC88,Office supplies,6020,Supplies,125.50,0.00,
+GJ,02/15/2026,CC88,Office supplies,2300,Credit Card,0.00,125.50,
+CD,03/01/2026,CHK502,City Utilities,6010,Utilities,310.20,0.00,
+CD,03/01/2026,CHK502,City Utilities,1010,Operating Cash,0.00,310.20,
+CD,04/10/2026,CHK503,Pay supplier,2010,Accounts Payable,950.00,0.00,
+CD,04/10/2026,CHK503,Pay supplier,1010,Operating Cash,0.00,950.00,
+CR,05/22/2026,DEP2,Cash sales,1010,Operating Cash,"3,402.33",0.00,
+CR,05/22/2026,DEP2,Cash sales,4010,Bakery Sales,0.00,"3,402.33",
+AP,06/15/2026,BILL77,Sugar Supply Inc,5010,Ingredients,640.00,0.00,
+AP,06/15/2026,BILL77,Sugar Supply Inc,2010,Accounts Payable,0.00,640.00,

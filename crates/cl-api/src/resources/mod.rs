@@ -32,6 +32,8 @@ pub mod feed_rules;
 pub mod finance_charges;
 pub mod form1099;
 pub mod home_queries;
+// P31: QBD and other-system imports (U-260 to U-268).
+pub mod imports;
 pub mod intake;
 pub mod inventory;
 pub mod invoice_layouts;
@@ -45,6 +47,8 @@ pub mod operations;
 pub mod payments;
 // P30: payroll import (U-242 to U-251).
 pub mod payroll;
+// P31 D5: spreadsheet transaction import (U-261, U-268).
+pub mod import_transactions;
 pub mod posting;
 pub mod printing;
 pub(crate) mod reconcile;

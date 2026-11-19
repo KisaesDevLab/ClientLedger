@@ -915,6 +915,32 @@ fn group_digits(n: u64) -> String {
     out
 }
 
+/// A restore another window asks for (P31: "Restore the backup taken
+/// before the import"): the next Open Company frame shows its restore
+/// panel with this file filled in. The path is never logged.
+static RESTORE_REQUEST: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+/// Asks Open Company to show its restore panel with `path` (the window is
+/// opened or brought to the front by the caller).
+pub fn request_restore(path: std::path::PathBuf) {
+    *RESTORE_REQUEST
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(path);
+}
+
+impl OpenCompanyScreen {
+    fn take_restore_request(&mut self) {
+        let asked = RESTORE_REQUEST
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(p) = asked {
+            self.restore_open = true;
+            self.restore_path = p.display().to_string();
+        }
+    }
+}
+
 impl Screen for OpenCompanyScreen {
     fn title(&self) -> String {
         t("open.tab")
@@ -926,6 +952,7 @@ impl Screen for OpenCompanyScreen {
 
     fn ui(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
+        self.take_restore_request();
         self.poll();
         // P29 WP2: after Sign out the window asks for a sign-in again.
         if self.stage == Stage::Ready && !self.link.signed_in() && self.busy.is_none() {

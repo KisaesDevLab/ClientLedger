@@ -1,0 +1,11 @@
+Account,Description,Type,Class,Category,SubAccount Of
+1010,Operating Cash,A,Current,Cash,
+1100,Accounts Receivable,A,Current,Receivables,
+2010,Accounts Payable,L,Current,Payables,
+2300,Credit Card,L,Current,Credit Cards,
+3010,Owner's Equity,Q,Equity,Capital,
+3200,Retained Earnings,Q,Equity,Retained,
+4010,Bakery Sales,I,Revenue,Sales,
+5010,Ingredients,C,Cost of Sales,Materials,
+6010,Utilities,E,Operating,Occupancy,
+6020,Supplies,E,Operating,Office,

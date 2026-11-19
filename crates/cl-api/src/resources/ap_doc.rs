@@ -867,11 +867,16 @@ impl<'de> Deserialize<'de> for BillRecord {
             // are never bill lines (P24 §2.3 B3; `inventoryLines[]`).
             .filter(|(l, _)| !l.is_inventory_derived())
             .filter_map(|(l, x)| {
-                let amount = match kind {
-                    ApKind::Bill => l.debit,
-                    ApKind::VendorCredit => l.credit,
+                // The engine stores each document line on its own side as
+                // given, so a negative line (a refund or discount on an
+                // imported bill) is a negative debit. The A/P line is the
+                // one on the other side: its total is positive, and a
+                // document line never has an amount there.
+                let (amount, other) = match kind {
+                    ApKind::Bill => (l.debit, l.credit),
+                    ApKind::VendorCredit => (l.credit, l.debit),
                 };
-                amount.is_positive().then(|| BillRecordLine {
+                other.is_zero().then(|| BillRecordLine {
                     account: l.account_id,
                     amount,
                     description: l.description.clone(),

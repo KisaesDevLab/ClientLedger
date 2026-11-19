@@ -224,6 +224,7 @@ async fn backup_moves_the_archive_verifies_it_and_records_history() {
             kind: BackupKind::Backup,
             dest_dir: dir.path().join("Backups"),
             apply_retention: true,
+            protected: None,
         },
         &progress,
     )
@@ -291,6 +292,7 @@ async fn backup_refuses_without_a_passphrase_and_a_bad_copy_is_removed() {
         kind: BackupKind::Backup,
         dest_dir: dir.path().join("Backups"),
         apply_retention: false,
+        protected: None,
     };
     let e = backup(&s, &store, &empty, &req, &cl_company::backup::silent())
         .await

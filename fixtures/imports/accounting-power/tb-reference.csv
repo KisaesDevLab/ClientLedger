@@ -1,0 +1,11 @@
+Account Code,Type,Description,Beginning Balance,Adjusted Balance
+1010,A,Operating Cash,"12,500.00","15,316.38"
+1100,A,Accounts Receivable,"1,800.00","2,250.00"
+2010,L,Accounts Payable,-950.00,-640.00
+2300,L,Credit Card,-425.50,-551.00
+3010,Q,Owner's Equity,"-10,000.00","-10,000.00"
+3200,Q,Retained Earnings,"-2,924.50","-2,924.50"
+4010,I,Bakery Sales,0.00,"-5,652.33"
+5010,C,Ingredients,0.00,"1,765.75"
+6010,E,Utilities,0.00,310.20
+6020,E,Supplies,0.00,125.50

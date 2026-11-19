@@ -72,6 +72,7 @@ impl RetryClass {
             RetryClass::Keyable(KeySet::FeedAcceptV1) => "keyable-feed-accept",
             RetryClass::Keyable(KeySet::FeedUndoV1) => "keyable-feed-undo",
             RetryClass::Keyable(KeySet::PayrollV1) => "keyable-payroll",
+            RetryClass::Keyable(KeySet::ImportsV1) => "keyable-imports",
             RetryClass::KeyedOnce => "keyed-once",
             RetryClass::Never => "never",
             RetryClass::Query => "query",
@@ -176,6 +177,9 @@ pub enum KeySet {
     /// `payroll-import-post-v1` (U-244, P30): payroll post and reverse (key
     /// required; one transaction each).
     PayrollV1,
+    /// `imports-batch-v1` (U-261, P31 E1): an import batch's commit and
+    /// undo (key required; each runs as one job in one transaction).
+    ImportsV1,
 }
 
 impl KeySet {
@@ -212,6 +216,7 @@ impl KeySet {
             KeySet::FeedAcceptV1 => crate::wire::Capabilities::FEED_ACCEPT,
             KeySet::FeedUndoV1 => crate::wire::Capabilities::FEED_UNDO,
             KeySet::PayrollV1 => crate::wire::Capabilities::PAYROLL_IMPORT_POST,
+            KeySet::ImportsV1 => crate::wire::Capabilities::IMPORTS_BATCH,
         }
     }
 }
@@ -278,7 +283,7 @@ impl Operation {
     }
 }
 
-const fn op(
+pub(crate) const fn op(
     method: Method,
     route: &'static str,
     retry: RetryClass,
@@ -1004,6 +1009,75 @@ pub(crate) const PAYROLL_AUTO_MAP: Operation = write(
     Method::Post,
     "/api/v1/payroll-import/account-mappings/{companyId}/auto-map",
 );
+
+// ---- P31: QBD and other-system imports (U-260 to U-268) ----------------------
+// Upload, session and discard are in the pinned spec; the `/imports/batches`
+// routes arrive with engine E1-E4 (outside the pinned spec until the pin bump).
+
+/// Uploads one import file (multipart): the Import time class, one attempt.
+/// Not keyed: a lost answer leaves at most an unbatched session, which the
+/// wizard discards.
+pub(crate) const IMPORTS_UPLOAD: Operation = op(
+    Method::Post,
+    "/api/v1/imports/upload",
+    RetryClass::PreHandlerOnly,
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// One uploaded import file (its parse preview and row problems).
+pub(crate) const IMPORTS_SESSION: Operation = read("/api/v1/imports/{id}");
+/// Discards an uploaded file that is not in a committed batch.
+pub(crate) const IMPORTS_DISCARD: Operation = write(Method::Delete, "/api/v1/imports/{id}");
+/// Groups uploaded files into one import batch (E1).
+pub(crate) const IMPORT_BATCH_CREATE: Operation = write(Method::Post, "/api/v1/imports/batches");
+/// The company's import batches, newest first (History).
+pub(crate) const IMPORT_BATCHES: Operation = read("/api/v1/imports/batches");
+/// One batch with its job progress (Check status).
+pub(crate) const IMPORT_BATCH: Operation = read("/api/v1/imports/batches/{id}");
+/// Commits a batch as one job (`imports-batch-v1`, key required): 202, then
+/// poll the batch. One attempt; "Try again" is the owner's, same key.
+pub(crate) const IMPORT_BATCH_COMMIT: Operation = op(
+    Method::Post,
+    "/api/v1/imports/batches/{id}/commit",
+    RetryClass::Keyable(KeySet::ImportsV1),
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// Undoes a committed batch as one job (key required). As for commit.
+pub(crate) const IMPORT_BATCH_UNDO: Operation = op(
+    Method::Post,
+    "/api/v1/imports/batches/{id}/undo",
+    RetryClass::Keyable(KeySet::ImportsV1),
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// Computes the batch's tie-out (saves the result on the batch).
+pub(crate) const IMPORT_BATCH_TIEOUT: Operation = op(
+    Method::Post,
+    "/api/v1/imports/batches/{id}/tieout",
+    RetryClass::PreHandlerOnly,
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// Marks the batch verified when the recomputed tie-out is all zero.
+pub(crate) const IMPORT_BATCH_VERIFY: Operation = op(
+    Method::Post,
+    "/api/v1/imports/batches/{id}/verify",
+    RetryClass::PreHandlerOnly,
+    RouteKind::Session,
+    TimeoutClass::Import,
+    true,
+);
+/// Saves the batch's spot-check list (Q-144).
+pub(crate) const IMPORT_BATCH_SPOT_CHECK: Operation =
+    write(Method::Put, "/api/v1/imports/batches/{id}/spot-check");
+/// The transactions a batch created, paged (U-271; the spot-check sample).
+pub(crate) const IMPORT_BATCH_TRANSACTIONS: Operation =
+    read("/api/v1/imports/batches/{id}/transactions");
 /// One account's reconciliations, newest statement first.
 pub(crate) const RECONCILIATIONS: Operation = read("/api/v1/banking/reconciliations");
 /// Imported bank statements.
@@ -2048,7 +2122,7 @@ const NEVER_RETRIED: [(&str, &str); 7] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 457] = [
+pub const OPERATIONS: [Operation; 469] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2530,6 +2604,18 @@ pub const OPERATIONS: [Operation; 457] = [
     PAYROLL_ACCOUNT_MAPPINGS,
     PAYROLL_ACCOUNT_MAPPINGS_SAVE,
     PAYROLL_AUTO_MAP,
+    IMPORTS_UPLOAD,
+    IMPORTS_SESSION,
+    IMPORTS_DISCARD,
+    IMPORT_BATCH_CREATE,
+    IMPORT_BATCHES,
+    IMPORT_BATCH,
+    IMPORT_BATCH_COMMIT,
+    IMPORT_BATCH_UNDO,
+    IMPORT_BATCH_TIEOUT,
+    IMPORT_BATCH_VERIFY,
+    IMPORT_BATCH_SPOT_CHECK,
+    IMPORT_BATCH_TRANSACTIONS,
 ];
 
 /// Looks up a covered operation.
@@ -2686,6 +2772,8 @@ mod tests {
                 Some(KeySet::FeedUndoV1)
             } else if KEYABLE_PAYROLL.contains(&route) {
                 Some(KeySet::PayrollV1)
+            } else if KEYABLE_IMPORTS.contains(&route) {
+                Some(KeySet::ImportsV1)
             } else {
                 None
             };
@@ -2734,6 +2822,7 @@ mod tests {
                 + KEYABLE_FEED.len()
                 + KEYABLE_FEED_POST.len()
                 + KEYABLE_PAYROLL.len()
+                + KEYABLE_IMPORTS.len()
                 + 3,
             "every idempotency-v1, idempotency-ap-v1, idempotency-docs-v1, document-drafts-attach-v1 and idempotency-pay-bills-v1 route is covered"
         );
@@ -2931,6 +3020,12 @@ mod tests {
     const KEYABLE_PAYROLL: [(&str, &str); 2] = [
         ("POST", "/api/v1/payroll-import/sessions/{id}/post"),
         ("POST", "/api/v1/payroll-import/sessions/{id}/reverse"),
+    ];
+
+    /// `imports-batch-v1` (U-261, P31 E1).
+    const KEYABLE_IMPORTS: [(&str, &str); 2] = [
+        ("POST", "/api/v1/imports/batches/{id}/commit"),
+        ("POST", "/api/v1/imports/batches/{id}/undo"),
     ];
 
     /// `feed-match-post-v1` (U-171, P26 E4).

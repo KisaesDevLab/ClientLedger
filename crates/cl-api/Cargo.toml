@@ -40,6 +40,9 @@ cl-api = { path = ".", features = ["test-support"] }
 cl-host = { path = "../cl-host", features = ["test-support"] }
 cl-pg = { path = "../cl-pg" }
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
+# The QuickBooks Online import fixtures as xlsx with numeric cells (P31);
+# MIT OR Apache-2.0, already in the tree through cl-print.
+rust_xlsxwriter = { version = "0.102.0", default-features = false }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util"] }
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt", "std"] }
 wiremock = "0.6.5"

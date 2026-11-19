@@ -1,0 +1,11 @@
+Account #,Full name,Type,Detail type,Description
+1010,Operating Cash,Bank,Checking,
+1100,Accounts Receivable,Accounts receivable (A/R),Accounts Receivable (A/R),
+2010,Accounts Payable,Accounts payable (A/P),Accounts Payable (A/P),
+2300,Credit Card,Credit Card,Credit Card,
+3010,Owner's Equity,Equity,Owner's Equity,
+3200,Retained Earnings,Equity,Retained Earnings,
+4010,Bakery Sales,Income,Sales of Product Income,
+5010,Ingredients,Cost of Goods Sold,Supplies & Materials - COGS,
+6010,Utilities,Expenses,Utilities,
+6020,Supplies,Expenses,Supplies & Materials,

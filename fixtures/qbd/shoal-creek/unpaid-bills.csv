@@ -1,0 +1,9 @@
+"Shoal Creek Landscaping",,,,,,,
+"Unpaid Bills Detail",,,,,,,
+"As of October 27, 2026",,,,,,,
+,"Type","Date","Num","Name","Due Date","Aging","Open Balance"
+,"Bill","09/20/2026","F-131","Hill Country Fuel","10/20/2026","7","389.44"
+,"Credit","10/22/2026","VC-9","Hill Country Fuel","","","-50.00"
+,"Bill","10/10/2026","OCT26","Lakeside Properties LLC","10/10/2026","17","750.00"
+,"Bill","10/05/2026","NP-552","Native Plant Supply","11/04/2026","","800.00"
+,"TOTAL","","","","","","1,889.44"

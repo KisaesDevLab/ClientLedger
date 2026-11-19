@@ -13,3 +13,6 @@ fixtures/batch/** -text
 fixtures/bank/** -text
 # Payroll import fixtures keep their exact bytes (file hashes are duplicate keys).
 fixtures/payroll/** -text
+# QBD and other-system import fixtures keep their exact bytes (Latin-1, file hashes are re-import keys).
+fixtures/qbd/** -text
+fixtures/imports/** -text

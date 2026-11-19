@@ -1,0 +1,11 @@
+Account Number,Account Name,Debit,Credit
+1010,Operating Cash,15316.38,
+1100,Accounts Receivable,2250.00,
+2010,Accounts Payable,,640.00
+2300,Credit Card,,551.00
+3010,Owner's Equity,,10000.00
+3200,Retained Earnings,,2924.50
+4010,Bakery Sales,,5652.33
+5010,Ingredients,1765.75,
+6010,Utilities,310.20,
+6020,Supplies,125.50,

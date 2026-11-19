@@ -212,8 +212,8 @@ mod tests {
         assert_eq!(backup.shortcut, None);
         assert_eq!(
             file.iter().filter(|r| r.separator_before).count(),
-            5,
-            "six groups in the File menu"
+            6,
+            "seven groups in the File menu (P31: the imports)"
         );
         for m in Menu::ALL {
             assert!(!rows(*m, &all).is_empty(), "{m:?} has rows");

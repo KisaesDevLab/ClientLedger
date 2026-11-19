@@ -45,6 +45,7 @@ mod contract_finance_charges;
 mod contract_harness;
 mod contract_home;
 mod contract_idempotency;
+mod contract_imports;
 mod contract_inventory;
 mod contract_invoices;
 mod contract_items;
@@ -58,6 +59,8 @@ mod contract_money;
 mod contract_money_helpers;
 mod contract_pay_bills;
 mod contract_payroll;
+// P31 D5: spreadsheet transaction import (U-261, U-268).
+mod contract_import_transactions;
 mod contract_pr3;
 mod contract_preferences;
 mod contract_printing;
@@ -86,6 +89,8 @@ mod contract_tags;
 mod contract_team;
 mod contract_templates;
 mod contract_thresholds_1099;
+#[path = "../support/imports_expect.rs"]
+mod imports_expect;
 #[path = "../support/payroll_expect.rs"]
 mod payroll_expect;
 // A09: `.clreport` transfer (U-220, WP-A) and the tenant-archive round
@@ -1066,6 +1071,88 @@ fn main() -> std::process::ExitCode {
             "lifecycle::ten_switches_under_two_seconds",
             contract_lifecycle::ten_switches_under_two_seconds,
         ),
+        // P31 QBD and other-system imports (U-260 to U-268): PENDING until
+        // the pin has the import capabilities.
+        (
+            "imports::qbd_conversion_ties_out",
+            contract_imports::qbd_conversion_ties_out,
+        ),
+        (
+            "imports::altered_repointed_two_accounts",
+            contract_imports::altered_repointed_two_accounts,
+        ),
+        (
+            "imports::altered_open_item_ar_and_history",
+            contract_imports::altered_open_item_ar_and_history,
+        ),
+        (
+            "imports::undo_restores_snapshot",
+            contract_imports::undo_restores_snapshot,
+        ),
+        (
+            "imports::recommit_after_undo",
+            contract_imports::recommit_after_undo,
+        ),
+        (
+            "imports::kill_mid_commit",
+            contract_imports::kill_mid_commit,
+        ),
+        (
+            "imports::system_accounting_power_ties_out",
+            contract_imports::system_accounting_power_ties_out,
+        ),
+        (
+            "imports::system_qbo_ties_out",
+            contract_imports::system_qbo_ties_out,
+        ),
+        (
+            "imports::qbo_xlsx_raw_values_read_exactly",
+            contract_imports::qbo_xlsx_raw_values_read_exactly,
+        ),
+        (
+            "imports::qbo_csv_reports_are_refused",
+            contract_imports::qbo_csv_reports_are_refused,
+        ),
+        (
+            "imports::qbd_into_a_starter_chart",
+            contract_imports::qbd_into_a_starter_chart,
+        ),
+        (
+            "imports::system_qbd_gl_ties_out",
+            contract_imports::system_qbd_gl_ties_out,
+        ),
+        (
+            "imports::system_generic_ties_out",
+            contract_imports::system_generic_ties_out,
+        ),
+        (
+            "imports::generic_altered",
+            contract_imports::generic_altered,
+        ),
+        (
+            "imports::reimport_refused_409",
+            contract_imports::reimport_refused_409,
+        ),
+        (
+            "imports::overlap_refused_409",
+            contract_imports::overlap_refused_409,
+        ),
+        (
+            "imports::reimport_after_undo_allowed",
+            contract_imports::reimport_after_undo_allowed,
+        ),
+        (
+            "imports::dates_are_checked_before_any_commit",
+            contract_imports::dates_are_checked_before_any_commit,
+        ),
+        (
+            "imports::unmapped_accounts_fail_then_a_mapped_retry_posts",
+            contract_imports::unmapped_accounts_fail_then_a_mapped_retry_posts,
+        ),
+        (
+            "imports::inventory_off_is_refused",
+            contract_imports::inventory_off_is_refused,
+        ),
         // P30 payroll import (U-242 to U-251): PENDING until the pin has
         // the three payroll capabilities.
         (
@@ -1115,6 +1202,32 @@ fn main() -> std::process::ExitCode {
         (
             "payroll::restricted_viewer_sees_no_payroll",
             contract_payroll::restricted_viewer_sees_no_payroll,
+        ),
+        // P31 D5 spreadsheet transaction import (U-261, U-268): own companies.
+        (
+            "import_transactions::bad_row_posts_nothing",
+            contract_import_transactions::bad_row_posts_nothing,
+        ),
+        ("import_transactions::undo", contract_import_transactions::undo),
+        (
+            "import_transactions::owner_amount_text_reads_exactly",
+            contract_import_transactions::owner_amount_text_reads_exactly,
+        ),
+        (
+            "import_transactions::negative_lines_read_back",
+        contract_import_transactions::negative_lines_read_back,
+    ),
+    (
+        "import_transactions::unknown_refs",
+            contract_import_transactions::unknown_refs,
+        ),
+        (
+            "import_transactions::closed_period",
+            contract_import_transactions::closed_period,
+        ),
+        (
+            "import_transactions::recommit",
+            contract_import_transactions::recommit,
         ),
         // P25 bank file import (U-06): its own accounts in Contract Co.
         (

@@ -90,6 +90,58 @@ async fn body_of(server: &MockServer, m: &str, n: usize) -> Value {
     serde_json::from_slice(&requests(server, m).await[n].body).expect("json")
 }
 
+/// A stored bill or vendor credit of one positive and one negative line
+/// (`kind` `bill` or `vendor_credit`) and the engine's A/P line.
+fn signed_record(kind: &str) -> String {
+    let (pos, neg, ap) = if kind == "bill" {
+        (
+            r#""debit":"212.4000","credit":"0.0000""#,
+            r#""debit":"-12.4000","credit":"0.0000""#,
+            r#""debit":"0.0000","credit":"200.0000""#,
+        )
+    } else {
+        (
+            r#""debit":"0.0000","credit":"212.4000""#,
+            r#""debit":"0.0000","credit":"-12.4000""#,
+            r#""debit":"200.0000","credit":"0.0000""#,
+        )
+    };
+    let ap_order = if kind == "bill" { 2 } else { 0 };
+    // A vendor credit's A/P line comes first.
+    let first = u8::from(kind != "bill");
+    format!(
+        r#"{{"id":"{ID}","txnType":"{kind}","txnNumber":"B-1","txnDate":"2026-11-03","status":"posted",
+        "basis":"both","contactId":"{VENDOR}","memo":null,"total":"200.0000","balanceDue":"200.0000",
+        "createdAt":"2199-01-01T00:00:00.000Z","updatedAt":"2026-11-03T10:00:00.120Z","lines":[
+        {{"id":"8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","accountId":"{A}",{pos},
+          "description":null,"lineOrder":{first},"tagId":null,"contactId":null,"itemId":null,"quantity":null,"unitPrice":null}},
+        {{"id":"8b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","accountId":"{A}",{neg},
+          "description":null,"lineOrder":{second},"tagId":null,"contactId":null,"itemId":null,"quantity":null,"unitPrice":null}},
+        {{"id":"8c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","accountId":"{AP}",{ap},
+          "description":null,"lineOrder":{ap_order},"tagId":null,"contactId":null,"itemId":null,"quantity":null,"unitPrice":null}}]}}"#,
+        second = first + 1,
+    )
+}
+
+#[test]
+fn a_negative_line_is_read_and_the_ap_line_is_not() {
+    // P31 QA: an imported bill of 212.40 and (12.40) stores the second
+    // line as a negative debit; the reader once kept only positive
+    // amounts, so the form showed one line against a 200.00 total.
+    for kind in ["bill", "vendor_credit"] {
+        let r: crate::resources::ap_doc::BillRecord =
+            serde_json::from_str(&signed_record(kind)).expect(kind);
+        let amounts: Vec<Money> = r.lines.iter().map(|l| l.amount).collect();
+        assert_eq!(amounts, vec![m("212.40"), m("-12.40")], "{kind}");
+        assert!(r.lines.iter().all(|l| l.account == acct(A)), "{kind}");
+        let sum = amounts
+            .iter()
+            .try_fold(Money::ZERO, |s, a| s.checked_add(*a))
+            .expect("sum");
+        assert_eq!(Some(sum), r.txn.total, "{kind}");
+    }
+}
+
 #[test]
 fn open_only_asks_for_the_states_that_still_owe() {
     // P17 WP8 (review S4): open bills from `/bills` with a status filter,

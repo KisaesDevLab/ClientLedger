@@ -234,7 +234,7 @@ fn keyable_p22_rows_are_the_recorded_sets() {
     }
 }
 
-const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 18] = [
+const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 19] = [
     (
         "idempotency_credit_memo_v1_routes.txt",
         "keyable-credit-memo",
@@ -353,6 +353,14 @@ const P22_SETS: [(&str, &str, cl_api::KeySet, usize); 18] = [
         "idempotency_payroll_v1_routes.txt",
         "keyable-payroll",
         cl_api::KeySet::PayrollV1,
+        2,
+    ),
+    // P31 (U-261): import batch commit and undo; client-declared until the
+    // pin has imports-batch-v1.
+    (
+        "idempotency_imports_v1_routes.txt",
+        "keyable-imports",
+        cl_api::KeySet::ImportsV1,
         2,
     ),
 ];
@@ -530,6 +538,8 @@ fn engine_idempotency_marks_equal_the_keyable_rows() {
             "idempotency_payroll_v1_routes.txt",
             "payroll-import-post-v1",
         ),
+        // P31 (U-261): PENDING until the pin has imports-batch-v1.
+        ("idempotency_imports_v1_routes.txt", "imports-batch-v1"),
     ]
     .iter()
     .map(|(f, cap)| {

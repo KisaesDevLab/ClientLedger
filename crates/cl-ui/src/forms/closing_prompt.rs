@@ -54,6 +54,10 @@ pub enum Verb {
     /// A contact or tag merge that moves closed-period transactions
     /// (Merge, U-47).
     Merge,
+    /// An import into a closed period (Import, P31).
+    Import,
+    /// Undoing an import in a closed period (Undo import, P31).
+    UndoImport,
 }
 
 impl Verb {
@@ -63,6 +67,8 @@ impl Verb {
             Verb::Void => "closing.ask.void",
             Verb::Delete => "closing.ask.delete",
             Verb::Merge => "closing.ask.merge",
+            Verb::Import => "closing.ask.import",
+            Verb::UndoImport => "closing.ask.undo_import",
         }
     }
 
@@ -72,6 +78,8 @@ impl Verb {
             Verb::Void => "closing.void",
             Verb::Delete => "closing.delete",
             Verb::Merge => "closing.merge",
+            Verb::Import => "closing.import",
+            Verb::UndoImport => "closing.undo_import",
         }
     }
 }

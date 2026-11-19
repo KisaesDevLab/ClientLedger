@@ -331,6 +331,7 @@ async fn backup_restore_keeps_folders(
             kind: BackupKind::Backup,
             dest_dir: scratch.join("Backups"),
             apply_retention: false,
+            protected: None,
         },
         &cl_company::backup::silent(),
     )

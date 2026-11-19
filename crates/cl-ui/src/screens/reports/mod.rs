@@ -21,7 +21,7 @@ mod builder_run;
 mod catalog;
 // A09 WP-A: `.clreport` export and import (Q-A09a).
 pub mod clreport;
-mod drill;
+pub(crate) mod drill;
 mod email;
 mod export;
 mod filter_lists;

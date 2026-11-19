@@ -147,6 +147,10 @@ mod inventory;
 // P25: Import Bank File.
 mod bank_import;
 mod payroll;
+// P31: QuickBooks Desktop and other-program imports.
+mod imports;
+// P31 D5: Import Transactions from a Spreadsheet.
+mod csv_transactions;
 mod reconcile;
 // P28: the report window.
 mod report_builder;
@@ -164,7 +168,7 @@ mod auth;
 mod sensitive;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 59] = [
+const TABLES: [&[(&str, &str)]; 61] = [
     audit::ENGLISH,
     auth::ENGLISH,
     sensitive::ENGLISH,
@@ -218,6 +222,8 @@ const TABLES: [&[(&str, &str)]; 59] = [
     inventory::ENGLISH,
     bank_import::ENGLISH,
     payroll::ENGLISH,
+    imports::ENGLISH,
+    csv_transactions::ENGLISH,
     reconcile::ENGLISH,
     reports::ENGLISH,
     report_builder::ENGLISH,
@@ -642,7 +648,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.company.too_new", "This backup was made by a newer ClientLedger."),
     ("fix.company.too_new", "Update ClientLedger, then restore it."),
     ("error.company.job_failed", "The backup or restore could not be finished."),
-    ("fix.company.no_passphrase", "Set one on the Back Up screen; it is shown once."),
+    ("fix.company.no_passphrase", "Set one in the boxes shown here, or on File \u{203a} Back Up Company."),
     ("error.company.not_a_backup", "That file is not a ClientLedger backup."),
     ("fix.company.not_a_backup", "Pick a .clbackup file made by ClientLedger."),
     ("error.company.tampered", "This backup file changed after it was written."),

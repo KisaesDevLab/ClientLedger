@@ -1,0 +1,7 @@
+Account Code,Type,Description,Beginning Balance,Adjusted Balance
+1010,A,Operating Cash,"11,000.00","12,500.00"
+1100,A,Accounts Receivable,"1,250.00","1,800.00"
+2010,L,Accounts Payable,-700.00,-950.00
+2300,L,Credit Card,-300.00,-425.50
+3010,Q,Owner's Equity,"-10,000.00","-10,000.00"
+3200,Q,Retained Earnings,"-1,250.00","-2,924.50"

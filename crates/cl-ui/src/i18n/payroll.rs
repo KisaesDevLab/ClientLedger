@@ -206,6 +206,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("payroll.backup.stop", "Stop, don't post"),
     ("payroll.backup.failed", "We couldn't make a backup, so nothing was posted. ClientLedger always backs up before posting payroll."),
     ("payroll.backup.open_backup", "Open Back Up"),
+    ("payroll.passphrase_why", "A backup is made before payroll is posted, and backups need a passphrase. Set one here; Post saves it, makes the backup and posts."),
     ("payroll.backup.stopped", "Posting stopped. Nothing was posted. The backup that was made is kept."),
     ("payroll.backup.failed_unsettled", "We couldn't make a backup, so the post wasn't sent again. Check its status first; the earlier post may have gone through."),
     ("payroll.backup.stopped_unsettled", "Stopped. The post wasn't sent again; the backup that was made is kept. Check its status first; the earlier post may have gone through."),

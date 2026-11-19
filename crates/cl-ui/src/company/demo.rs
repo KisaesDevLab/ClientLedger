@@ -32,6 +32,10 @@ pub mod lists;
 pub mod money;
 // P30: payroll import answered from the fixtures' goldens.
 pub mod payroll;
+// P31: QBD and other-system imports answered from the fixtures.
+pub mod imports;
+// P31 D5: spreadsheet transaction import (U-261, U-268).
+pub mod import_transactions;
 // P18: Pay Bills.
 pub mod layouts;
 pub mod pay_bills;
@@ -138,6 +142,10 @@ pub struct DemoState {
     pub bank_feed: bank_import::DemoBankFeed,
     /// P30: payroll imports.
     pub payroll: payroll::DemoPayroll,
+    /// P31: QBD and other-system imports.
+    pub imports: imports::DemoImports,
+    /// P31 D5: spreadsheet transaction imports.
+    pub txn_import: import_transactions::DemoTxnImport,
     /// The Bank Feed review (P26).
     pub feed_review: feed_review::DemoFeedReview,
     /// Reconciliations (P27).
@@ -312,6 +320,8 @@ impl DemoState {
             daily_sales: daily_sales::DemoDailySales::default(),
             bank_feed: bank_import::DemoBankFeed::default(),
             payroll: payroll::DemoPayroll::default(),
+            imports: imports::DemoImports::default(),
+            txn_import: import_transactions::DemoTxnImport::default(),
             feed_review: feed_review::DemoFeedReview::default(),
             reconcile: reconcile::DemoRecon::default(),
             entity_type: cl_api::EntityType::SingleMemberLlc,

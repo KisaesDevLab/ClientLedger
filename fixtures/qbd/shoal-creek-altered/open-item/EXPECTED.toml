@@ -1,0 +1,21 @@
+# Shoal Creek, altered: open invoice 1005 is raised by 10.00 (3,500.00 to
+# 3,510.00) in open-invoices.csv. Every other file is the base set's. The
+# open-invoices file is on both sides of the item rows, so 1005's row stays
+# 0.00; the documents put 10.00 more on Accounts Receivable than the
+# reference trial balance has, and "Receivables before conversion" is left
+# at -10.00. Worked out by hand. Differences are books minus source.
+
+[replaces]
+open-invoices = "open-invoices.csv"
+
+[diffs]
+"1200" = "10.00"
+
+[balance_rows]
+history_ar = "-10.00"
+history_ap = "0.00"
+history_inventory = "0.00"
+valuation_vs_asset = "0.00"
+
+[items]
+"1005" = "0.00"

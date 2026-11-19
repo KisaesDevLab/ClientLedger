@@ -1,0 +1,1385 @@
+//! Switch from `QuickBooks` Desktop (P31, `file.import_qbd`), and the same
+//! wizard for other accounting programs (`system_import`, Q-275). Layout per
+//! `docs/design/mockups/QBDImport.html`: a step list on the left, the step
+//! on the right, Back and the step's main button at the bottom right.
+//!
+//! 1. **Export reports.** Each report to export, in plain words.
+//! 2. **Add the files.** One card per report; several journal files (one
+//!    per year); the engine reads each file as its slot's report (its
+//!    header check) and says what it could not read.
+//! 3. **Review matches.** How each account the files name was matched;
+//!    an account that matches nothing must be given one (never suspense,
+//!    Q-P31c).
+//! 4. **History and start date.** The conversion date (from the reference
+//!    trial balance), the history depth (Q-142: two years plus opening
+//!    balances, preselected), the date checks of the files.
+//! 5. **Import.** One batch: a verified backup first (nothing is sent when
+//!    it fails), then the commit (one key per exact body; never sent again
+//!    on its own), then the batch read each frame with its progress. A
+//!    closed period asks for the closing-date password; a lost answer
+//!    offers Check status and Try again (the same body and key).
+//! 6. **Check that it matches** and 7. **Spot-check** (D4 builds their
+//!    views; here they show the engine's tie-out summary).
+//!
+//! Undo (History or the step list's link): confirm, backup, undo; a 409
+//! lists what blocks it in plain words and offers the backup's restore.
+//!
+//! Control-channel state: steps, counts and flags only; never amounts,
+//! names, file names or the backup's path.
+
+// No floating point near imported amounts (plan §3); pixel sums only in
+// the drawing.
+#![deny(clippy::float_arithmetic)]
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::mpsc::Receiver;
+
+use cl_api::imports::{
+    AccountMatch, BatchState, BatchStatus, ImportBatch, ImportBatchId, ImportRefusal,
+    ImportSessionId, JobAccepted, MatchStatus, TieOut, UploadOutcome, import_refusal,
+};
+use cl_api::{
+    Account, AccountFilter, ApiError, IdempotencyKey, OrphanLabel, RequestGroup, Session,
+};
+use cl_core::ids::AccountId;
+use cl_core::{CalendarDate, Secret};
+use cl_model::CommandId;
+use cl_model::imports::wizard::{DroppedFile, Source, Step, Wizard};
+use serde_json::{Value, json};
+
+use crate::company::{CompanyLink, Task};
+use crate::forms::closing_prompt::ClosingPrompt;
+use crate::i18n::t;
+use crate::windows::Screen;
+
+mod draw;
+pub(crate) use draw::undo_blocker_lines as draw_undo_blocker_lines;
+pub mod mapping;
+pub mod spot_check;
+#[cfg(test)]
+mod tests;
+pub mod tieout;
+mod wizard;
+
+/// The command and window kind.
+pub const KIND: &str = "file.import_qbd";
+
+/// The QuickBooks Desktop window for `kind`, if it is one.
+#[must_use]
+pub fn make(
+    kind: CommandId,
+    link: &Arc<CompanyLink>,
+    _open: Option<(cl_core::ids::TenantId, String)>,
+    today: CalendarDate,
+) -> Option<Box<dyn Screen>> {
+    (kind.as_str() == KIND)
+        .then(|| Box::new(ImportScreen::new(Arc::clone(link), today, Source::Qbd)) as Box<_>)
+}
+
+/// The backup kind taken before every import or undo: the QBD and
+/// other-program wizards and the spreadsheet import (D5) all use this one.
+/// It is the shared `BackupKind::BeforeImport` (Q-P30h, as payroll posts
+/// use), so its own retention (the newest 10 per company and folder) never
+/// prunes the owner's regular backups.
+pub(crate) fn backup_kind() -> cl_settings::BackupKind {
+    cl_settings::BackupKind::BeforeImport
+}
+
+/// Whether the backup before an import or undo applies retention: on, the
+/// before-import kind's own newest-10 rule (see [`backup_kind`]).
+pub(crate) const BACKUP_RETENTION: bool = true;
+
+/// The before-import backups an import batch still needs (History's
+/// `protected_backups`: committed, running and failed batches), read just
+/// before every before-import backup (imports, undo, spreadsheet imports,
+/// payroll posts) so its retention never deletes the one a batch's
+/// "Restore the backup taken before the import" points at.
+///
+/// `None` when the list can't be read in full (offline, no right, more than
+/// the pages History reads): the backup then prunes nothing. Empty when
+/// the engine has no import batches at all.
+pub(crate) async fn protected_backups(
+    session: &cl_api::Session,
+) -> Option<std::collections::BTreeSet<String>> {
+    match session.imports().batches_all().await {
+        Ok(list)
+            if list.len()
+                < cl_api::imports::HISTORY_MAX_PAGES
+                    * usize::from(cl_api::imports::HISTORY_PAGE) =>
+        {
+            let entries: Vec<_> = list.iter().map(draw::entry_of).collect();
+            Some(cl_model::imports::history::protected_backups(&entries))
+        }
+        Err(ApiError::Local(cl_api::LocalValidation::Unsupported)) => {
+            Some(std::collections::BTreeSet::new())
+        }
+        _ => None,
+    }
+}
+
+/// A request in flight or already answered (the demo answers at once).
+pub(crate) enum Job<T> {
+    Running(Task<T>),
+    Done(Option<Result<T, ApiError>>),
+}
+
+impl<T> Job<T> {
+    fn take(&mut self) -> Option<Result<T, ApiError>> {
+        match self {
+            Job::Running(t) => t.try_take(),
+            Job::Done(v) => v.take(),
+        }
+    }
+}
+
+fn poll<T>(slot: &mut Option<Job<T>>) -> Option<Result<T, ApiError>> {
+    let r = slot.as_mut()?.take()?;
+    *slot = None;
+    Some(r)
+}
+
+/// Which part of the window shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum View {
+    /// The wizard.
+    Import,
+    /// Earlier imports.
+    History,
+}
+
+/// What went wrong (shown in owner words; never the engine's text, which
+/// can name people, U-270).
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Trouble {
+    Refused(ImportRefusal),
+    /// The answer was lost: it may have gone through.
+    Unknown,
+    PasswordWait,
+    /// Not the company Admin.
+    Restricted,
+    /// An account is hidden from this user (403 `SENSITIVE_HIDDEN`: the
+    /// import routes refuse while any is).
+    Hidden,
+    Unsupported,
+    EngineDown,
+    /// The backup before the import (or undo) failed: nothing was sent.
+    BackupFailed,
+    /// The import job failed: nothing was posted (the backup is kept).
+    Failed,
+    /// The batch is gone (discarded elsewhere): nothing was posted.
+    Gone,
+    /// A failed import from History that needs its files again (a new
+    /// batch: accounts to pick, or the valuation to add).
+    AddAgain,
+    Other,
+}
+
+impl Trouble {
+    fn of(e: &ApiError) -> Trouble {
+        if let Some(r) = import_refusal(e) {
+            return Trouble::Refused(r);
+        }
+        match e {
+            ApiError::OutcomeUnknown { .. } => Trouble::Unknown,
+            ApiError::ClosingPasswordRateLimited { .. } => Trouble::PasswordWait,
+            ApiError::Sensitive(_) => Trouble::Hidden,
+            ApiError::Forbidden { .. } => Trouble::Restricted,
+            ApiError::Local(cl_api::LocalValidation::Unsupported) => Trouble::Unsupported,
+            ApiError::EngineUnavailable { .. } => Trouble::EngineDown,
+            ApiError::NotFound { .. } => Trouble::Gone,
+            _ => Trouble::Other,
+        }
+    }
+
+    /// A stable key (`imports.trouble.<code>` or `imports.refusal.<code>`).
+    pub(crate) fn code(&self) -> &'static str {
+        match self {
+            Trouble::Refused(r) => refusal_code(r),
+            Trouble::Unknown => "unknown",
+            Trouble::PasswordWait => "password_wait",
+            Trouble::Restricted => "restricted",
+            Trouble::Hidden => "hidden",
+            Trouble::Unsupported => "unsupported",
+            Trouble::EngineDown => "engine_down",
+            Trouble::BackupFailed => "backup_failed",
+            Trouble::Failed => "failed",
+            Trouble::Gone => "gone",
+            Trouble::AddAgain => "add_again",
+            Trouble::Other => "other",
+        }
+    }
+}
+
+/// A stable key for a refusal (`imports.refusal.<key>`).
+pub(crate) fn refusal_code(r: &ImportRefusal) -> &'static str {
+    match r {
+        ImportRefusal::AlreadyCommitted { .. } => "already_committed",
+        ImportRefusal::PeriodOverlap { .. } => "period_overlap",
+        ImportRefusal::Busy => "busy",
+        ImportRefusal::UndoBlocked { .. } => "undo_blocked",
+        ImportRefusal::TieOutNotZero { .. } => "tieout_not_zero",
+        ImportRefusal::TieOutReferenceRequired { .. } => "tieout_reference_required",
+        ImportRefusal::TieOutNoDate => "tieout_no_date",
+        ImportRefusal::TieOutReferenceAmbiguous => "tieout_reference_ambiguous",
+        ImportRefusal::CompanyNotEmpty => "company_not_empty",
+        ImportRefusal::SessionInBatch => "session_in_batch",
+        ImportRefusal::FiscalYearLocked => "fiscal_year_locked",
+        ImportRefusal::AdminRequired => "admin_required",
+        ImportRefusal::DateMismatch { .. } => "date_mismatch",
+        ImportRefusal::AmountInvalid { .. } => "amount_invalid",
+        ImportRefusal::Unbalanced => "unbalanced",
+        ImportRefusal::UnknownRef { .. } => "unknown_ref",
+        ImportRefusal::MixedGroup => "mixed_group",
+        ImportRefusal::HasErrors { .. } => "has_errors",
+        ImportRefusal::SessionActive { .. } => "session_active",
+        ImportRefusal::DocumentTotal => "document_total",
+        ImportRefusal::ArApNameRequired => "ar_ap_name_required",
+        ImportRefusal::Interrupted => "interrupted",
+        ImportRefusal::BatchUndone => "batch_undone",
+        ImportRefusal::BatchNotCommitted => "batch_not_committed",
+        ImportRefusal::BatchEmpty => "batch_empty",
+        ImportRefusal::SourceMismatch => "source_mismatch",
+        ImportRefusal::JournalAfterConversion { .. } => "journal_after_conversion",
+        ImportRefusal::BadDate => "bad_date",
+        ImportRefusal::UnmappedAccount { .. } => "unmapped_account",
+        ImportRefusal::AccountMapInvalid { .. } => "account_map_invalid",
+        ImportRefusal::InventoryOff => "inventory_off",
+        ImportRefusal::InventoryPeriodClosed { .. } => "inventory_period_closed",
+        ImportRefusal::ValuationRequired { .. } => "valuation_required",
+    }
+}
+
+/// A failed import that can't be committed again as it is: its options
+/// are fixed when the batch is made (E2b), so the files go in a new batch
+/// (accounts picked, or the valuation file added). The step it goes back to.
+pub(crate) fn rebuild_step(r: &ImportRefusal) -> Option<Step> {
+    match r {
+        ImportRefusal::UnmappedAccount { .. } => Some(Step::Mapping),
+        ImportRefusal::ValuationRequired { .. } => Some(Step::Files),
+        _ => None,
+    }
+}
+
+/// Reads one chosen file off the egui thread, refusing it before anything
+/// is sent when it is over the engine's limit.
+fn read_import_file(path: &std::path::Path) -> crate::screens::write_check::attach::FileRead {
+    let meta = std::fs::metadata(path).map_err(|_| "imports.file.open")?;
+    if !meta.is_file() {
+        return Err("imports.file.open");
+    }
+    if meta.len() > cl_api::imports::MAX_UPLOAD_BYTES as u64 {
+        return Err("imports.file.too_large");
+    }
+    let bytes = std::fs::read(path).map_err(|_| "imports.file.open")?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    Ok((name, bytes))
+}
+
+/// One file the owner added to a report's card.
+pub(crate) struct SlotFile {
+    /// Its name, shown on the card only (never logged or in state).
+    pub(crate) name: String,
+    /// Being read from disk.
+    pub(crate) reading: Option<Receiver<crate::screens::write_check::attach::FileRead>>,
+    /// The upload out.
+    pub(crate) job: Option<Job<UploadOutcome>>,
+    /// What the engine read.
+    pub(crate) outcome: Option<UploadOutcome>,
+    /// Why it was not taken (an i18n key).
+    pub(crate) problem: Option<&'static str>,
+    /// The engine's refusal (a re-import).
+    pub(crate) refusal: Option<ImportRefusal>,
+    /// The bytes sent, kept for a new batch after a failed one (E2b: a
+    /// failed batch's files are deleted and uploaded again).
+    pub(crate) bytes: Option<Arc<Vec<u8>>>,
+}
+
+impl SlotFile {
+    fn new(name: String) -> SlotFile {
+        SlotFile {
+            name,
+            reading: None,
+            job: None,
+            outcome: None,
+            problem: None,
+            refusal: None,
+            bytes: None,
+        }
+    }
+
+    pub(crate) fn session(&self) -> Option<ImportSessionId> {
+        self.outcome.as_ref().map(|o| o.session.id)
+    }
+
+    pub(crate) fn busy(&self) -> bool {
+        self.reading.is_some() || self.job.is_some()
+    }
+
+    /// The model's view of it.
+    fn dropped(&self) -> DroppedFile {
+        DroppedFile {
+            name: self.name.clone(),
+            uploaded: self.outcome.is_some(),
+            problems: self.outcome.as_ref().map_or(0, |o| {
+                u32::try_from(
+                    o.problems
+                        .len()
+                        .max(usize::try_from(o.session.error_count).unwrap_or(0)),
+                )
+                .unwrap_or(u32::MAX)
+            }),
+            report_date: self
+                .outcome
+                .as_ref()
+                .and_then(|o| o.session.report_date.or(o.preview.report_date)),
+        }
+    }
+}
+
+/// The running job the batch reports on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Running {
+    Commit,
+    Undo,
+}
+
+/// The exact body (and its key) of the last commit or undo sent: "Try
+/// again" after a lost answer sends this again, never a new one. No
+/// `Debug`: the password and the backup's name are in it.
+#[derive(Clone)]
+pub(crate) struct Held {
+    pub(crate) what: Running,
+    pub(crate) batch: ImportBatchId,
+    pub(crate) backup_ref: String,
+    pub(crate) password: Option<Secret>,
+    /// The owner confirmed importing into a closed period that has no
+    /// closing-date password (commit only; never set by default).
+    pub(crate) confirm_closed: bool,
+    pub(crate) key: IdempotencyKey,
+}
+
+/// The closed-period question (no closing-date password is set).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ClosedAsk {
+    /// The closing date it names, when known.
+    pub(crate) date: Option<CalendarDate>,
+}
+
+/// What the closing-date password is for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Locked {
+    Commit,
+    Undo(ImportBatchId),
+}
+
+/// The Import window (QuickBooks Desktop or another program).
+#[allow(clippy::struct_excessive_bools, reason = "independent screen flags")]
+pub struct ImportScreen {
+    pub(crate) link: Arc<CompanyLink>,
+    group: Option<RequestGroup>,
+    pub(crate) today: CalendarDate,
+    pub(crate) view: View,
+    /// The step machine (cl-model).
+    pub(crate) wizard: Wizard,
+    /// The QBD window or the other-programs one (its source picker).
+    pub(crate) system: bool,
+    // Files.
+    pub(crate) pick_rx: Option<Receiver<Vec<std::path::PathBuf>>>,
+    /// The card the file window is for.
+    pub(crate) pick_slot: Option<&'static str>,
+    pub(crate) uploads: BTreeMap<&'static str, Vec<SlotFile>>,
+    discard_jobs: Vec<Job<()>>,
+    // Matches.
+    chart_job: Option<Job<Vec<Account>>>,
+    pub(crate) chart: Vec<Account>,
+    /// Source key → the company account the owner picked.
+    pub(crate) account_map: BTreeMap<String, AccountId>,
+    /// QA-11: imported documents an undo blocker names (id → "invoice 1005").
+    pub(crate) blocker_docs: BTreeMap<String, String>,
+    docs_job: Option<Job<Vec<(String, String)>>>,
+    docs_asked: Vec<String>,
+    /// Number matches to another name the owner said are right (QA-1).
+    pub(crate) confirmed: std::collections::BTreeSet<String>,
+    /// Keys a failed commit said have no account (`IMPORT_UNMAPPED_ACCOUNT`):
+    /// unmatched until picked, whatever the uploads said.
+    pub(crate) unmapped_failed: std::collections::BTreeSet<String>,
+    /// A failed batch's files being deleted before they go up again; the
+    /// step the wizard returns to when they are.
+    rebuild: Option<(Vec<Job<()>>, Step)>,
+    /// What the batch's dates mean (E2c), from its creation and reads.
+    pub(crate) date_check: Option<cl_api::imports::DateCheck>,
+    // Dates.
+    pub(crate) date_text: String,
+    /// The switch date as last filled in from the reference file (QA-4).
+    date_from_file: Option<String>,
+    pub(crate) opening_text: String,
+    // Import.
+    batch_create_job: Option<Job<ImportBatch>>,
+    /// The batch (made once on the first Import click; every retry uses
+    /// it: its files are pinned to it).
+    pub(crate) batch: Option<ImportBatchId>,
+    backup_job: Option<Job<Result<String, cl_company::CompanyError>>>,
+    /// The commit or undo waiting for its backup.
+    waiting: Option<(Running, ImportBatchId)>,
+    job_out: Option<Job<JobAccepted>>,
+    pub(crate) held: Option<Held>,
+    /// The key of the last commit or undo sent (control channel, tests).
+    pub(crate) last_key: Option<IdempotencyKey>,
+    /// The commit's or undo's answer was lost (B1: nothing discards,
+    /// Cancel and Back are off until Check status settles it).
+    pub(crate) unsettled: bool,
+    /// The batch's job runs (per the last read).
+    pub(crate) running: Option<Running>,
+    batch_job: Option<Job<BatchState>>,
+    pub(crate) state: Option<BatchState>,
+    /// Commits and undos sent (control channel: never twice on its own).
+    pub(crate) jobs_sent: u32,
+    pub(crate) closing: ClosingPrompt<Locked>,
+    /// The closing-date password for the next send (dropped once sent).
+    password: Option<Secret>,
+    /// A closed period with no closing-date password: the question is up.
+    pub(crate) ask_closed: Option<ClosedAsk>,
+    /// The owner said yes: the next commit carries the confirmation.
+    confirm_closed_next: bool,
+    pub(crate) status_answer: Option<bool>,
+    pub(crate) trouble: Option<Trouble>,
+    /// Why the last job failed, when its code has owner words (shown in
+    /// place of the plain "stopped partway"; Retry is still offered).
+    pub(crate) failure: Option<ImportRefusal>,
+    // Tie-out (D4 draws it in full).
+    tieout_job: Option<Job<TieOut>>,
+    pub(crate) tieout: Option<TieOut>,
+    /// The tie-out's rows, tab and filter.
+    pub(crate) tie: Option<tieout::TieState>,
+    /// Save PDF waiting for its Save dialog.
+    pub(crate) pdf: Option<tieout::PdfSave>,
+    /// The last Save PDF's outcome (`ok`, words).
+    pub(crate) pdf_message: Option<(bool, String)>,
+    /// Tie-out PDFs written (control channel).
+    pub(crate) pdfs_saved: u32,
+    verify_job: Option<Job<cl_api::imports::Verified>>,
+    /// The first differences a refused verify named, applied when the
+    /// tie-out it reloads arrives.
+    point_at: Option<Vec<cl_api::imports::TieOutDifference>>,
+    /// The spot-check list (step 7), saved with the batch.
+    pub(crate) spot: spot_check::SpotList,
+    // Undo.
+    pub(crate) confirm_undo: Option<ImportBatchId>,
+    /// The batch an undo (its backup, its password, its send) is for.
+    pub(crate) undo_pending: Option<ImportBatchId>,
+    pub(crate) undone: bool,
+    // History.
+    history_job: Option<Job<Vec<ImportBatch>>>,
+    pub(crate) history: Option<Vec<ImportBatch>>,
+    /// Before-import backups looked up on this computer (S3).
+    backup_paths: BTreeMap<String, Option<std::path::PathBuf>>,
+    /// Restore was asked for a backup that is no longer here.
+    pub(crate) restore_gone: bool,
+    /// When the import's backup was taken (local date and time), kept
+    /// after an undo.
+    pub(crate) backup_when: Option<String>,
+    /// The close prompt is up over this window (QA-20).
+    close_asked: bool,
+    /// The commit or undo whose backup finished under the close prompt:
+    /// sent on Keep, dropped (never sent) on Close.
+    parked: Option<Held>,
+    /// Why the last backup failed (owner words, QA-2).
+    pub(crate) backup_error: Option<cl_company::CompanyError>,
+    /// The inline backup passphrase (QA-2, Q-P31ad).
+    pub(crate) passphrase: crate::widgets::passphrase::PassphraseAsk,
+    /// No backup passphrase is set: the boxes show on the Import step.
+    pub(crate) need_passphrase: bool,
+}
+
+/// Combines the files' account matches by source key: `existing` (any
+/// file) wins over `create` (the account list), which wins over
+/// `unmatched`; rows add up. `failed` keys (from a failed commit) are
+/// unmatched whatever the files said, and listed even when no file did.
+pub(crate) fn merge_matches<'a>(
+    all: impl IntoIterator<Item = &'a AccountMatch>,
+    failed: &std::collections::BTreeSet<String>,
+) -> Vec<AccountMatch> {
+    let rank = |s: MatchStatus| match s {
+        MatchStatus::Existing => 2,
+        MatchStatus::Create => 1,
+        MatchStatus::Unmatched => 0,
+    };
+    let mut by_key: BTreeMap<String, AccountMatch> = BTreeMap::new();
+    for m in all {
+        match by_key.get_mut(&m.source_key) {
+            None => {
+                by_key.insert(m.source_key.clone(), m.clone());
+            }
+            Some(have) => {
+                let rows = have.rows.saturating_add(m.rows);
+                let role = have.system_role.or(m.system_role);
+                if rank(m.status) > rank(have.status) {
+                    *have = m.clone();
+                }
+                have.rows = rows;
+                // Only the account list carries the role (U-272): keep it
+                // whichever file's match won.
+                have.system_role = role;
+                // A name that is only the number (a trial balance row) gives
+                // way to a file's real name (the chart's).
+                let bare = |x: &AccountMatch| {
+                    x.name.is_empty()
+                        || x.number.as_deref() == Some(x.name.as_str())
+                        || x.name == x.source_key
+                };
+                if bare(have) && !bare(m) {
+                    have.name.clone_from(&m.name);
+                }
+                if have.number.is_none() {
+                    have.number.clone_from(&m.number);
+                }
+            }
+        }
+    }
+    for k in failed {
+        let m = by_key.entry(k.clone()).or_insert_with(|| AccountMatch {
+            source_key: k.clone(),
+            number: None,
+            name: k.clone(),
+            status: MatchStatus::Unmatched,
+            account: None,
+            matched_by: None,
+            rows: 0,
+            system_role: None,
+        });
+        m.status = MatchStatus::Unmatched;
+        m.account = None;
+    }
+    by_key.into_values().collect()
+}
+
+/// A date as the screen shows and takes it.
+pub(crate) fn show_date(d: CalendarDate) -> String {
+    format!("{:02}/{:02}/{:04}", d.month(), d.day(), d.year())
+}
+
+/// [`show_date`] for the other import screens.
+pub(crate) fn show_date_pub(d: CalendarDate) -> String {
+    show_date(d)
+}
+
+pub(crate) fn parse_date(s: &str) -> Option<CalendarDate> {
+    let s = s.trim();
+    if let Ok(d) = CalendarDate::parse_wire(s) {
+        return Some(d);
+    }
+    let mut it = s.split('/');
+    let (m, d, y) = (it.next()?, it.next()?, it.next()?);
+    CalendarDate::parse_wire(&format!("{y:0>4}-{m:0>2}-{d:0>2}")).ok()
+}
+
+impl ImportScreen {
+    /// A fresh wizard for `source` (the other-programs window starts on
+    /// Accounting Power and offers the others).
+    #[must_use]
+    pub fn new(link: Arc<CompanyLink>, today: CalendarDate, source: Source) -> ImportScreen {
+        let group = link.group().and_then(Result::ok);
+        let mut s = ImportScreen {
+            link,
+            group,
+            today,
+            view: View::Import,
+            wizard: Wizard::new(source, 1),
+            system: source != Source::Qbd,
+            pick_rx: None,
+            pick_slot: None,
+            uploads: BTreeMap::new(),
+            discard_jobs: Vec::new(),
+            chart_job: None,
+            chart: Vec::new(),
+            account_map: BTreeMap::new(),
+            confirmed: std::collections::BTreeSet::new(),
+            blocker_docs: BTreeMap::new(),
+            docs_job: None,
+            docs_asked: Vec::new(),
+            unmapped_failed: std::collections::BTreeSet::new(),
+            rebuild: None,
+            date_check: None,
+            date_text: String::new(),
+            date_from_file: None,
+            opening_text: String::new(),
+            batch_create_job: None,
+            batch: None,
+            backup_job: None,
+            waiting: None,
+            job_out: None,
+            held: None,
+            last_key: None,
+            unsettled: false,
+            running: None,
+            batch_job: None,
+            state: None,
+            jobs_sent: 0,
+            closing: ClosingPrompt::default(),
+            password: None,
+            ask_closed: None,
+            confirm_closed_next: false,
+            status_answer: None,
+            trouble: None,
+            failure: None,
+            tieout_job: None,
+            tieout: None,
+            tie: None,
+            pdf: None,
+            pdf_message: None,
+            pdfs_saved: 0,
+            verify_job: None,
+            point_at: None,
+            spot: spot_check::SpotList::default(),
+            confirm_undo: None,
+            undo_pending: None,
+            undone: false,
+            history_job: None,
+            history: None,
+            backup_paths: BTreeMap::new(),
+            restore_gone: false,
+            backup_when: None,
+            close_asked: false,
+            parked: None,
+            backup_error: None,
+            passphrase: crate::widgets::passphrase::PassphraseAsk::default(),
+            need_passphrase: false,
+        };
+        s.need_passphrase = crate::widgets::passphrase::needed(&s.link);
+        if !s.allowed() {
+            s.trouble = Some(Trouble::Restricted);
+        } else if !s.supported() {
+            s.trouble = Some(Trouble::Unsupported);
+        } else {
+            s.load_chart();
+        }
+        s
+    }
+
+    /// The window's command id.
+    pub(crate) fn kind(&self) -> &'static str {
+        if self.system {
+            crate::screens::system_import::KIND
+        } else {
+            KIND
+        }
+    }
+
+    /// Only the company Admin brings books over (plan S4; the engine
+    /// refuses others too).
+    pub(crate) fn allowed(&self) -> bool {
+        let r = self.link.rights();
+        r.is_admin() && r.allows(CommandId::new(self.kind()))
+    }
+
+    /// The engine can do this import (the demo plays every one).
+    pub(crate) fn supported(&self) -> bool {
+        let flow = if self.wizard.source.is_conversion() {
+            cl_api::imports::Flow::QbdConversion
+        } else {
+            cl_api::imports::Flow::OtherSystem
+        };
+        self.link.is_demo() || flow.supported(&self.link.capabilities())
+    }
+
+    // ---- Running requests ------------------------------------------------
+
+    fn read<T, F, Fut>(
+        &self,
+        demo: impl FnOnce(&mut crate::company::demo::DemoState) -> Result<T, ApiError>,
+        real: F,
+    ) -> Job<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Session) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<T, ApiError>> + Send + 'static,
+    {
+        if let Some(mut d) = self.link.demo_state() {
+            return Job::Done(Some(demo(&mut d)));
+        }
+        match (self.link.session(), self.group.as_ref()) {
+            (Some(session), Some(group)) => group.read(&session, real).map_or(
+                Job::Done(Some(Err(ApiError::EngineUnavailable { permanent: false }))),
+                |p| Job::Running(Task::Pending(p)),
+            ),
+            _ => Job::Done(Some(Err(ApiError::EngineUnavailable { permanent: false }))),
+        }
+    }
+
+    fn write<T, F, Fut>(
+        &self,
+        what: &'static str,
+        key: Option<IdempotencyKey>,
+        demo: impl FnOnce(&mut crate::company::demo::DemoState) -> Result<T, ApiError>,
+        real: F,
+    ) -> Job<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(Session) -> Fut + Send + 'static,
+        Fut: std::future::Future<Output = Result<T, ApiError>> + Send + 'static,
+    {
+        if let Some(mut d) = self.link.demo_state() {
+            return Job::Done(Some(demo(&mut d)));
+        }
+        match (self.link.session(), self.group.as_ref()) {
+            (Some(session), Some(group)) => group
+                .write(&session, OrphanLabel { what, key }, real)
+                .map_or(
+                    Job::Done(Some(Err(ApiError::EngineUnavailable { permanent: false }))),
+                    |p| Job::Running(Task::Pending(p)),
+                ),
+            _ => Job::Done(Some(Err(ApiError::EngineUnavailable { permanent: false }))),
+        }
+    }
+
+    fn load_chart(&mut self) {
+        self.chart_job = Some(self.read(
+            |d| Ok(crate::company::demo::home::accounts(d)),
+            |s| async move { s.accounts().list_all(&AccountFilter::default()).await },
+        ));
+    }
+
+    /// Takes every answer that arrived; while a job runs, reads its batch
+    /// (one read out at a time).
+    pub(crate) fn poll(&mut self) {
+        if self.need_passphrase {
+            self.passphrase
+                .refresh(&self.link, &mut self.need_passphrase);
+        }
+        if let Some(Ok(v)) = poll(&mut self.chart_job) {
+            self.chart = v;
+        }
+        self.poll_files();
+        self.discard_jobs.retain_mut(|j| j.take().is_none());
+        self.poll_rebuild();
+        if let Some(r) = poll(&mut self.batch_create_job) {
+            self.after_batch_created(r);
+        }
+        // Before the job's own answer: the demo's backup and job both
+        // answer within one poll.
+        if let Some(r) = poll(&mut self.backup_job) {
+            self.after_backup(r.map_err(cl_company::CompanyError::from).and_then(|x| x));
+        }
+        if let Some(r) = poll(&mut self.job_out) {
+            self.after_job_sent(r);
+        }
+        if let Some(r) = poll(&mut self.batch_job) {
+            self.after_batch_read(r);
+        }
+        if self.running.is_some() && self.batch_job.is_none() {
+            self.read_batch();
+        }
+        if let Some(r) = poll(&mut self.tieout_job) {
+            match r {
+                Ok(t) => {
+                    let mut st = tieout::TieState::new(&t);
+                    if let Some(old) = &self.tie {
+                        st.tab = old.tab;
+                        st.view.differences_only = old.view.differences_only;
+                    }
+                    // Verify was refused: show the first difference it named.
+                    if let Some(first) = self.point_at.take() {
+                        st.point_at(&first);
+                    }
+                    self.tie = Some(st);
+                    self.tieout = Some(t);
+                }
+                Err(e) => self.trouble = Some(Trouble::of(&e)),
+            }
+        }
+        if let Some(r) = poll(&mut self.verify_job) {
+            match r {
+                Ok(v) => {
+                    let b = v.batch;
+                    self.wizard.verified = b.is_verified();
+                    if self.wizard.verified {
+                        tracing::info!(target: "imports", "import verified");
+                        self.trouble = None;
+                        // The tie-out it was verified on (kept by the engine).
+                        let mut st = tieout::TieState::new(&v.tieout);
+                        if let Some(old) = &self.tie {
+                            st.tab = old.tab;
+                        }
+                        self.tie = Some(st);
+                        self.tieout = Some(v.tieout);
+                        // The list comes from this tie-out and the batch's
+                        // transactions (the samples): verify drops the rows
+                        // the tie-out was made from (E3).
+                        if self.wizard.source.steps().contains(&Step::SpotCheck) {
+                            self.spot.build(&b, self.tieout.as_ref(), &self.chart);
+                            // Saved once the samples are in (or could not
+                            // be read); a saved list is kept as it is.
+                            self.spot.save_after_samples = self.spot.unsaved();
+                            self.load_spot_samples(&b);
+                        }
+                        self.wizard.next(self.today);
+                    }
+                }
+                Err(e) => {
+                    let t = Trouble::of(&e);
+                    if let Trouble::Refused(ImportRefusal::TieOutNotZero { first, .. }) = &t {
+                        // Show the engine's rows now, with the first
+                        // difference it named marked.
+                        self.point_at = Some(first.clone());
+                        self.load_tieout();
+                    }
+                    self.trouble = Some(t);
+                }
+            }
+        }
+        self.poll_pdf();
+        self.poll_spot_check();
+        self.poll_blocker_docs();
+        if let Some(r) = poll(&mut self.history_job) {
+            match r {
+                Ok(list) => self.history = Some(list),
+                Err(e) => self.trouble = Some(Trouble::of(&e)),
+            }
+        }
+    }
+
+    pub(crate) fn busy(&self) -> bool {
+        self.pick_rx.is_some()
+            || self.rebuild.is_some()
+            || self.uploads.values().flatten().any(SlotFile::busy)
+            || self.chart_job.is_some()
+            || self.batch_create_job.is_some()
+            || self.backup_job.is_some()
+            || self.job_out.is_some()
+            || self.batch_job.is_some()
+            || self.running.is_some()
+            || self.tieout_job.is_some()
+            || self.verify_job.is_some()
+            || self.history_job.is_some()
+    }
+
+    /// A commit or undo is being made, sent, or runs (per the last read of
+    /// its batch).
+    pub(crate) fn in_flight(&self) -> bool {
+        self.backup_job.is_some()
+            || self.parked.is_some()
+            || self.job_out.is_some()
+            || self.running.is_some()
+    }
+
+    /// Cancel, Back and Start over are off: something is out, or its
+    /// answer was lost (B1).
+    pub(crate) fn locked(&self) -> bool {
+        self.in_flight() || self.unsettled || self.batch_create_job.is_some()
+    }
+
+    /// The model's files, from the cards.
+    fn sync_files(&mut self) {
+        self.wizard.files = self
+            .uploads
+            .iter()
+            .filter(|(_, v)| !v.is_empty())
+            .map(|(k, v)| (*k, v.iter().map(SlotFile::dropped).collect()))
+            .collect();
+        // QA-4: the switch date follows the reference trial balance until
+        // the owner types one (a misfiled file removed or replaced no longer
+        // leaves its date behind).
+        if self.wizard.source.is_conversion()
+            && (self.date_text.trim().is_empty()
+                || self.date_from_file.as_deref() == Some(self.date_text.as_str()))
+        {
+            let d = self.wizard.reference_date().map(show_date);
+            self.date_text = d.clone().unwrap_or_default();
+            self.date_from_file = d;
+        }
+        self.sync_mapping();
+    }
+
+    /// Every account the posted files name, once each (by source key),
+    /// combined across the files: the engine matches each file against the
+    /// chart as it is now, so a trial balance names an account the batch's
+    /// own account list creates as unmatched. A key is resolved when any
+    /// file found it (`existing`) or the account list makes it (`create`);
+    /// a key a failed commit named stays unmatched until picked.
+    pub(crate) fn matches(&self) -> Vec<AccountMatch> {
+        let posted = || {
+            self.uploads
+                .values()
+                .flatten()
+                .filter_map(|f| f.outcome.as_ref())
+                // A reference file is only compared against, never posted.
+                .filter(|o| o.session.role != Some(cl_api::imports::FileRole::Reference))
+        };
+        let mut all = merge_matches(
+            posted().flat_map(|o| o.preview.account_matches.iter()),
+            &self.unmapped_failed,
+        );
+        // QA-1/QA-10: the account list decides what its own keys become (the
+        // commit makes or takes over that account by number); another file's
+        // name match against the chart as it was is not what posts.
+        let chart_rows: BTreeMap<&str, &AccountMatch> = posted()
+            .filter(|o| o.session.kind == cl_api::imports::ImportKind::Coa)
+            .flat_map(|o| o.preview.account_matches.iter())
+            .map(|m| (m.source_key.as_str(), m))
+            .collect();
+        for m in &mut all {
+            if let Some(c) = chart_rows.get(m.source_key.as_str())
+                && !self.unmapped_failed.contains(&m.source_key)
+            {
+                m.status = c.status;
+                m.account = c.account;
+                m.matched_by = c.matched_by;
+            }
+        }
+        all
+    }
+
+    /// QA-11: reads the imported documents a blocked undo names, once per
+    /// refusal, so the reasons say "invoice 1005" (the demo names none).
+    fn poll_blocker_docs(&mut self) {
+        if let Some(r) = poll(&mut self.docs_job) {
+            if let Ok(found) = r {
+                self.blocker_docs.extend(found);
+            }
+            return;
+        }
+        if self.docs_job.is_some() {
+            return;
+        }
+        let Some(Trouble::Refused(ImportRefusal::UndoBlocked { blockers })) = &self.trouble else {
+            return;
+        };
+        let mut ids: Vec<String> = blockers
+            .iter()
+            .filter_map(draw::blocker_doc_id)
+            .map(str::to_string)
+            .filter(|id| !self.blocker_docs.contains_key(id))
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids.truncate(10);
+        if ids.is_empty() || ids == self.docs_asked {
+            return;
+        }
+        self.docs_asked.clone_from(&ids);
+        self.docs_job = Some(self.read(
+            |_| Ok(Vec::new()),
+            move |s| async move {
+                let mut out = Vec::new();
+                for id in ids {
+                    let Ok(tid) = id.parse::<cl_core::ids::TransactionId>() else {
+                        continue;
+                    };
+                    if let Ok(v) = s.transactions().get(tid).await {
+                        let tx = v.record;
+                        out.push((id, draw::doc_words(tx.txn_type, tx.txn_number.as_deref())));
+                    }
+                }
+                Ok(out)
+            },
+        ));
+    }
+
+    /// The company account `m` matched, when it is one of the chart's.
+    pub(crate) fn matched_account(&self, m: &AccountMatch) -> Option<&Account> {
+        let id = m.account?;
+        self.chart.iter().find(|a| a.id == id)
+    }
+
+    /// QA-1 (Q-P31ac): a match by number to an account of another name
+    /// needs the owner's OK (or another account) before the step is done.
+    pub(crate) fn needs_you(&self, m: &AccountMatch) -> bool {
+        m.status == MatchStatus::Existing
+            && m.matched_by == Some(cl_api::imports::MatchedBy::Number)
+            && !self.account_map.contains_key(&m.source_key)
+            && !self.confirmed.contains(&m.source_key)
+            && self
+                .matched_account(m)
+                .is_none_or(|a| !mapping::same_name(&a.fields.name, &m.name))
+    }
+
+    /// Accounts that keep the step open: unmatched with no account picked,
+    /// and number matches to another name not yet confirmed (QA-1).
+    pub(crate) fn unmapped(&self) -> usize {
+        self.matches()
+            .iter()
+            .filter(|m| {
+                (m.status == MatchStatus::Unmatched
+                    && !self.account_map.contains_key(&m.source_key))
+                    || self.needs_you(m)
+            })
+            .count()
+    }
+
+    pub(crate) fn sync_mapping(&mut self) {
+        let uploaded = self.uploads.values().flatten().all(|f| f.outcome.is_some());
+        self.wizard.mapping_complete = uploaded && self.unmapped() == 0;
+    }
+
+    /// The dates as typed, into the model.
+    pub(crate) fn sync_dates(&mut self) {
+        self.wizard.conversion_date = parse_date(&self.date_text);
+        self.wizard.opening_date = parse_date(&self.opening_text);
+    }
+
+    /// The step's main button is on.
+    pub(crate) fn can_next(&self) -> bool {
+        match self.wizard.step {
+            Step::Import => {
+                !self.locked()
+                    && !self.wizard.imported
+                    && self.held.is_none()
+                    && !self.closing.dialog_open()
+                    && self.ask_closed.is_none()
+            }
+            Step::TieOut => {
+                // An undone import can't be verified (the engine refuses
+                // `batch_undone` too): the button is off.
+                !self.undone
+                    && self.tieout.as_ref().is_some_and(|t| t.all_zero)
+                    && self.verify_job.is_none()
+                    && self.allowed()
+            }
+            Step::Done => false,
+            _ => !self.busy() && self.wizard.can_continue(self.today),
+        }
+    }
+
+    /// The step's main button.
+    pub(crate) fn next(&mut self) {
+        if !self.can_next() {
+            return;
+        }
+        match self.wizard.step {
+            Step::Import => self.start_import(),
+            Step::TieOut => self.verify(),
+            Step::SpotCheck => {
+                if self.spot.unsaved() {
+                    self.save_spot_check();
+                }
+                self.wizard.next(self.today);
+            }
+            _ => {
+                self.sync_dates();
+                if self.wizard.next(self.today) {
+                    self.trouble = None;
+                }
+            }
+        }
+    }
+
+    /// Back a step: never while something is out or unsettled, never once
+    /// the batch is made (its files are pinned; Start over instead), never
+    /// back past the import.
+    pub(crate) fn can_back(&self) -> bool {
+        !self.locked()
+            && self.wizard.step != Step::Source
+            && (self.wizard.step != Step::Import || self.batch.is_none())
+            && (!self.wizard.imported || self.wizard.step > Step::TieOut)
+    }
+
+    pub(crate) fn back(&mut self) {
+        if self.can_back() && self.wizard.back() {
+            self.trouble = None;
+        }
+    }
+
+    /// Start over: every file not in a batch is discarded; a batch made
+    /// and not committed stays as a draft (History lists it).
+    pub(crate) fn start_over(&mut self) {
+        if self.locked() {
+            return;
+        }
+        self.release_files();
+        let source = self.wizard.source;
+        let fy = self.wizard.fy_start_month;
+        self.wizard = Wizard::new(source, fy);
+        self.account_map.clear();
+        self.confirmed.clear();
+        self.unmapped_failed.clear();
+        self.date_check = None;
+        self.failure = None;
+        self.date_text.clear();
+        self.date_from_file = None;
+        self.opening_text.clear();
+        self.batch = None;
+        self.held = None;
+        self.state = None;
+        self.tieout = None;
+        self.trouble = None;
+        self.status_answer = None;
+        self.password = None;
+        self.ask_closed = None;
+        self.confirm_closed_next = false;
+        self.undone = false;
+        self.backup_when = None;
+        self.tie = None;
+        self.point_at = None;
+        self.pdf_message = None;
+        self.spot = spot_check::SpotList::default();
+        // D6: Start over (and the demo reset) goes back to the wizard, even
+        // from History.
+        self.view = View::Import;
+    }
+
+    /// Discards the uploaded files no batch holds (closing, Start over,
+    /// a replaced file). Files in a batch are pinned to it (B1).
+    fn release_files(&mut self) {
+        if self.batch.is_some() || self.locked() {
+            self.uploads.clear();
+            return;
+        }
+        let ids: Vec<ImportSessionId> = self
+            .uploads
+            .values()
+            .flatten()
+            .filter_map(SlotFile::session)
+            .collect();
+        self.uploads.clear();
+        for id in ids {
+            self.discard(id);
+        }
+    }
+
+    pub(crate) fn discard(&mut self, id: ImportSessionId) {
+        let job = self.write(
+            "orphan.import_discard",
+            None,
+            move |d| d.imports.discard(id),
+            move |s| async move { s.imports().discard(id).await },
+        );
+        self.discard_jobs.push(job);
+    }
+
+    pub(crate) fn show_history(&mut self) {
+        self.view = View::History;
+        self.load_history();
+    }
+
+    pub(crate) fn load_history(&mut self) {
+        self.backup_paths.clear();
+        self.history_job = Some(self.read(
+            |d| Ok(d.imports.batches().batches),
+            |s| async move { s.imports().batches_all().await },
+        ));
+    }
+
+    /// The demo company's closing date (the demo checks it itself).
+    pub(crate) fn demo_closing(d: &crate::company::demo::DemoState) -> Option<CalendarDate> {
+        d.open
+            .and_then(|o| d.companies.iter().find(|c| c.tenant_id == o))
+            .and_then(|c| c.closed_through)
+    }
+}
+
+impl Drop for ImportScreen {
+    /// Closing the window discards the files no batch holds; a commit or
+    /// undo out (or whose answer was lost) keeps everything (B1).
+    fn drop(&mut self) {
+        // The spot-check list is saved on close (its write outlives the
+        // window, as the discards do).
+        if self.spot.unsaved() {
+            self.save_spot_check();
+        }
+        self.release_files();
+    }
+}
+
+impl Screen for ImportScreen {
+    fn title(&self) -> String {
+        t(&format!("cmd.{}", self.kind()))
+    }
+
+    fn fixed_layout(&self) -> bool {
+        true
+    }
+
+    /// Asks before closing only while a commit or undo runs or its answer
+    /// was lost, or files were added and nothing imported yet. The batch
+    /// is read every frame while its job runs, so this is the engine's
+    /// latest word: a job that ended closes without a question.
+    fn dirty(&self) -> bool {
+        self.in_flight()
+            || self.unsettled
+            || (!self.wizard.imported && self.uploads.values().any(|v| !v.is_empty()))
+    }
+
+    fn save_unconfirmed(&self) -> bool {
+        self.unsettled
+    }
+
+    fn can_save(&self) -> bool {
+        false
+    }
+
+    /// Review B2: the words say what really happens. While only the backup
+    /// is being made nothing has been sent, so nothing posts. Once the
+    /// commit or undo is out, closing the window does not stop it (the
+    /// engine runs it to the end), and quitting may or may not: it either
+    /// finished or changed nothing, and History tells which.
+    fn close_words(&self, quitting: bool) -> Option<crate::windows::CloseWords> {
+        let sent = self.job_out.is_some() || self.running.is_some();
+        let close = if quitting {
+            "imports.close.quit_anyway"
+        } else {
+            "imports.close.close_anyway"
+        };
+        let (message, close) = match (self.in_flight(), sent, self.running_kind(), quitting) {
+            (true, false, Running::Undo, _) => ("imports.close.undo_backup", close),
+            (true, false, Running::Commit, _) => ("imports.close.backup", close),
+            (true, true, Running::Undo, false) => ("imports.close.undo_running", close),
+            (true, true, Running::Undo, true) => ("imports.close.undo_quit", close),
+            (true, true, Running::Commit, false) => ("imports.close.running", close),
+            (true, true, Running::Commit, true) => ("imports.close.running_quit", close),
+            _ => ("imports.close.files", "imports.close.discard"),
+        };
+        Some(crate::windows::CloseWords {
+            message: t(message),
+            close: t(close),
+            keep: t("imports.close.keep"),
+        })
+    }
+
+    /// QA-20: a backup that finishes under the close prompt parks its
+    /// commit or undo; Keep sends it, Close drops the window unsent.
+    fn close_asked(&mut self, asked: bool) {
+        self.close_asked = asked;
+        if !asked && let Some(held) = self.parked.take() {
+            self.send(held);
+        }
+    }
+
+    fn ui(&mut self, ui: &mut eframe::egui::Ui) {
+        self.poll();
+        if self.busy() || self.spot.saving() || self.spot.unsaved() || self.pdf.is_some() {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(100));
+        }
+        self.draw(ui);
+    }
+
+    fn scope(&self) -> cl_model::Scope {
+        cl_model::Scope::Form
+    }
+
+    fn command(&mut self, id: CommandId) -> bool {
+        if let Some(done) = self.closing.command(id) {
+            return done;
+        }
+        let s = id.as_str();
+        if let Some(rest) = s.strip_prefix("dev.imports_demo_") {
+            return self.link.is_demo() && self.demo_command(rest);
+        }
+        match s {
+            "form.save_new" => {
+                self.next();
+                true
+            }
+            "form.step_back" => {
+                self.back();
+                true
+            }
+            "form.revert" => {
+                if self.confirm_undo.take().is_some() {
+                    return true;
+                }
+                if self.ask_closed.is_some() {
+                    self.cancel_closed();
+                    return true;
+                }
+                if self.view == View::History {
+                    self.view = View::Import;
+                    return true;
+                }
+                // Esc never walks back through the steps (UI review): with
+                // nothing of its own to revert it goes to the shell, which
+                // closes the window or asks first when there is work.
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn state(&self) -> Value {
+        let files: usize = self.uploads.values().map(Vec::len).sum();
+        let mut s = json!({
+            "screen": self.kind(),
+            "view": match self.view { View::Import => "import", View::History => "history" },
+            "source": self.wizard.source.key(),
+            "step": self.wizard.step.key(),
+            "steps": self.wizard.source.steps().iter().map(|s| s.key()).collect::<Vec<_>>(),
+            "blockers": self.wizard.blockers(self.today).iter().map(cl_model::imports::wizard::Blocker::key).collect::<Vec<_>>(),
+            "can_next": self.can_next(),
+            "can_back": self.can_back(),
+            "busy": self.busy(),
+            "files": files,
+            "files_uploaded": self.uploads.values().flatten().filter(|f| f.outcome.is_some()).count(),
+            "files_refused": self.uploads.values().flatten().filter(|f| f.problem.is_some() || f.refusal.is_some()).count(),
+            "matches": self.matches().len(),
+            "unmapped": self.unmapped(),
+            // U-272: account-list rows merged into a system account, and
+            // the ones the owner sent to an account of theirs instead.
+            "merged": self.matches().iter().filter(|m| m.status == MatchStatus::Create && m.system_role.is_some()).count(),
+            "redirected": self.matches().iter().filter(|m| m.status == MatchStatus::Create && self.account_map.contains_key(&m.source_key)).count(),
+            "depth": self.wizard.depth.key(),
+            "conversion_date_set": self.wizard.conversion_date.is_some(),
+            "batch": self.batch.is_some(),
+            "backing_up": self.backup_job.is_some(),
+            "running": self.running.map(|r| match r { Running::Commit => "commit", Running::Undo => "undo" }),
+            "progress": self.state.as_ref().and_then(|b| b.progress.as_ref()).map(|p| json!({"done": p.done, "total": p.total})),
+            "batch_status": self.state.as_ref().map(|b| b.batch.status.as_wire()),
+            "jobs_sent": self.jobs_sent,
+            "unsettled": self.unsettled,
+            "in_flight": self.in_flight(),
+            "imported": self.wizard.imported,
+            "verified": self.wizard.verified,
+            "tieout_all_zero": self.tieout.as_ref().map(|t| t.all_zero),
+            "tieout_accounts": self.tieout.as_ref().map(|t| t.accounts.len()),
+            "status_answer": self.status_answer,
+            "trouble": self.trouble.as_ref().map(Trouble::code),
+            "blocked_by": match &self.trouble {
+                Some(Trouble::Refused(ImportRefusal::UndoBlocked { blockers })) => blockers.len(),
+                _ => 0,
+            },
+            "confirm_undo": self.confirm_undo.is_some(),
+            "undone": self.undone,
+            "allowed": self.allowed(),
+            "history": self.history.as_ref().map(|h| json!({
+                "rows": h.len(),
+                "committed": h.iter().filter(|b| b.status == BatchStatus::Committed).count(),
+                "undone": h.iter().filter(|b| b.status == BatchStatus::Undone).count(),
+            })),
+        });
+        if let Value::Object(m) = &mut s
+            && let Value::Object(c) = self.closing.state_json(true)
+        {
+            m.extend(c);
+        }
+        // Tie-out, spot-check and the D4 flags (one more object: the macro's
+        // recursion limit).
+        let d4 = json!({
+            "tieout_tab": self.tie.as_ref().map(|x| x.tab.key()),
+            "tieout_tabs": self.tie.as_ref().map(|x| x.tabs().iter().map(|t| t.key()).collect::<Vec<_>>()),
+            "tieout_differences_only": self.tie.as_ref().map(|x| x.view.differences_only),
+            "tieout_rows_shown": self.tie.as_ref().map(|x| x.rows(x.tab).len() + x.checks(x.tab).len()),
+            "tieout_differences": self.tie.as_ref().map(tieout::TieState::all_differences),
+            // The marked row's index (M1: never its label, which can be a name).
+            "tieout_marked": self.tie.as_ref().and_then(|x| x.focus),
+            "spot_samples": self.spot.items.iter().filter(|i| i.key.starts_with("sample:")).count(),
+            "pdfs_saved": self.pdfs_saved,
+            "spot_items": self.spot.items.len(),
+            "spot_done": self.spot.items.iter().filter(|i| i.done).count(),
+            "spot_complete": !self.spot.items.is_empty() && self.spot.complete(),
+            "spot_unsaved": self.spot.unsaved(),
+            "spot_saves": self.spot.saves,
+            "ask_closed": self.ask_closed.is_some(),
+            "restore_gone": self.restore_gone,
+            "failure": self.failure.as_ref().map(refusal_code),
+            "needs_you": self.matches().iter().filter(|m| self.needs_you(m)).count(),
+            "confirmed": self.confirmed.len(),
+        });
+        if let (Value::Object(m), Value::Object(d)) = (&mut s, d4) {
+            m.extend(d);
+        }
+        s
+    }
+}

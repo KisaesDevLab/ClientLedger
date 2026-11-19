@@ -7,7 +7,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use cl_company::{BackupOutcome, BackupRequest, CompanyError, ExportAllOutcome, Progress};
-use cl_core::Secret;
 use cl_core::ids::TenantId;
 use cl_model::{CommandId, Scope};
 use cl_settings::BackupKind;
@@ -75,14 +74,7 @@ impl BackupScreen {
         tenant: Option<(TenantId, String)>,
     ) -> BackupScreen {
         let group = link.group().and_then(Result::ok);
-        let passphrase_needed = job != Job::ExportAll
-            && !link.is_demo()
-            && link
-                .secrets()
-                .get(cl_settings::secrets::BACKUP_PASSPHRASE)
-                .ok()
-                .flatten()
-                .is_none_or(|p| p.is_empty());
+        let passphrase_needed = job != Job::ExportAll && crate::widgets::passphrase::needed(&link);
         BackupScreen {
             dest_dir: link.backup_dir.display().to_string(),
             link,
@@ -105,28 +97,18 @@ impl BackupScreen {
             return;
         };
         if self.passphrase_needed {
-            if self.passphrase.chars().count() < 12 {
-                self.error = Some(CompanyError::PassphraseTooShort);
+            // The shared rule and path (the import wizards ask inline too).
+            if let Err(e) = crate::widgets::passphrase::save(
+                &self.link,
+                &self.passphrase,
+                &self.passphrase_confirm,
+            ) {
+                self.error = Some(e);
                 return;
             }
-            if self.passphrase != self.passphrase_confirm {
-                self.error = Some(CompanyError::PassphraseMismatch);
-                return;
-            }
-            let secret = Secret::new(std::mem::take(&mut self.passphrase));
+            self.passphrase.clear();
             self.passphrase_confirm.clear();
-            if let Err(e) = self
-                .link
-                .secrets()
-                .set(cl_settings::secrets::BACKUP_PASSPHRASE, &secret)
-            {
-                self.error = Some(e.into());
-                return;
-            }
             self.passphrase_needed = false;
-            self.link
-                .bus()
-                .publish(crate::data_bus::Change::BackupPassphrase);
         }
         let dest_dir = PathBuf::from(self.dest_dir.trim());
         if self.link.is_demo() {
@@ -179,6 +161,7 @@ impl BackupScreen {
                         kind: BackupKind::Backup,
                         dest_dir,
                         apply_retention: true,
+                        protected: None,
                     },
                     &sink,
                 )

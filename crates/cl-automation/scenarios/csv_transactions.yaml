@@ -1,0 +1,44 @@
+# Import Transactions from a Spreadsheet (P31) against `clientledger --demo`:
+# the synthetic fixtures/import_transactions/good.csv (2 invoices, 2 bills, 1
+# journal entry) goes through Choose file, Match columns, Check rows, a backup
+# and the import, then Undo this import. The demo reads the file by its bytes.
+# The state carries counts and flags only (no names, amounts or file names).
+name: csv_transactions
+description: Good spreadsheet - columns matched, rows checked (2 invoices, 2 bills, 1 entry), imported, then undone.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: file.import_transactions
+  - command: dev.txn_import_demo_reset
+  - assert_state: {key: screen.screen, equals: file.import_transactions}
+  - assert_state: {key: screen.step, equals: choose}
+  - screenshot: choose
+  - command: dev.txn_import_demo_file_good
+  - assert_state: {key: screen.step, equals: map}
+  - assert_state: {key: screen.gaps, equals: 0}
+  - screenshot: map
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: preview}
+  - assert_state: {key: screen.invoices, equals: 2}
+  - assert_state: {key: screen.bills, equals: 2}
+  - assert_state: {key: screen.journal_entries, equals: 1}
+  - assert_state: {key: screen.problems, equals: 0}
+  - assert_state: {key: screen.can_import, equals: true}
+  - screenshot: preview
+  - key: Alt+N
+  - assert_state: {key: screen.step, equals: done, within_ms: 8000}
+  - assert_state: {key: screen.backup_made, equals: true}
+  - assert_state: {key: screen.batch_status, equals: committed}
+  - screenshot: done
+  - click: {label: Undo this import}
+  - assert_state: {key: screen.confirm_undo, equals: true}
+  - screenshot: undo-confirm
+  - click: {role: button, label: Keep it}
+  - assert_state: {key: screen.confirm_undo, equals: false}
+  - click: {label: Undo this import}
+  - click: {role: button, label: Undo the import}
+  - assert_state: {key: screen.undone, equals: true, within_ms: 8000}
+  - screenshot: undone
+  - command: dev.txn_import_demo_reset
+  - command: file.close_window
+  - wait: {ms: 300}

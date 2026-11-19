@@ -1,0 +1,10 @@
+Group,Type,Date,Num,Name,Due Date,Memo,Account,Item,Description,Amount,Debit,Credit,Tag
+1,Invoice,10/05/2026,7001,Riverbend HOA,11/04/2026,Fall cleanup,Service Income,,Leaf removal,"$1,250.00",,,
+1,Invoice,10/05/2026,7001,Riverbend HOA,11/04/2026,,Service Income,,Bed edging,312.50,,,
+2,Invoice,10/12/2026,7002,Table Rock Dental,11/11/2026,,Service Income,,Mowing (October),480.00,,,
+3,Bill,10/08/2026,OMS-5521,Ozark Mulch Supply,11/07/2026,,Mulch & stone,,Hardwood mulch,640.25,,,
+3,Bill,10/08/2026,OMS-5521,Ozark Mulch Supply,11/07/2026,,Mulch & stone,,Delivery,45.00,,,
+4,Bill,10/15/2026,HF-2209,Hollister Fuel Stop,10/30/2026,,Fuel,,,(12.40),,,
+4,Bill,10/15/2026,HF-2209,Hollister Fuel Stop,10/30/2026,,Fuel,,Diesel,212.40,,,
+5,Journal Entry,10/31/2026,JE-1031,,,Reclass software,Office Supplies and Software,,,,89.99,,
+5,Journal Entry,10/31/2026,JE-1031,,,,Repairs and Maintenance,,,,,89.99,

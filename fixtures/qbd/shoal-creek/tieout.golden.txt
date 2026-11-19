@@ -1,0 +1,52 @@
+Check that it matches
+QuickBooks Desktop compared with ClientLedger at 10/27/2026
+Every difference is 0.00 (not marked verified yet).
+
+## Trial balance
+Account | QuickBooks Desktop | ClientLedger | Difference
+1000 | 26,684.35 | 26,684.35 | 0.00
+1200 | 4,311.67 | 4,311.67 | 0.00
+1300 | 3,400.00 | 3,400.00 | 0.00
+1500 | 15,000.00 | 15,000.00 | 0.00
+2000 | -1,889.44 | -1,889.44 | 0.00
+2100 | -160.65 | -160.65 | 0.00
+2200 | -41.25 | -41.25 | 0.00
+3000 | -30,000.00 | -30,000.00 | 0.00
+3900 | -16,428.12 | -16,428.12 | 0.00
+4000 | -4,766.00 | -4,766.00 | 0.00
+4100 | -500.00 | -500.00 | 0.00
+5000 | 200.00 | 200.00 | 0.00
+6100 | 339.44 | 339.44 | 0.00
+6300 | 2,100.00 | 2,100.00 | 0.00
+6400 | 1,750.00 | 1,750.00 | 0.00
+Total debits (all 15 accounts) | 53,785.46 | 53,785.46 | 0.00
+Total credits | 53,785.46 | 53,785.46 | 
+
+## A/R aging
+Invoice | QuickBooks Desktop | ClientLedger | Difference
+1004 | 2,345.67 | 2,345.67 | 0.00
+1005 | 3,500.00 | 3,500.00 | 0.00
+CM-7 | -1,234.00 | -1,234.00 | 0.00
+Payment · Riverside Café | -300.00 | -300.00 | 0.00
+Total (all 4) | 4,311.67 | 4,311.67 | 0.00
+
+## A/P aging
+Bill | QuickBooks Desktop | ClientLedger | Difference
+F-131 | 389.44 | 389.44 | 0.00
+NP-552 | 800.00 | 800.00 | 0.00
+OCT26 | 750.00 | 750.00 | 0.00
+VC-9 | -50.00 | -50.00 | 0.00
+Total (all 4) | 1,889.44 | 1,889.44 | 0.00
+
+## Inventory
+Item | QuickBooks Desktop | ClientLedger | Difference
+Live Oak 15gal | 1,125.00 | 1,125.00 | 0.00
+Mulch (bag) | 325.00 | 325.00 | 0.00
+Native Shrub 3gal | 1,950.00 | 1,950.00 | 0.00
+Total (all 3) | 3,400.00 | 3,400.00 | 0.00
+
+## Must be 0.00 at the switch date
+Receivables before conversion | 0.00
+Payables before conversion | 0.00
+Inventory before conversion | 0.00
+Inventory valuation vs. Inventory Asset accounts | 0.00

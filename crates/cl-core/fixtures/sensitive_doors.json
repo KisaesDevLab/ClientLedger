@@ -10,7 +10,8 @@
     "/api/v1/ai",
     "/api/v2",
     "/api/v1/practice/1099",
-    "/api/v1/payroll-import"
+    "/api/v1/payroll-import",
+    "/api/v1/imports"
   ],
   "converted": [
     {

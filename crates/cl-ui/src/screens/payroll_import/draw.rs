@@ -1164,10 +1164,15 @@ impl PayrollImportScreen {
                 }),
             );
         }
+        // P31 QA-2 (Q-P31ad): no passphrase yet: asked here; Post saves it
+        // (as Back Up does), then backs up and posts.
+        if self.need_passphrase && self.allowed() && self.posted.is_none() {
+            ui.add_space(6.0);
+            self.passphrase.ui(ui, tokens, "payroll.passphrase_why");
+        }
         let Some(e) = &self.backup_failed else {
             return;
         };
-        let no_passphrase = matches!(e, cl_company::CompanyError::NoPassphrase);
         ui.add_space(6.0);
         warn(
             ui,
@@ -1182,9 +1187,6 @@ impl PayrollImportScreen {
         ui.horizontal(|ui| {
             if ui.button(t("payroll.try_again")).clicked() {
                 self.backup_try_again();
-            }
-            if no_passphrase && ui.button(t("payroll.backup.open_backup")).clicked() {
-                self.link_open("file.backup");
             }
         });
         ui.add_space(6.0);
