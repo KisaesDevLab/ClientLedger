@@ -680,6 +680,10 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Demo Import: One Account Matches Nothing (developer)",
     ),
     dev_action(
+        "dev.imports_demo_number_match",
+        "Demo Import: One Account Matches Another Name by Number (developer)",
+    ),
+    dev_action(
         "dev.imports_demo_close_books",
         "Close Demo Books for Import (developer)",
     ),

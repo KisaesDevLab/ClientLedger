@@ -253,6 +253,7 @@ async fn refusals_are_classified() {
                 kind: "payment".into(),
                 id: Some("p1".into()),
                 reason: Some("live_application".into()),
+                target: None,
             }]
         })
     );

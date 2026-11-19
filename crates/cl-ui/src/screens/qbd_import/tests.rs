@@ -297,7 +297,22 @@ fn undo_with_blockers_lists_them_and_offers_the_restore() {
     );
     assert_eq!(s.state()["blocked_by"], 1);
     assert!(s.blocked_backup().is_some(), "the restore is offered");
-    assert!(draw::blocker_kind_text("payment").contains("payment"));
+    // QA-11: plain words, once each, naming the document when known.
+    let b = |target: &str| cl_api::imports::UndoBlocker {
+        kind: "payment_applications.payment_id".into(),
+        id: None,
+        reason: Some("payment_applied".into()),
+        target: Some(target.into()),
+    };
+    let docs = std::collections::BTreeMap::from([("t1".to_string(), "invoice 1005".to_string())]);
+    let lines = draw::undo_blocker_lines(&[b("t1"), b("t1"), b("t1")], &docs);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(lines[0].contains("invoice 1005"), "{lines:?}");
+    let unknown = draw::undo_blocker_lines(&[b("t2")], &docs);
+    assert!(
+        !unknown[0].contains("{doc}") && !unknown[0].contains("imports."),
+        "{unknown:?}"
+    );
     assert!(!s.undone);
     f.link
         .demo_state()
@@ -411,6 +426,54 @@ fn closing_during_the_backup_sends_nothing() {
     finish(&mut s);
     assert_eq!(jobs(&f), 1, "sent once on Keep");
     assert!(s.wizard.imported);
+}
+
+/// QA-1 (Q-P31ac): a match by number to an account of another name is
+/// shown and needs the owner's OK (or another account) before Continue.
+#[test]
+fn a_number_match_to_another_name_needs_the_owner() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.imports_demo_number_match");
+    s.next();
+    cmd(&mut s, "dev.imports_demo_file_all");
+    for _ in 0..3 {
+        s.poll();
+    }
+    s.next();
+    assert_eq!(s.wizard.step, Step::Mapping);
+    let st = s.state();
+    assert_eq!(st["needs_you"], 1, "{st}");
+    assert!(!s.can_next(), "never silently");
+    let m = s
+        .matches()
+        .into_iter()
+        .find(|m| m.source_key == "2200")
+        .expect("2200");
+    assert!(s.matched_account(&m).is_some(), "both names are known");
+    // OK it: Continue goes on; the batch carries no map for it.
+    s.confirmed.insert("2200".into());
+    s.sync_mapping();
+    assert!(s.can_next(), "{}", s.state());
+    // Or send it elsewhere: the pick goes in the batch's account map.
+    s.confirmed.clear();
+    let other = s
+        .chart
+        .iter()
+        .find(|a| a.id != m.account.expect("id"))
+        .expect("other")
+        .id;
+    s.account_map.insert("2200".into(), other);
+    s.sync_mapping();
+    assert!(s.can_next());
+    assert!(super::mapping::same_name(
+        "Sales Tax Payable",
+        "sales tax  payable"
+    ));
+    assert!(!super::mapping::same_name(
+        "Sales Tax Payable",
+        "Vehicle and Equipment Loans"
+    ));
 }
 
 /// QA-2: no backup passphrase yet: Import asks for one in the window and

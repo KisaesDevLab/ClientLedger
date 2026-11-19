@@ -447,7 +447,11 @@ pub fn qbd_into_a_starter_chart(h: &Harness) {
         assert!(t.all_zero, "QA-1: the QuickBooks chart ties out");
     }
     undo(h, &s, id);
-    assert_eq!(name_of("2200"), before, "undo puts the starter account back");
+    assert_eq!(
+        name_of("2200"),
+        before,
+        "undo puts the starter account back"
+    );
 }
 /// Polls the batch until its job is done.
 fn wait(h: &Harness, s: &Session, id: ImportBatchId) -> BatchState {

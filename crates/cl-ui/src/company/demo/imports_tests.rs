@@ -493,6 +493,7 @@ fn undo_blockers_are_listed_with_reasons() {
             kind: "payment".into(),
             id: Some("pay-1".into()),
             reason: Some("payment_applied".into()),
+            target: None,
         },
     )
     .expect("blocker");

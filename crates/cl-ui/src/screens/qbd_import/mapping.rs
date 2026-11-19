@@ -109,6 +109,20 @@ pub fn mapping_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
             .wrap(),
         );
     }
+    let needs = matches.iter().filter(|m| s.needs_you(m)).count();
+    if needs > 0 {
+        ui.add(
+            egui::Label::new(
+                RichText::new(crate::i18n::t_count(
+                    "imports.mapping.needs_you",
+                    needs,
+                    &[],
+                ))
+                .color(tokens.warn_text),
+            )
+            .wrap(),
+        );
+    }
     for m in matches
         .iter()
         .filter(|m| m.status == MatchStatus::Create && m.system_role.is_some())
@@ -124,6 +138,7 @@ pub fn mapping_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
         .filter(|a| a.is_active)
         .map(|a| (a.id, account_text(a)))
         .collect();
+    number_section(s, ui, tokens, &matches, &chart);
     let unmatched: Vec<&AccountMatch> = matches
         .iter()
         .filter(|m| m.status == MatchStatus::Unmatched)
@@ -131,7 +146,178 @@ pub fn mapping_ui(s: &mut ImportScreen, ui: &mut Ui, tokens: &Tokens) {
     if !unmatched.is_empty() {
         unmatched_grid(s, ui, tokens, &unmatched, &chart);
     }
+    all_matches_section(s, ui, &matches);
     redirect_section(s, ui, &matches, &chart);
+}
+
+/// Two account names are the same name (case, spaces and punctuation
+/// aside): "Accounts Receivable" and "accounts receivable (A/R)" are not,
+/// "Sales Tax Payable" and "sales tax payable" are.
+#[must_use]
+pub fn same_name(a: &str, b: &str) -> bool {
+    let norm = |s: &str| {
+        s.chars()
+            .filter(char::is_ascii_alphanumeric)
+            .map(|c| c.to_ascii_lowercase())
+            .collect::<String>()
+    };
+    let (x, y) = (norm(a), norm(b));
+    !x.is_empty() && x == y
+}
+
+/// QA-1 (Q-P31ac): every match by account number, with both names. One
+/// whose names differ needs the owner: OK it, or send it to another
+/// account. In a QuickBooks Desktop switch the QuickBooks account takes the
+/// number over (the starter account gets its name and type; undo gives
+/// them back); elsewhere it posts into the account as it is.
+fn number_section(
+    s: &mut ImportScreen,
+    ui: &mut Ui,
+    tokens: &Tokens,
+    matches: &[AccountMatch],
+    chart: &[(AccountId, String)],
+) {
+    let rows: Vec<&AccountMatch> = matches
+        .iter()
+        .filter(|m| {
+            m.status == MatchStatus::Existing
+                && m.matched_by == Some(cl_api::imports::MatchedBy::Number)
+                && s.matched_account(m)
+                    .is_none_or(|a| !same_name(&a.fields.name, &m.name))
+        })
+        .collect();
+    if rows.is_empty() {
+        return;
+    }
+    let takes_over = s.wizard.source == cl_model::imports::wizard::Source::Qbd;
+    ui.add_space(8.0);
+    ui.label(RichText::new(t("imports.mapping.number.title")).strong());
+    ui.add(
+        egui::Label::new(
+            RichText::new(t(if takes_over {
+                "imports.mapping.number.intro_qbd"
+            } else {
+                "imports.mapping.number.intro"
+            }))
+            .color(tokens.text_secondary),
+        )
+        .wrap(),
+    );
+    egui::Grid::new("imports/number_matches")
+        .num_columns(3)
+        .striped(true)
+        .spacing([16.0, 6.0])
+        .show(ui, |ui| {
+            ui.label(RichText::new(t("imports.mapping.col_source")).strong());
+            ui.label(RichText::new(t("imports.mapping.col_here")).strong());
+            ui.label(RichText::new(t("imports.mapping.col_choice")).strong());
+            ui.end_row();
+            for m in rows {
+                let l = ui.label(source_text(m));
+                let here = s
+                    .matched_account(m)
+                    .map_or_else(|| t("imports.mapping.choose"), account_text);
+                ui.label(&here);
+                let picked = s.account_map.get(&m.source_key).copied();
+                let ok = s.confirmed.contains(&m.source_key);
+                let keep = t_with(
+                    if takes_over {
+                        "imports.mapping.number.ok_qbd"
+                    } else {
+                        "imports.mapping.number.ok"
+                    },
+                    &[("source", &source_text(m)), ("account", &here)],
+                );
+                let shown = if let Some(id) = picked {
+                    chart
+                        .iter()
+                        .find(|(c, _)| *c == id)
+                        .map_or_else(|| t("imports.mapping.choose"), |(_, n)| n.clone())
+                } else if ok {
+                    keep.clone()
+                } else {
+                    t("imports.mapping.number.needs_you")
+                };
+                let mut chosen: Option<Option<AccountId>> = None;
+                let r = egui::ComboBox::from_id_salt(("imports/number", &m.source_key))
+                    .selected_text(if picked.is_none() && !ok {
+                        RichText::new(shown).color(tokens.warn_text)
+                    } else {
+                        RichText::new(shown)
+                    })
+                    .width(320.0)
+                    .show_ui(ui, |ui| {
+                        if ui.selectable_label(ok && picked.is_none(), &keep).clicked() {
+                            chosen = Some(None);
+                        }
+                        for (id, name) in chart {
+                            if ui.selectable_label(picked == Some(*id), name).clicked() {
+                                chosen = Some(Some(*id));
+                            }
+                        }
+                    })
+                    .response
+                    .labelled_by(l.id);
+                let _ = r;
+                match chosen {
+                    Some(Some(id)) => {
+                        s.confirmed.remove(&m.source_key);
+                        s.account_map.insert(m.source_key.clone(), id);
+                        s.sync_mapping();
+                    }
+                    Some(None) => {
+                        s.account_map.remove(&m.source_key);
+                        s.confirmed.insert(m.source_key.clone());
+                        s.sync_mapping();
+                    }
+                    None => {}
+                }
+                ui.end_row();
+            }
+        });
+}
+
+/// QA-1: every account the files name, with what it becomes here (an
+/// account already here, a new one from the account list, a merge into a
+/// system account, or the owner's pick).
+fn all_matches_section(s: &ImportScreen, ui: &mut Ui, matches: &[AccountMatch]) {
+    ui.add_space(8.0);
+    egui::CollapsingHeader::new(t_with(
+        "imports.mapping.all",
+        &[("n", &matches.len().to_string())],
+    ))
+    .id_salt("imports/all_matches")
+    .show(ui, |ui| {
+        egui::Grid::new("imports/all_matches_grid")
+            .num_columns(2)
+            .striped(true)
+            .spacing([16.0, 4.0])
+            .show(ui, |ui| {
+                ui.label(RichText::new(t("imports.mapping.col_source")).strong());
+                ui.label(RichText::new(t("imports.mapping.col_here")).strong());
+                ui.end_row();
+                for m in matches {
+                    ui.label(source_text(m));
+                    let picked = s
+                        .account_map
+                        .get(&m.source_key)
+                        .and_then(|id| s.chart.iter().find(|a| a.id == *id));
+                    let here = match (picked, m.status) {
+                        (Some(a), _) => account_text(a),
+                        (None, MatchStatus::Existing) => s
+                            .matched_account(m)
+                            .map_or_else(|| t("imports.mapping.here_unknown"), account_text),
+                        (None, MatchStatus::Create) if m.system_role.is_some() => {
+                            merge_text(m, &s.chart, None).unwrap_or_default()
+                        }
+                        (None, MatchStatus::Create) => t("imports.mapping.here_new"),
+                        (None, MatchStatus::Unmatched) => t("imports.mapping.choose"),
+                    };
+                    ui.add(egui::Label::new(here).wrap());
+                    ui.end_row();
+                }
+            });
+    });
 }
 
 /// What a merged account list row becomes ("3900 · Retained Earnings goes

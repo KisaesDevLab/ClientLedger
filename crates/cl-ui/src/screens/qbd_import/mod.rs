@@ -54,6 +54,7 @@ use crate::i18n::t;
 use crate::windows::Screen;
 
 mod draw;
+pub(crate) use draw::undo_blocker_lines as draw_undo_blocker_lines;
 pub mod mapping;
 pub mod spot_check;
 #[cfg(test)]
@@ -397,6 +398,12 @@ pub struct ImportScreen {
     pub(crate) chart: Vec<Account>,
     /// Source key → the company account the owner picked.
     pub(crate) account_map: BTreeMap<String, AccountId>,
+    /// QA-11: imported documents an undo blocker names (id → "invoice 1005").
+    pub(crate) blocker_docs: BTreeMap<String, String>,
+    docs_job: Option<Job<Vec<(String, String)>>>,
+    docs_asked: Vec<String>,
+    /// Number matches to another name the owner said are right (QA-1).
+    pub(crate) confirmed: std::collections::BTreeSet<String>,
     /// Keys a failed commit said have no account (`IMPORT_UNMAPPED_ACCOUNT`):
     /// unmatched until picked, whatever the uploads said.
     pub(crate) unmapped_failed: std::collections::BTreeSet<String>,
@@ -583,6 +590,10 @@ impl ImportScreen {
             chart_job: None,
             chart: Vec::new(),
             account_map: BTreeMap::new(),
+            confirmed: std::collections::BTreeSet::new(),
+            blocker_docs: BTreeMap::new(),
+            docs_job: None,
+            docs_asked: Vec::new(),
             unmapped_failed: std::collections::BTreeSet::new(),
             rebuild: None,
             date_check: None,
@@ -814,6 +825,7 @@ impl ImportScreen {
         }
         self.poll_pdf();
         self.poll_spot_check();
+        self.poll_blocker_docs();
         if let Some(r) = poll(&mut self.history_job) {
             match r {
                 Ok(list) => self.history = Some(list),
@@ -876,24 +888,111 @@ impl ImportScreen {
     /// file found it (`existing`) or the account list makes it (`create`);
     /// a key a failed commit named stays unmatched until picked.
     pub(crate) fn matches(&self) -> Vec<AccountMatch> {
-        merge_matches(
+        let posted = || {
             self.uploads
                 .values()
                 .flatten()
                 .filter_map(|f| f.outcome.as_ref())
                 // A reference file is only compared against, never posted.
                 .filter(|o| o.session.role != Some(cl_api::imports::FileRole::Reference))
-                .flat_map(|o| o.preview.account_matches.iter()),
+        };
+        let mut all = merge_matches(
+            posted().flat_map(|o| o.preview.account_matches.iter()),
             &self.unmapped_failed,
-        )
+        );
+        // QA-1/QA-10: the account list decides what its own keys become (the
+        // commit makes or takes over that account by number); another file's
+        // name match against the chart as it was is not what posts.
+        let chart_rows: BTreeMap<&str, &AccountMatch> = posted()
+            .filter(|o| o.session.kind == cl_api::imports::ImportKind::Coa)
+            .flat_map(|o| o.preview.account_matches.iter())
+            .map(|m| (m.source_key.as_str(), m))
+            .collect();
+        for m in &mut all {
+            if let Some(c) = chart_rows.get(m.source_key.as_str())
+                && !self.unmapped_failed.contains(&m.source_key)
+            {
+                m.status = c.status;
+                m.account = c.account;
+                m.matched_by = c.matched_by;
+            }
+        }
+        all
     }
 
-    /// Unmatched accounts with no account picked yet.
+    /// QA-11: reads the imported documents a blocked undo names, once per
+    /// refusal, so the reasons say "invoice 1005" (the demo names none).
+    fn poll_blocker_docs(&mut self) {
+        if let Some(r) = poll(&mut self.docs_job) {
+            if let Ok(found) = r {
+                self.blocker_docs.extend(found);
+            }
+            return;
+        }
+        if self.docs_job.is_some() {
+            return;
+        }
+        let Some(Trouble::Refused(ImportRefusal::UndoBlocked { blockers })) = &self.trouble else {
+            return;
+        };
+        let mut ids: Vec<String> = blockers
+            .iter()
+            .filter_map(draw::blocker_doc_id)
+            .map(str::to_string)
+            .filter(|id| !self.blocker_docs.contains_key(id))
+            .collect();
+        ids.sort();
+        ids.dedup();
+        ids.truncate(10);
+        if ids.is_empty() || ids == self.docs_asked {
+            return;
+        }
+        self.docs_asked.clone_from(&ids);
+        self.docs_job = Some(self.read(
+            |_| Ok(Vec::new()),
+            move |s| async move {
+                let mut out = Vec::new();
+                for id in ids {
+                    let Ok(tid) = id.parse::<cl_core::ids::TransactionId>() else {
+                        continue;
+                    };
+                    if let Ok(v) = s.transactions().get(tid).await {
+                        let tx = v.record;
+                        out.push((id, draw::doc_words(tx.txn_type, tx.txn_number.as_deref())));
+                    }
+                }
+                Ok(out)
+            },
+        ));
+    }
+
+    /// The company account `m` matched, when it is one of the chart's.
+    pub(crate) fn matched_account(&self, m: &AccountMatch) -> Option<&Account> {
+        let id = m.account?;
+        self.chart.iter().find(|a| a.id == id)
+    }
+
+    /// QA-1 (Q-P31ac): a match by number to an account of another name
+    /// needs the owner's OK (or another account) before the step is done.
+    pub(crate) fn needs_you(&self, m: &AccountMatch) -> bool {
+        m.status == MatchStatus::Existing
+            && m.matched_by == Some(cl_api::imports::MatchedBy::Number)
+            && !self.account_map.contains_key(&m.source_key)
+            && !self.confirmed.contains(&m.source_key)
+            && self
+                .matched_account(m)
+                .is_none_or(|a| !mapping::same_name(&a.fields.name, &m.name))
+    }
+
+    /// Accounts that keep the step open: unmatched with no account picked,
+    /// and number matches to another name not yet confirmed (QA-1).
     pub(crate) fn unmapped(&self) -> usize {
         self.matches()
             .iter()
             .filter(|m| {
-                m.status == MatchStatus::Unmatched && !self.account_map.contains_key(&m.source_key)
+                (m.status == MatchStatus::Unmatched
+                    && !self.account_map.contains_key(&m.source_key))
+                    || self.needs_you(m)
             })
             .count()
     }
@@ -982,6 +1081,7 @@ impl ImportScreen {
         let fy = self.wizard.fy_start_month;
         self.wizard = Wizard::new(source, fy);
         self.account_map.clear();
+        self.confirmed.clear();
         self.unmapped_failed.clear();
         self.date_check = None;
         self.failure = None;
@@ -1260,6 +1360,8 @@ impl Screen for ImportScreen {
             "ask_closed": self.ask_closed.is_some(),
             "restore_gone": self.restore_gone,
             "failure": self.failure.as_ref().map(refusal_code),
+            "needs_you": self.matches().iter().filter(|m| self.needs_you(m)).count(),
+            "confirmed": self.confirmed.len(),
         });
         if let (Value::Object(m), Value::Object(d)) = (&mut s, d4) {
             m.extend(d);

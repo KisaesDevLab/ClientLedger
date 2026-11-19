@@ -1085,6 +1085,17 @@ impl ImportScreen {
                 x.tab = t;
             }
             "unmatched" => d.imports.unmatched = vec!["Old suspense".into()],
+            // QA-1: the set's 2200 matches a demo account of another name by
+            // number (before the files are added).
+            "number_match" => {
+                let Some(a) = crate::company::demo::home::accounts(&mut d)
+                    .into_iter()
+                    .find(|a| a.is_active && !a.is_system)
+                else {
+                    return false;
+                };
+                d.imports.number_match = Some(("2200".into(), a.id));
+            }
             "close_books" => {
                 if let Some(open) = d.open
                     && let Some(c) = d.companies.iter_mut().find(|c| c.tenant_id == open)
@@ -1101,9 +1112,10 @@ impl ImportScreen {
                     .add_blocker(
                         id,
                         cl_api::imports::UndoBlocker {
-                            kind: "payment".into(),
+                            kind: "payment_applications.payment_id".into(),
                             id: None,
-                            reason: Some("applied".into()),
+                            reason: Some("payment_applied".into()),
+                            target: None,
                         },
                     )
                     .is_ok();

@@ -416,17 +416,12 @@ impl CsvTransactionsScreen {
             Trouble::AdminRequired => warn(ui, tokens, &t("txn_import.admin_required")),
             Trouble::UndoBlocked(blockers) => {
                 warn(ui, tokens, &t("txn_import.undo_blocked"));
-                for b in blockers {
-                    ui.label(t_with(
-                        "txn_import.undo_blocked.item",
-                        &[
-                            ("kind", &b.kind.replace('_', " ")),
-                            (
-                                "reason",
-                                &b.reason.as_deref().unwrap_or("").replace('_', " "),
-                            ),
-                        ],
-                    ));
+                // QA-11: plain words, once each (never table names).
+                for line in crate::screens::qbd_import::draw_undo_blocker_lines(
+                    blockers,
+                    &std::collections::BTreeMap::new(),
+                ) {
+                    ui.add(egui::Label::new(format!("• {line}")).wrap());
                 }
                 note(ui, tokens, &t("txn_import.undo_blocked.fix"));
             }

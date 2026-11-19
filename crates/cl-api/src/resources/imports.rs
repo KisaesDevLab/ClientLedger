@@ -1580,6 +1580,9 @@ pub struct UndoBlocker {
     pub id: Option<String>,
     /// The engine's reason code.
     pub reason: Option<String>,
+    /// The import's own transaction it holds on to (an invoice a payment
+    /// was applied to), when the engine names one (P31 QA-11).
+    pub target: Option<String>,
 }
 
 /// An import refusal the screen explains (codes only; engine messages can
@@ -1824,6 +1827,7 @@ fn refusal_from(code: &str, details: Option<&crate::ConflictDetails>) -> Option<
                             kind: b["kind"].as_str().unwrap_or_default().to_string(),
                             id: b["id"].as_str().map(str::to_string),
                             reason: b["reason"].as_str().map(str::to_string),
+                            target: b["target"].as_str().map(str::to_string),
                         })
                         .collect()
                 })

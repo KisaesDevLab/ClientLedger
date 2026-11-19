@@ -360,6 +360,9 @@ pub struct DemoImports {
     /// Source accounts the journal files name that match nothing (the
     /// mapping step's "pick an account"; scenarios add one).
     pub unmatched: Vec<String>,
+    /// P31 QA-1: an account list key the demo matches by number to one of
+    /// the company's accounts (another name): Review matches asks about it.
+    pub number_match: Option<(String, cl_core::ids::AccountId)>,
     /// How the next backup before an import or undo answers.
     pub backup_mode: DemoBackup,
     /// The before-import backups the demo "made" (no files).
@@ -401,6 +404,7 @@ impl Default for DemoImports {
             company_empty: true,
             jobs_received: 0,
             unmatched: Vec::new(),
+            number_match: None,
             backup_mode: DemoBackup::Succeed,
             backups_taken: 0,
             fail_next_commit: None,
@@ -553,6 +557,13 @@ impl DemoImports {
                 rows: 1,
             })
             .collect();
+        if let Some((key, id)) = &self.number_match
+            && let Some(m) = out.iter_mut().find(|m| &m.source_key == key)
+        {
+            m.status = MatchStatus::Existing;
+            m.account = Some(*id);
+            m.matched_by = Some(cl_api::imports::MatchedBy::Number);
+        }
         if kind == ImportKind::GlTransactions {
             out.extend(self.unmatched.iter().map(|k| AccountMatch {
                 source_key: k.clone(),

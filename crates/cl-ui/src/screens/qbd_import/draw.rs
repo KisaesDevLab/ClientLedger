@@ -701,8 +701,8 @@ impl ImportScreen {
                 }
                 match &tr {
                     Trouble::Refused(ImportRefusal::UndoBlocked { blockers }) => {
-                        for b in blockers {
-                            ui.label(format!("• {}", blocker_kind_text(&b.kind)));
+                        for line in undo_blocker_lines(blockers, &self.blocker_docs) {
+                            ui.add(egui::Label::new(format!("• {line}")).wrap());
                         }
                         if let Some(name) = self.blocked_backup() {
                             if self.backup_path(&name).is_some() {
@@ -1223,14 +1223,62 @@ pub(crate) fn result_lines(b: &ImportBatch) -> Vec<String> {
     out
 }
 
-/// What blocks an undo, in plain words.
-pub(crate) fn blocker_kind_text(kind: &str) -> String {
-    let key = format!("imports.undo_blocker.{kind}");
-    if crate::i18n::has(&key) {
-        t(&key)
-    } else {
-        t("imports.undo_blocker.other")
+/// The import's transaction a blocker holds on to (the engine's `target`;
+/// for an edited one, the transaction itself).
+pub(crate) fn blocker_doc_id(b: &cl_api::imports::UndoBlocker) -> Option<&str> {
+    b.target.as_deref().or_else(|| {
+        (b.kind == "transactions")
+            .then_some(b.id.as_deref())
+            .flatten()
+    })
+}
+
+/// A transaction as a sentence names it ("invoice 1005").
+pub(crate) fn doc_words(t_: cl_api::TxnType, number: Option<&str>) -> String {
+    use cl_api::TxnType as T;
+    let kind = match t_ {
+        T::Invoice => "invoice",
+        T::CustomerPayment => "payment",
+        T::CreditMemo => "credit_memo",
+        T::Bill => "bill",
+        T::VendorCredit => "vendor_credit",
+        T::BillPayment => "bill_payment",
+        T::JournalEntry => "journal_entry",
+        T::Deposit => "deposit",
+        _ => "transaction",
+    };
+    let kind = t(&format!("imports.doc.{kind}"));
+    match number.map(str::trim).filter(|n| !n.is_empty()) {
+        Some(n) => format!("{kind} {n}"),
+        None => kind,
     }
+}
+
+/// QA-11 (Q-P31u): what keeps an undo from running, in plain words, once
+/// each: by the engine's reason, naming the imported document it holds on
+/// to when known (`docs`: target id → "invoice 1005").
+pub(crate) fn undo_blocker_lines(
+    blockers: &[cl_api::imports::UndoBlocker],
+    docs: &std::collections::BTreeMap<String, String>,
+) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for b in blockers {
+        let reason = b.reason.as_deref().unwrap_or("linked");
+        let key = format!("imports.undo_reason.{reason}");
+        let key = if crate::i18n::has(&key) {
+            key
+        } else {
+            "imports.undo_reason.linked".to_string()
+        };
+        let doc = blocker_doc_id(b)
+            .and_then(|id| docs.get(id).cloned())
+            .unwrap_or_else(|| t("imports.doc.unknown"));
+        let line = crate::i18n::t_with(&key, &[("doc", &doc)]);
+        if !out.contains(&line) {
+            out.push(line);
+        }
+    }
+    out
 }
 
 pub(crate) fn trouble_text(tr: &Trouble) -> String {
