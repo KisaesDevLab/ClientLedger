@@ -1,6 +1,6 @@
 # Switch from QuickBooks Desktop
 
-**File › Switch from QuickBooks Desktop** brings your old books into a new
+**File › Import from QuickBooks Desktop** brings your old books into a new
 ClientLedger company: your accounts, customers, vendors, items, your history
 and the open invoices and bills. Then it compares the result with the reports
 you exported and tells you whether everything matches, to the cent.
@@ -54,8 +54,14 @@ Each file can be up to 10 MB.
    a file that isn't the report on its card is refused with a reason.
 3. **Review matches.** Accounts in your files are matched to accounts in the
    new company by number, then by name. Accounts from your account list are
-   created for you. Anything that matches nothing needs an account chosen;
-   nothing goes to a holding account.
+   created for you. Your QuickBooks chart is used: when a starter account in
+   the new company has the same number as a QuickBooks account, the
+   QuickBooks account takes that number over (the starter account gets the
+   QuickBooks name and type; Undo puts it back). Every account matched by
+   number to an account with another name is listed with both names and
+   waits for your OK, or for you to choose another account. Anything that
+   matches nothing needs an account chosen; nothing goes to a holding
+   account.
 4. **History and start date.** The switch date is filled in from your trial
    balance. Choose how much history to bring:
    - **Two years plus opening balances** (recommended): the two fiscal years
@@ -64,8 +70,10 @@ Each file can be up to 10 MB.
      year brings history from January 1, 2024; balances before that come in
      as opening balances dated December 31, 2023.
    - **All history in the files.**
-5. **Import.** ClientLedger takes a verified backup first. If the backup
-   fails, nothing is imported. Then the import runs with progress; it can't
+5. **Import.** ClientLedger takes a verified backup first. If no backup
+   passphrase is set yet, this step asks for one (it is saved as File ›
+   Back Up Company saves it). If the backup fails, nothing is imported.
+   Closing the window while the backup is being made cancels the import. Then the import runs with progress; it can't
    be posted twice. If you lose touch with the books midway, choose **Check
    status** before doing anything else.
 6. **Check that it matches.** See below.
@@ -134,8 +142,10 @@ is, so nothing is lost. Backups taken before imports are kept (the newest 10).
 
 ## Other programs
 
-**File › Switch from another program** does the same for Accounting Power,
+**File › Import from Another Accounting Program** does the same for Accounting Power,
 QuickBooks Online, a QuickBooks Desktop chart and general ledger only, or any
 program that can export our spreadsheet layout. The steps, the check and the
-undo work the same way. To bring in just a spreadsheet of invoices, bills or
-journal entries, use **File › Import Transactions from a Spreadsheet**.
+undo work the same way. From QuickBooks Online, export each report to Excel
+(.xlsx); the Account List may also be a CSV file. To bring in just a
+spreadsheet of invoices, bills or journal entries, use **File › Import
+Transactions from a Spreadsheet**.

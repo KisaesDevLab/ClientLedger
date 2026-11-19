@@ -226,10 +226,18 @@ fn upload_outcome(
 ) -> cl_api::imports::UploadOutcome {
     let raw = std::fs::read(&f.path).unwrap_or_else(|e| panic!("{}: {e}", f.path.display()));
     let (bytes, file_name) = if source == SourceSystem::QuickBooksOnline {
-        (
-            qbo_xlsx(&String::from_utf8(raw).expect("utf-8")),
-            "report.xlsx",
-        )
+        let x = qbo_xlsx(&String::from_utf8(raw).expect("utf-8"));
+        // Hands-on QA: the same workbooks for the app (synthetic fixtures).
+        if let Some(dir) = std::env::var_os("CL_QA_XLSX_DIR")
+            && let Some(stem) = f.path.file_stem()
+        {
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(
+                std::path::Path::new(&dir).join(stem).with_extension("xlsx"),
+                &x,
+            );
+        }
+        (x, "report.xlsx")
     } else {
         (raw, "report.csv")
     };

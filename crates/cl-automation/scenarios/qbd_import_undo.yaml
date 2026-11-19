@@ -56,11 +56,23 @@ steps:
   - command: dev.imports_demo_reset
   - assert_state: {key: screen.view, equals: import}
   - key: Alt+N
+  # QA-1 (Q-P31ac): 2200 matches an account of another name by number:
+  # shown with both names, and Continue waits for the owner's OK.
+  - command: dev.imports_demo_number_match
   - command: dev.imports_demo_file_all
   - assert_state: {key: screen.files_uploaded, equals: 12, within_ms: 6000}
   - assert_state: {key: screen.files_refused, equals: 0}
   - assert_state: {key: screen.can_next, equals: true}
   - key: Alt+N
+  - assert_state: {key: screen.step, equals: mapping}
+  - assert_state: {key: screen.needs_you, equals: 1}
+  - assert_state: {key: screen.can_next, equals: false}
+  - assert_exists: {role: label, label: 'Matched by account number, with another name'}
+  - screenshot: number-match
+  - click: {role: combo_box, label: '2200'}
+  - click: {role: button, label_contains: becomes 2200}
+  - assert_state: {key: screen.needs_you, equals: 0, within_ms: 2000}
+  - assert_state: {key: screen.can_next, equals: true}
   - key: Alt+N
   - key: Alt+N
   - key: Alt+N
@@ -70,6 +82,8 @@ steps:
   - click: {role: link, label: Undo this import}
   - click: {role: button, label: Undo import}
   - assert_state: {key: screen.blocked_by, equals: 1, within_ms: 4000}
+  # QA-11: the reason in plain words, once.
+  - assert_exists: {label_contains: A payment is applied to}
   - assert_state: {key: screen.undone, equals: false}
   - assert_exists: {role: button, label: Restore the backup taken before the import}
   - screenshot: blocked
