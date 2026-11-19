@@ -220,6 +220,11 @@ impl ImportScreen {
         if self.locked() || self.wizard.imported {
             return;
         }
+        // QA-2: before the batch is made, so a missing passphrase leaves
+        // nothing behind.
+        if !self.passphrase_ready() {
+            return;
+        }
         self.trouble = None;
         self.failure = None;
         self.status_answer = None;
@@ -366,6 +371,12 @@ impl ImportScreen {
     /// Anything that keeps it from starting is a failed backup: nothing is
     /// sent without one.
     pub(crate) fn start_backup(&mut self, what: Running, batch: ImportBatchId) {
+        self.backup_error = None;
+        // QA-2: no passphrase, no backup: the boxes say why (nothing sent).
+        if !self.passphrase_ready() {
+            self.trouble = Some(Trouble::BackupFailed);
+            return;
+        }
         self.waiting = Some((what, batch));
         if let Some(mut d) = self.link.demo_state() {
             let r = d.imports.backup().map(|r| {
@@ -379,7 +390,7 @@ impl ImportScreen {
         let unavailable =
             || cl_company::CompanyError::Api(ApiError::EngineUnavailable { permanent: false });
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
-            self.backup_failed(&unavailable());
+            self.backup_failed(unavailable());
             return;
         };
         let store = self.link.store().clone();
@@ -422,16 +433,34 @@ impl ImportScreen {
         });
         match task {
             Ok(t) => self.backup_job = Some(Job::Running(t)),
-            Err(_) => self.backup_failed(&unavailable()),
+            Err(_) => self.backup_failed(unavailable()),
         }
     }
 
-    fn backup_failed(&mut self, e: &cl_company::CompanyError) {
-        tracing::warn!(target: "imports", detail = %cl_core::OwnerFacing::scrubbed_detail(e), "backup before the import failed; nothing sent");
+    fn backup_failed(&mut self, e: cl_company::CompanyError) {
+        tracing::warn!(target: "imports", detail = %cl_core::OwnerFacing::scrubbed_detail(&e), "backup before the import failed; nothing sent");
         self.waiting = None;
         self.password = None;
         self.confirm_closed_next = false;
         self.trouble = Some(Trouble::BackupFailed);
+        // QA-2: the real cause is shown; no passphrase brings the boxes back.
+        if matches!(e, cl_company::CompanyError::NoPassphrase) {
+            self.need_passphrase = true;
+        }
+        self.backup_error = Some(e);
+    }
+
+    /// QA-2: a backup passphrase is set, or the one typed in the Import
+    /// step's boxes is saved now (as Back Up saves it).
+    pub(crate) fn passphrase_ready(&mut self) -> bool {
+        if !self.need_passphrase {
+            return true;
+        }
+        if self.passphrase.save(&self.link) {
+            self.need_passphrase = false;
+            return true;
+        }
+        false
     }
 
     pub(crate) fn after_backup(&mut self, r: Result<String, cl_company::CompanyError>) {
@@ -447,18 +476,25 @@ impl ImportScreen {
                         && std::mem::take(&mut self.confirm_closed_next),
                     key: IdempotencyKey::new(),
                 };
-                self.send(held);
+                if self.close_asked {
+                    // QA-20: the close prompt is up; nothing is sent until
+                    // Keep (Close drops the window and this with it).
+                    tracing::info!(target: "imports", "send held while the close prompt is up");
+                    self.parked = Some(held);
+                } else {
+                    self.send(held);
+                }
             }
-            (Ok(_), Some(_)) => self.backup_failed(&cl_company::CompanyError::JobFailed {
+            (Ok(_), Some(_)) => self.backup_failed(cl_company::CompanyError::JobFailed {
                 code: "NO_PATH".into(),
             }),
             (Ok(_), None) => {}
-            (Err(e), _) => self.backup_failed(&e),
+            (Err(e), _) => self.backup_failed(e),
         }
     }
 
     /// Sends `held` (the exact body and key); "Try again" sends it again.
-    fn send(&mut self, held: Held) {
+    pub(crate) fn send(&mut self, held: Held) {
         let (id, backup, key) = (held.batch, held.backup_ref.clone(), held.key.clone());
         let password = held.password.clone();
         let confirm = held.confirm_closed;

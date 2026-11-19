@@ -106,6 +106,80 @@ fn csv_transactions_backup_failure_sends_nothing() {
     });
 }
 
+/// QA-20: the backup finishes while the close prompt is up. Close anyway
+/// drops the window and nothing is sent; nothing posts.
+#[test]
+fn csv_transactions_close_during_the_backup_sends_nothing() {
+    let f = fixture();
+    let mut s = screen(&f);
+    to_preview(&mut s, "good");
+    s.next();
+    // The prompt goes up while the backup is being made.
+    Screen::close_asked(&mut s, true);
+    settle(&mut s);
+    assert!(s.parked, "{}", s.state());
+    assert!(matches!(s.phase, Phase::BackingUp(Action::Commit)));
+    assert!(Screen::dirty(&s), "still asks: the import is held");
+    let words = Screen::close_words(&s, false).expect("words");
+    assert!(
+        words.message.contains("cancels the import"),
+        "{}",
+        words.message
+    );
+    demo(&f, |d| {
+        assert_eq!(d.txn_import.backups_made, 1);
+        assert_eq!(d.txn_import.commits_received, 0, "held, not sent");
+    });
+    // Close anyway: the window goes.
+    drop(s);
+    demo(&f, |d| {
+        assert_eq!(d.txn_import.commits_received, 0, "nothing sent after close");
+        assert_eq!(d.txn_import.posted_documents, 0, "nothing posted");
+    });
+}
+
+/// QA-20: Keep the window open after the backup finished under the prompt:
+/// the import is sent then, once.
+#[test]
+fn csv_transactions_keep_after_the_backup_sends_once() {
+    let f = fixture();
+    let mut s = screen(&f);
+    to_preview(&mut s, "good");
+    s.next();
+    Screen::close_asked(&mut s, true);
+    settle(&mut s);
+    assert!(s.parked);
+    Screen::close_asked(&mut s, false);
+    settle(&mut s);
+    assert_eq!(s.step, Step::Done, "{}", s.state());
+    demo(&f, |d| assert_eq!(d.txn_import.commits_received, 1));
+}
+
+/// QA-2/QA-18: with no backup passphrase, Import asks for one in the
+/// window; a short one is refused with nothing sent.
+#[test]
+fn csv_transactions_ask_for_the_passphrase_before_anything_goes_up() {
+    let f = fixture();
+    let mut s = screen(&f);
+    to_preview(&mut s, "good");
+    s.need_passphrase = true;
+    s.passphrase.fill("short", "short");
+    s.start_import();
+    s.poll();
+    assert_eq!(s.phase, Phase::Idle);
+    assert!(matches!(
+        s.passphrase.error,
+        Some(cl_company::CompanyError::PassphraseTooShort)
+    ));
+    demo(&f, |d| {
+        assert_eq!(d.txn_import.backups_made, 0, "nothing backed up");
+        assert_eq!(d.txn_import.commits_received, 0);
+    });
+    assert!(s.need_passphrase);
+    let st = s.state().to_string();
+    assert!(!st.contains("short"), "never in state: {st}");
+}
+
 #[test]
 fn csv_transactions_problem_rows_block_the_import() {
     let f = fixture();

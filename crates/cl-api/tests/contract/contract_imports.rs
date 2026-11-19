@@ -304,6 +304,139 @@ fn batch_of(
         .id
 }
 
+/// P31 QA-13: a `QuickBooks` Online report uploaded as CSV (the fixture as
+/// it is, not converted to xlsx) on each report card. The engine's QBO
+/// adapter reads the chart from CSV or xlsx but the reports from xlsx only:
+/// each is refused with a validation error the desktop names in owner words
+/// ("export it to Excel"). If the engine ever reads them, this says so.
+pub fn qbo_csv_reports_are_refused(h: &Harness) {
+    if !caps(h, Flow::OtherSystem) {
+        return;
+    }
+    let (s, _) = fresh_company(h, "qbo-csv");
+    let mut refused = Vec::new();
+    for f in files("imports/quickbooks-online", &[]) {
+        let raw = std::fs::read(&f.path).expect("fixture");
+        let req = UploadRequest {
+            kind: f.kind,
+            source: SourceSystem::QuickBooksOnline,
+            role: f.role,
+            bytes: raw,
+            file_name: "report.csv".into(),
+            contact_kind: f.contact,
+            tb_column: None,
+            tb_report_date: None,
+        };
+        match h.run(s.imports().upload(&req)) {
+            Ok(o) if o.is_clean() => {}
+            Ok(o) => refused.push((f.kind, format!("problems {:?}", o.problems))),
+            Err(e) => refused.push((f.kind, format!("{e:?}"))),
+        }
+    }
+    eprintln!("QA-13 qbo csv: {refused:?}");
+    // The chart reads from CSV; every report does not (QA-13).
+    assert!(
+        refused.iter().all(|(k, _)| *k != ImportKind::Coa),
+        "{refused:?}"
+    );
+    assert!(
+        refused.iter().any(|(k, _)| *k == ImportKind::TrialBalance),
+        "the engine now reads QBO reports from CSV: drop the Excel note ({refused:?})"
+    );
+}
+
+/// P31 QA-1 (Q-P31ac): a QBD conversion into a company made with a starter
+/// chart. Every number the starter chart shares with the QuickBooks list
+/// goes to `"create"` (the QuickBooks account, not the starter one). Prints
+/// what the engine did; asserts the commit ties out.
+pub fn qbd_into_a_starter_chart(h: &Harness) {
+    if !caps(h, Flow::QbdConversion) {
+        return;
+    }
+    h.auth_slots(1);
+    let tenant = h
+        .run(h.s1.create_company(&NewCompany {
+            company_name: unique("starter-chart"),
+            business_type: Some("default".into()),
+            entity_type: None,
+            system_accounts_only: Some(false),
+        }))
+        .expect("create")
+        .tenant_id;
+    let s = h.s3();
+    h.run(s.open_company(tenant)).expect("open");
+    h.run(s.set_inventory_enabled(true, IdempotencyKey::new()))
+        .expect("inventory on");
+    let set = "qbd/shoal-creek";
+    let e = fx::expected(set);
+    let source = source_of(&e);
+    let outcomes: Vec<_> = files(set, &[])
+        .iter()
+        .map(|f| upload_outcome(h, &s, source, f))
+        .collect();
+    let mut map = std::collections::BTreeMap::new();
+    for o in &outcomes {
+        for m in &o.preview.account_matches {
+            eprintln!(
+                "QA-1 match {:?} {} {:?} {:?} role {:?}",
+                o.session.kind, m.source_key, m.status, m.matched_by, m.system_role
+            );
+            if o.session.kind == ImportKind::Coa
+                && m.status == cl_api::imports::MatchStatus::Existing
+                && m.system_role.is_none()
+            {
+                map.insert(m.source_key.clone(), cl_api::imports::AccountTarget::Create);
+            }
+        }
+    }
+    eprintln!("QA-1 create map: {:?}", map.keys().collect::<Vec<_>>());
+    let new = NewBatch {
+        source,
+        kind: BatchKind::Conversion,
+        sessions: outcomes.iter().map(|o| o.session.id).collect(),
+        options: BatchOptions {
+            fiscal_year_start_month: Some(1),
+            conversion_date: Some(day(&fx::section(&e, "company")["conversion_date"])),
+            require_empty_company: true,
+            account_map: map,
+            ..BatchOptions::default()
+        },
+    };
+    let id = match h.run(s.imports().create_batch(&new)) {
+        Ok(b) => b.id,
+        Err(err) => panic!("QA-1 batch refused: {err:?}"),
+    };
+    let req = CommitRequest {
+        backup_ref: unique("contract-before-import"),
+        ..CommitRequest::default()
+    };
+    h.run(s.imports().commit(id, &req, IdempotencyKey::new()))
+        .expect("commit sent");
+    let st = wait(h, &s, id);
+    eprintln!("QA-1 commit: {:?} {:?}", st.batch.status, st.error);
+    assert_eq!(st.batch.status, BatchStatus::Committed, "{:?}", st.error);
+    let chart = h
+        .run(s.accounts().list_all(&cl_api::AccountFilter::default()))
+        .expect("chart");
+    let by_number = |n: &str| {
+        chart
+            .iter()
+            .filter(|a| a.fields.account_number.as_deref() == Some(n))
+            .count()
+    };
+    eprintln!(
+        "QA-1 accounts {} (2200 x{}, 6300 x{})",
+        chart.len(),
+        by_number("2200"),
+        by_number("6300")
+    );
+    if tieout(h) {
+        let t = h.run(s.imports().tieout(id)).expect("tieout");
+        eprintln!("QA-1 tie-out all zero: {}", t.all_zero);
+        assert!(t.all_zero, "QA-1: the QuickBooks chart ties out");
+    }
+}
+
 /// Polls the batch until its job is done.
 fn wait(h: &Harness, s: &Session, id: ImportBatchId) -> BatchState {
     let start = Instant::now();

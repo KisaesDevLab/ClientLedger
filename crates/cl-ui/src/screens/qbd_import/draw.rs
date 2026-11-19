@@ -412,7 +412,7 @@ impl ImportScreen {
                         let Some(f) = self.uploads.get(slot.key).and_then(|v| v.get(i)) else {
                             continue;
                         };
-                        let status = file_status(f);
+                        let status = file_status(f, self.wizard.source, slot);
                         let bad = f.problem.is_some()
                             || f.refusal.is_some()
                             || f.outcome.as_ref().is_some_and(|o| !o.is_clean());
@@ -560,6 +560,12 @@ impl ImportScreen {
             note(ui, tokens, &t("imports.import.empty_company"));
         }
         ui.add_space(8.0);
+        // QA-2: a fresh install has no backup passphrase; Import saves the
+        // one typed here (as Back Up does), then backs up and imports.
+        if self.need_passphrase && self.allowed() && !self.wizard.imported && !self.locked() {
+            self.passphrase.ui(ui, tokens, "imports.passphrase_why");
+            ui.add_space(8.0);
+        }
         if self.waiting.is_some() || self.backup_running() {
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -674,6 +680,25 @@ impl ImportScreen {
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.add(egui::Label::new(RichText::new(text).color(tokens.warn_text)).wrap());
+                if tr == Trouble::BackupFailed {
+                    // QA-2/QA-15: the real cause, in owner words.
+                    if let Some(e) = &self.backup_error {
+                        crate::screens::company::form::inline_error(ui, tokens, e);
+                    }
+                    // Undo (History, the tie-out) asks here; the Import
+                    // step has its own boxes.
+                    if self.need_passphrase
+                        && !(self.view == View::Import && self.wizard.step == Step::Import)
+                    {
+                        self.passphrase
+                            .ui(ui, tokens, "imports.passphrase_why_undo");
+                        if ui.button(t("imports.passphrase_save")).clicked()
+                            && self.passphrase_ready()
+                        {
+                            self.trouble = None;
+                        }
+                    }
+                }
                 match &tr {
                     Trouble::Refused(ImportRefusal::UndoBlocked { blockers }) => {
                         for b in blockers {
@@ -964,12 +989,42 @@ impl ImportScreen {
     }
 }
 /// The status line under a file.
-fn file_status(f: &super::SlotFile) -> String {
+/// An engine code that says the whole file isn't the report its card asks
+/// for (QA-3), not a bad row.
+fn whole_file_problem(code: &str) -> bool {
+    matches!(code, "IMPORT_HEADER_NOT_FOUND" | "IMPORT_WRONG_KIND")
+}
+
+fn file_status(
+    f: &super::SlotFile,
+    source: Source,
+    slot: &cl_model::imports::wizard::FileSlot,
+) -> String {
     if f.reading.is_some() {
         return t("imports.files.reading");
     }
     if f.job.is_some() {
         return t("imports.files.uploading");
+    }
+    // QA-13: QuickBooks Online reports are read from Excel files only (the
+    // engine reads the account list from CSV too).
+    let excel_only = source == Source::Qbo && slot.kind != "coa";
+    let csv = std::path::Path::new(&f.name)
+        .extension()
+        .is_some_and(|e| !e.eq_ignore_ascii_case("xlsx"));
+    let wrong = f.problem == Some("imports.file.wrong_report")
+        || f.outcome.as_ref().is_some_and(|o| {
+            !o.problems.is_empty() && o.problems.iter().all(|p| whole_file_problem(&p.code))
+        });
+    if wrong && excel_only && csv {
+        return t("imports.file.qbo_excel");
+    }
+    if wrong {
+        // QA-3: a file on the wrong card says which report it should be.
+        return t_with(
+            "imports.file.wrong_report_named",
+            &[("report", &slot_name(slot.key))],
+        );
     }
     if let Some(k) = f.problem {
         return t(k);
@@ -983,16 +1038,24 @@ fn file_status(f: &super::SlotFile) -> String {
     }
     match &f.outcome {
         Some(o) if !o.is_clean() => {
-            let mut rows: Vec<u64> = o.problems.iter().map(|p| p.row_number).collect();
+            // QA-3: row 0 is the whole file, never "rows 0"; counts in
+            // words ("1 row", "3 rows").
+            let mut rows: Vec<u64> = o
+                .problems
+                .iter()
+                .map(|p| p.row_number)
+                .filter(|r| *r > 0)
+                .collect();
             rows.sort_unstable();
             rows.dedup();
+            if rows.is_empty() {
+                return t("imports.file.unreadable");
+            }
             let shown: Vec<String> = rows.iter().take(5).map(u64::to_string).collect();
-            t_with(
+            crate::i18n::t_count(
                 "imports.files.problems",
-                &[
-                    ("n", &o.problems.len().max(1).to_string()),
-                    ("rows", &shown.join(", ")),
-                ],
+                rows.len(),
+                &[("rows", &shown.join(", "))],
             )
         }
         Some(o) => {

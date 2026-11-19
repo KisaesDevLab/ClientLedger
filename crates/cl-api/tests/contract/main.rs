@@ -1110,6 +1110,14 @@ fn main() -> std::process::ExitCode {
             contract_imports::qbo_xlsx_raw_values_read_exactly,
         ),
         (
+            "imports::qbo_csv_reports_are_refused",
+            contract_imports::qbo_csv_reports_are_refused,
+        ),
+        (
+            "imports::qbd_into_a_starter_chart",
+            contract_imports::qbd_into_a_starter_chart,
+        ),
+        (
             "imports::system_qbd_gl_ties_out",
             contract_imports::system_qbd_gl_ties_out,
         ),

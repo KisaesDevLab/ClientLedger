@@ -378,6 +378,71 @@ fn the_close_and_quit_prompts_tell_the_truth_mid_job() {
     assert!(!msg.contains("will be posted"));
 }
 
+/// QA-20: the backup finishes under the close prompt. The commit is held:
+/// Close anyway drops it unsent (nothing posts); Keep sends it once.
+#[test]
+fn closing_during_the_backup_sends_nothing() {
+    let f = fixture();
+    let mut s = screen(&f);
+    to_import(&mut s);
+    Screen::close_asked(&mut s, true);
+    s.next();
+    for _ in 0..4 {
+        s.poll();
+    }
+    assert_eq!(backups(&f), 1, "{}", s.state());
+    assert_eq!(jobs(&f), 0, "held under the prompt");
+    assert!(s.dirty() && s.in_flight());
+    let w = s.close_words(false).expect("words");
+    assert_eq!(w.message, t("imports.close.backup"));
+    assert!(w.message.contains("cancels the import"));
+    drop(s);
+    assert_eq!(jobs(&f), 0, "nothing sent after Close anyway");
+
+    // Keep: sent once, then it runs to the end.
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.imports_demo_reset");
+    to_import(&mut s);
+    Screen::close_asked(&mut s, true);
+    s.next();
+    s.poll();
+    assert_eq!(jobs(&f), 0);
+    Screen::close_asked(&mut s, false);
+    finish(&mut s);
+    assert_eq!(jobs(&f), 1, "sent once on Keep");
+    assert!(s.wizard.imported);
+}
+
+/// QA-2: no backup passphrase yet: Import asks for one in the window and
+/// sends nothing (no batch, no backup) until a good one is saved.
+#[test]
+fn import_asks_for_the_backup_passphrase_first() {
+    let f = fixture();
+    let mut s = screen(&f);
+    to_import(&mut s);
+    s.need_passphrase = true;
+    s.passphrase
+        .fill("a long enough passphrase", "something else entirely");
+    s.next();
+    s.poll();
+    assert!(s.batch.is_none(), "no batch made");
+    assert_eq!(backups(&f), 0);
+    assert_eq!(jobs(&f), 0);
+    assert!(matches!(
+        s.passphrase.error,
+        Some(cl_company::CompanyError::PassphraseMismatch)
+    ));
+    s.passphrase
+        .fill("a long enough passphrase", "a long enough passphrase");
+    s.next();
+    finish(&mut s);
+    assert!(!s.need_passphrase);
+    assert_eq!(backups(&f), 1);
+    assert!(s.wizard.imported, "{}", s.state());
+    let st = s.state().to_string();
+    assert!(!st.contains("long enough"), "{st}");
+}
+
 #[test]
 fn an_unmatched_account_blocks_review_matches_until_picked() {
     let f = fixture();

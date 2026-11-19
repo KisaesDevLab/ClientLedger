@@ -473,6 +473,17 @@ pub struct ImportScreen {
     /// When the import's backup was taken (local date and time), kept
     /// after an undo.
     pub(crate) backup_when: Option<String>,
+    /// The close prompt is up over this window (QA-20).
+    close_asked: bool,
+    /// The commit or undo whose backup finished under the close prompt:
+    /// sent on Keep, dropped (never sent) on Close.
+    parked: Option<Held>,
+    /// Why the last backup failed (owner words, QA-2).
+    pub(crate) backup_error: Option<cl_company::CompanyError>,
+    /// The inline backup passphrase (QA-2, Q-P31ad).
+    pub(crate) passphrase: crate::widgets::passphrase::PassphraseAsk,
+    /// No backup passphrase is set: the boxes show on the Import step.
+    pub(crate) need_passphrase: bool,
 }
 
 /// Combines the files' account matches by source key: `existing` (any
@@ -613,7 +624,13 @@ impl ImportScreen {
             backup_paths: BTreeMap::new(),
             restore_gone: false,
             backup_when: None,
+            close_asked: false,
+            parked: None,
+            backup_error: None,
+            passphrase: crate::widgets::passphrase::PassphraseAsk::default(),
+            need_passphrase: false,
         };
+        s.need_passphrase = crate::widgets::passphrase::needed(&s.link);
         if !s.allowed() {
             s.trouble = Some(Trouble::Restricted);
         } else if !s.supported() {
@@ -710,6 +727,10 @@ impl ImportScreen {
     /// Takes every answer that arrived; while a job runs, reads its batch
     /// (one read out at a time).
     pub(crate) fn poll(&mut self) {
+        if self.need_passphrase {
+            self.passphrase
+                .refresh(&self.link, &mut self.need_passphrase);
+        }
         if let Some(Ok(v)) = poll(&mut self.chart_job) {
             self.chart = v;
         }
@@ -819,7 +840,10 @@ impl ImportScreen {
     /// A commit or undo is being made, sent, or runs (per the last read of
     /// its batch).
     pub(crate) fn in_flight(&self) -> bool {
-        self.backup_job.is_some() || self.job_out.is_some() || self.running.is_some()
+        self.backup_job.is_some()
+            || self.parked.is_some()
+            || self.job_out.is_some()
+            || self.running.is_some()
     }
 
     /// Cancel, Back and Start over are off: something is out, or its
@@ -1099,6 +1123,15 @@ impl Screen for ImportScreen {
             close: t(close),
             keep: t("imports.close.keep"),
         })
+    }
+
+    /// QA-20: a backup that finishes under the close prompt parks its
+    /// commit or undo; Keep sends it, Close drops the window unsent.
+    fn close_asked(&mut self, asked: bool) {
+        self.close_asked = asked;
+        if !asked && let Some(held) = self.parked.take() {
+            self.send(held);
+        }
     }
 
     fn ui(&mut self, ui: &mut eframe::egui::Ui) {

@@ -835,7 +835,9 @@ impl Wizard {
                 }
                 continue;
             }
-            if !dated {
+            // QA-13: a refused or unread file blocks Continue for every
+            // source (it was skipped when the dated checks ran too).
+            if undated {
                 if !slot.multiple && files.len() > 1 {
                     out.push(Blocker::OneFileOnly { slot: slot.key });
                 }
@@ -1286,6 +1288,29 @@ mod tests {
         for x in &b {
             assert_ne!(x.key(), "");
         }
+    }
+
+    /// QA-13: another program's refused file (an optional card too) keeps
+    /// Continue off on the Files step.
+    #[test]
+    fn a_refused_file_blocks_files_for_other_programs() {
+        let today = day(TODAY);
+        let mut w = Wizard::new(Source::Qbo, 1);
+        w.step = Step::Files;
+        w.drop_file("qbo_coa", file(None));
+        w.drop_file("qbo_journal", file(None));
+        w.drop_file("qbo_tb_reference", file(Some("2026-06-30")));
+        let mut refused = file(None);
+        refused.uploaded = false;
+        w.drop_file("qbo_customers", refused);
+        let b = w.blockers(today);
+        assert!(
+            b.contains(&Blocker::NotUploaded {
+                slot: "qbo_customers"
+            }),
+            "{b:?}"
+        );
+        assert!(!w.can_continue(today));
     }
 
     #[test]

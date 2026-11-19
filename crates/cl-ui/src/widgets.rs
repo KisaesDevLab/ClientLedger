@@ -18,6 +18,8 @@ pub mod doc_pane;
 pub mod doc_worker;
 // A01 WP-D: the native Browse dialogs (folders and files).
 pub mod file_picker;
+// P31 QA-2: the backup passphrase asked where a backup is about to be made.
+pub mod passphrase;
 pub mod pdf_viewer;
 pub(crate) mod quick_add;
 

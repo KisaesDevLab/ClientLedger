@@ -272,6 +272,17 @@ pub struct CsvTransactionsScreen {
     pub(crate) confirm_undo: bool,
     pub(crate) undone: bool,
     pub(crate) closing: ClosingPrompt<Action>,
+    /// The close prompt is up over this window (QA-20): a finished backup
+    /// waits here instead of sending.
+    close_asked: bool,
+    /// The backup is made and the run waits for the close prompt's answer.
+    pub(crate) parked: bool,
+    /// Why the last backup failed (shown in owner words).
+    pub(crate) backup_error: Option<cl_company::CompanyError>,
+    /// The inline backup passphrase (QA-2, Q-P31ad).
+    pub(crate) passphrase: crate::widgets::passphrase::PassphraseAsk,
+    /// No backup passphrase is set: the boxes show above Import.
+    pub(crate) need_passphrase: bool,
 }
 
 /// A chosen file read off the egui thread: its name and bytes, or an i18n key.
@@ -296,7 +307,7 @@ impl CsvTransactionsScreen {
     #[must_use]
     pub fn new(link: Arc<CompanyLink>, open: Option<(TenantId, String)>) -> CsvTransactionsScreen {
         let group = link.group().and_then(Result::ok);
-        CsvTransactionsScreen {
+        let mut s = CsvTransactionsScreen {
             link,
             group,
             open,
@@ -330,7 +341,28 @@ impl CsvTransactionsScreen {
             confirm_undo: false,
             undone: false,
             closing: ClosingPrompt::default(),
+            close_asked: false,
+            parked: false,
+            backup_error: None,
+            passphrase: crate::widgets::passphrase::PassphraseAsk::default(),
+            need_passphrase: false,
+        };
+        s.need_passphrase = crate::widgets::passphrase::needed(&s.link);
+        s
+    }
+
+    /// QA-2: a backup passphrase is set, or the one typed in the window's
+    /// boxes is saved now (as Back Up saves it). False: nothing is sent and
+    /// the boxes say why.
+    fn passphrase_ready(&mut self) -> bool {
+        if !self.need_passphrase {
+            return true;
         }
+        if self.passphrase.save(&self.link) {
+            self.need_passphrase = false;
+            return true;
+        }
+        false
     }
 
     /// The signed-in user may commit and undo (Admin, U-263).
@@ -401,6 +433,10 @@ impl CsvTransactionsScreen {
 
     /// Takes every answer that arrived.
     pub(crate) fn poll(&mut self) {
+        if self.need_passphrase {
+            self.passphrase
+                .refresh(&self.link, &mut self.need_passphrase);
+        }
         if let Some(paths) = crate::widgets::file_picker::poll(&mut self.pick_rx)
             && let Some(p) = paths.into_iter().next()
         {
@@ -569,13 +605,22 @@ impl CsvTransactionsScreen {
 
     /// Import: the file goes up, a batch is made, then backup and commit.
     pub(crate) fn start_import(&mut self) {
-        let Some(plan) = self.plan.as_ref().filter(|p| p.can_import()) else {
-            return;
-        };
-        if self.phase != Phase::Idle || !self.admin() || !self.supported() {
+        if !self.plan.as_ref().is_some_and(TxnPlan::can_import)
+            || self.phase != Phase::Idle
+            || !self.admin()
+            || !self.supported()
+        {
             return;
         }
+        // QA-2: the backup needs a passphrase; nothing goes up without one.
+        if !self.passphrase_ready() {
+            return;
+        }
+        let Some(plan) = self.plan.as_ref() else {
+            return;
+        };
         self.trouble = None;
+        self.backup_error = None;
         self.engine_problems.clear();
         self.save_mapping();
         if self.batch.is_some() {
@@ -680,7 +725,11 @@ impl CsvTransactionsScreen {
         if self.batch.is_none() || !matches!(self.phase, Phase::Idle) {
             return;
         }
+        if !self.passphrase_ready() {
+            return;
+        }
         self.trouble = None;
+        self.backup_error = None;
         self.held = Some(Held {
             action,
             key: IdempotencyKey::new(),
@@ -762,14 +811,36 @@ impl CsvTransactionsScreen {
                 if let Some(h) = self.held.as_mut() {
                     h.backup_ref = Some(file);
                 }
-                self.send();
+                if self.close_asked {
+                    // QA-20: the close prompt is up; Close drops the window
+                    // and nothing is sent, Keep sends it.
+                    tracing::info!(target: "txn_import", "run held while the close prompt is up");
+                    self.parked = true;
+                } else {
+                    self.send();
+                }
             }
-            Ok(_) | Err(_) => {
-                tracing::warn!(target: "txn_import", "backup before the run failed; nothing sent");
+            r => {
+                let e = r.err().unwrap_or(cl_company::CompanyError::JobFailed {
+                    code: "NO_PATH".into(),
+                });
+                tracing::warn!(target: "txn_import", detail = %cl_core::OwnerFacing::scrubbed_detail(&e), "backup before the run failed; nothing sent");
                 self.held = None;
                 self.phase = Phase::Idle;
                 self.trouble = Some(Trouble::BackupFailed(action));
+                if matches!(e, cl_company::CompanyError::NoPassphrase) {
+                    self.need_passphrase = true;
+                }
+                self.backup_error = Some(e);
             }
+        }
+    }
+
+    /// The close prompt went up or was answered Keep (QA-20).
+    fn set_close_asked(&mut self, asked: bool) {
+        self.close_asked = asked;
+        if !asked && std::mem::take(&mut self.parked) {
+            self.send();
         }
     }
 
@@ -1236,6 +1307,10 @@ impl Screen for CsvTransactionsScreen {
             close: t("txn_import.close_prompt.discard"),
             keep: t("txn_import.close_prompt.keep"),
         })
+    }
+
+    fn close_asked(&mut self, asked: bool) {
+        self.set_close_asked(asked);
     }
 
     fn ui(&mut self, ui: &mut eframe::egui::Ui) {

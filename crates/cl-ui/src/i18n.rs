@@ -648,7 +648,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.company.too_new", "This backup was made by a newer ClientLedger."),
     ("fix.company.too_new", "Update ClientLedger, then restore it."),
     ("error.company.job_failed", "The backup or restore could not be finished."),
-    ("fix.company.no_passphrase", "Set one on the Back Up screen; it is shown once."),
+    ("fix.company.no_passphrase", "Set one in the boxes shown here, or on File \u{203a} Back Up Company."),
     ("error.company.not_a_backup", "That file is not a ClientLedger backup."),
     ("fix.company.not_a_backup", "Pick a .clbackup file made by ClientLedger."),
     ("error.company.tampered", "This backup file changed after it was written."),

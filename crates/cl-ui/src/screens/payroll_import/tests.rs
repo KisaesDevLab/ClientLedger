@@ -621,6 +621,56 @@ fn setting_a_passphrase_clears_the_stale_message() {
     assert_eq!(s.state()["backup_failed"], true);
 }
 
+/// P31 QA-2 (Q-P31ad): no passphrase yet: Post asks for one in the window;
+/// a short one sends nothing, a good one is saved, backed up and posted.
+#[test]
+fn post_asks_for_the_backup_passphrase_first() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    s.need_passphrase = true;
+    s.passphrase.fill("short", "short");
+    s.next();
+    s.poll();
+    assert_eq!(backups_taken(&f), 0);
+    assert_eq!(posts_received(&f), 0);
+    assert!(s.passphrase.error.is_some() && s.need_passphrase);
+    s.passphrase
+        .fill("twelve chars or more", "twelve chars or more");
+    s.next();
+    s.poll();
+    assert!(!s.need_passphrase);
+    assert_eq!(posts_received(&f), 1, "{}", s.state());
+}
+
+/// P31 QA-20: the backup finished under the close prompt: the post waits;
+/// Close drops it unsent, Keep sends it once.
+#[test]
+fn closing_during_the_backup_posts_nothing() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    Screen::close_asked(&mut s, true);
+    s.next();
+    s.poll();
+    assert_eq!(backups_taken(&f), 1);
+    assert_eq!(posts_received(&f), 0, "held under the prompt");
+    assert!(s.backing_up());
+    Screen::close_asked(&mut s, false);
+    s.poll();
+    assert_eq!(posts_received(&f), 1, "Keep sends it once");
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    Screen::close_asked(&mut s, true);
+    s.next();
+    s.poll();
+    drop(s);
+    assert_eq!(posts_received(&f), 1, "Close anyway: nothing more sent");
+}
+
 /// Q-P30h: a failed backup sends nothing, says so with Try again, and Try
 /// again backs up and posts with the same key.
 #[test]

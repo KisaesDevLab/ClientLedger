@@ -52,6 +52,12 @@ pub trait Screen {
         None
     }
 
+    /// The close (or quit) prompt over this window went up (`true`) or was
+    /// answered Keep (`false`). A wizard whose backup finishes under the
+    /// prompt holds what it would send until the answer (P31 QA-20): Close
+    /// drops the window and nothing is sent; Keep sends it.
+    fn close_asked(&mut self, _asked: bool) {}
+
     /// The keymap scope while this window has focus. Forms return
     /// [`Scope::Form`] so form shortcuts (Alt+N, Esc, Ctrl+Insert) apply.
     fn scope(&self) -> Scope {
@@ -705,10 +711,10 @@ impl Windows {
             None => CloseOutcome::Unknown,
             Some(w) if w.dirty() => {
                 self.activate(id);
-                self.prompt = Some(Prompt {
+                self.set_prompt(Some(Prompt {
                     window: id,
                     quitting: false,
-                });
+                }));
                 CloseOutcome::Prompt
             }
             Some(_) => {
@@ -722,6 +728,24 @@ impl Windows {
     #[must_use]
     pub fn prompt(&self) -> Option<Prompt> {
         self.prompt
+    }
+
+    /// Puts up (or takes down) the close prompt, telling the windows it is
+    /// over (QA-20: a wizard holds its send while asked).
+    fn set_prompt(&mut self, p: Option<Prompt>) {
+        let old = self.prompt.map(|o| o.window);
+        let new = p.map(|n| n.window);
+        if let Some(o) = old.filter(|o| Some(*o) != new)
+            && let Some(w) = self.get_mut(o)
+        {
+            w.screen.close_asked(false);
+        }
+        if let Some(n) = new
+            && let Some(w) = self.get_mut(n)
+        {
+            w.screen.close_asked(true);
+        }
+        self.prompt = p;
     }
 
     /// Windows with unsaved edits.
@@ -738,6 +762,12 @@ impl Windows {
     /// progress when the prompt was part of a quit.
     pub fn answer_prompt(&mut self, answer: PromptAnswer) -> Option<QuitProgress> {
         let prompt = self.prompt.take()?;
+        if answer != PromptAnswer::Discard
+            && let Some(w) = self.get_mut(prompt.window)
+        {
+            // Keep (or a Save that may leave it open): what it held goes on.
+            w.screen.close_asked(false);
+        }
         match answer {
             PromptAnswer::Keep => {
                 self.quitting = false;
@@ -805,7 +835,7 @@ impl Windows {
                     window: id,
                     quitting: true,
                 };
-                self.prompt = Some(p);
+                self.set_prompt(Some(p));
                 QuitProgress::Prompt(p)
             }
             None => QuitProgress::Ready,
@@ -1001,6 +1031,51 @@ mod tests {
         let mut empty = Windows::new();
         empty.next();
         assert_eq!(empty.active_id(), None);
+    }
+
+    /// Records every `close_asked` it is told (QA-20).
+    struct Asked(std::rc::Rc<std::cell::RefCell<Vec<bool>>>);
+
+    impl Screen for Asked {
+        fn title(&self) -> String {
+            "Import".into()
+        }
+        fn ui(&mut self, _ui: &mut Ui) {}
+        fn dirty(&self) -> bool {
+            true
+        }
+        fn can_save(&self) -> bool {
+            false
+        }
+        fn close_asked(&mut self, asked: bool) {
+            self.0.borrow_mut().push(asked);
+        }
+    }
+
+    #[test]
+    fn the_close_prompt_tells_the_window_it_is_up_and_answered() {
+        let log = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let mut w = Windows::new();
+        let a = w.open_new(id("vendors.write_check"), Box::new(Asked(log.clone())));
+        assert_eq!(w.request_close(a), CloseOutcome::Prompt);
+        assert_eq!(*log.borrow(), vec![true]);
+        w.answer_prompt(PromptAnswer::Keep);
+        assert_eq!(*log.borrow(), vec![true, false], "Keep lets it go on");
+        assert_eq!(w.request_close(a), CloseOutcome::Prompt);
+        w.answer_prompt(PromptAnswer::Discard);
+        assert_eq!(
+            *log.borrow(),
+            vec![true, false, true],
+            "Close drops it without letting it go on"
+        );
+        assert!(w.get(a).is_none());
+        // Quitting asks too.
+        let b = w.open_new(id("vendors.write_check"), Box::new(Asked(log.clone())));
+        let _ = w.begin_quit();
+        assert_eq!(log.borrow().last(), Some(&true));
+        w.answer_prompt(PromptAnswer::Keep);
+        assert_eq!(log.borrow().last(), Some(&false));
+        assert!(w.get(b).is_some());
     }
 
     #[test]

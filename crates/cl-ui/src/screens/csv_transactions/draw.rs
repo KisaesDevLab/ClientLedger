@@ -130,6 +130,16 @@ impl CsvTransactionsScreen {
                         Step::Preview => self.preview_ui(ui, &tokens),
                         Step::Done => self.done_ui(ui, &tokens),
                     }
+                    // QA-2: the backup before Import (or Undo) needs a
+                    // passphrase; asked here when none is set.
+                    if self.need_passphrase
+                        && self.admin()
+                        && matches!(self.step, Step::Preview | Step::Done)
+                        && self.phase == Phase::Idle
+                    {
+                        ui.add_space(8.0);
+                        self.passphrase.ui(ui, &tokens, "txn_import.passphrase_why");
+                    }
                     self.phase_ui(ui, &tokens);
                 });
                 frame.bottom(|ui| self.buttons_ui(ui));
@@ -361,6 +371,10 @@ impl CsvTransactionsScreen {
                         "txn_import.backup_failed"
                     }),
                 );
+                // The real cause, in owner words (QA-18).
+                if let Some(e) = &self.backup_error {
+                    crate::screens::company::form::inline_error(ui, tokens, e);
+                }
                 again = true;
             }
             Trouble::NotStarted(_) => {
