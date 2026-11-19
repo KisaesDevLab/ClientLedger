@@ -2,7 +2,7 @@
 
 This is the index. Each phase's full detail — decisions, engine changes, crates and files, ordered commit-sized steps, tests, and acceptance criteria — lives in the milestone files under `phases/`. Read this index plus the milestone file for the phase marked **Next** in STATE.md.
 
-**Beta track:** P00–P39 in seven milestones. **Post-beta:** P40–P49 (P50 MCP bookkeeper moved into the beta as addendum phase A11 after P34, ADD-06). **Process reviews:** PR-P05, PR-P10, PR-1 to PR-10 (opus; see docs/AGENTS.md).
+**Beta track:** P00–P39 (with P35.1, ADD-08) in seven milestones. **Post-beta:** P40–P49 (P50 MCP bookkeeper moved into the beta as addendum phase A11 after P34, ADD-06). **Process reviews:** PR-P05, PR-P10, PR-1 to PR-10 (opus; see docs/AGENTS.md).
 
 ## Milestones
 
@@ -14,7 +14,7 @@ This is the index. Each phase's full detail — decisions, engine changes, crate
 | M3 Banking | [phases/M3-banking.md](phases/M3-banking.md) | P25–P27 | Bank file import, review and rules, reconcile |
 | M4 Reports and controls | [phases/M4-reports-controls.md](phases/M4-reports-controls.md) | P28–P30 | Reports, budgets, users and permissions, audit trail, payroll import |
 | M5 Data movement and multi-user | [phases/M5-data-multiuser.md](phases/M5-data-multiuser.md) | P31–P34 | QBD import with tie-out, transfer file, IIF, LAN multi-user, backups and integrity |
-| M6 Ship beta | [phases/M6-ship-beta.md](phases/M6-ship-beta.md) | P35–P39 | Installers, updates, hardening, help, beta (STOP) |
+| M6 Ship beta | [phases/M6-ship-beta.md](phases/M6-ship-beta.md) | P35–P39 (incl. P35.1) | Installers, QuickBooks Desktop SDK import (P35.1, ADD-08), updates, hardening, help, beta (STOP) |
 | M7 Post-beta | [phases/M7-post-beta.md](phases/M7-post-beta.md) | P40–P50 | Estimates and sales orders, POs, assemblies, Plaid, Report Packs, accountant tools, workpapers, templates, cash flow, work copies (MCP bookkeeper moved to the beta as A11, ADD-06) |
 
 ## All phases
@@ -60,6 +60,7 @@ Tier and agent routing: docs/AGENTS.md. Size: S ≈ under a day of agent work, M
 | P33 | LAN multi-user | H | L | P29 |
 | P34 | Backup scheduling, recovery, and data integrity | H | M | P08, P33 |
 | P35 | Packaging | L | L | P00–P34 |
+| P35.1 | QuickBooks Desktop import through the SDK (ADD-08) | H | M | P35, P31 |
 | P36 | Updates and migrations | H | M | P35 |
 | P37 | Hardening | L | L | P35 |
 | P38 | Documentation | L | M | P35 |
@@ -73,6 +74,7 @@ Tier and agent routing: docs/AGENTS.md. Size: S ≈ under a day of agent work, M
 | ADD-01 Document intake, local reading, pop-out viewer | [addenda/ADD-01-document-intake.md](addenda/ADD-01-document-intake.md) | A01–A05 | Active, part of the beta | A01–A04 right after P17 merges, before P18; A05 right after P26; checkpoint PR-A1 after A05 |
 | ADD-03 Report Builder and Memorized Reports | [addenda/ADD-03-report-builder.md](addenda/ADD-03-report-builder.md) | A07–A10 | Active, part of the beta | Right after P28 and PR-6, before P29; mockup approved before A08 |
 | ADD-04 Distribution through winget | [addenda/ADD-04-winget.md](addenda/ADD-04-winget.md) | — (inside P35/P36) | Active, part of the beta | Built with P35/P36; enabled at P39 stage 2 |
+| ADD-08 Import from QuickBooks Desktop through the SDK | [addenda/ADD-08-qbd-sdk-import.md](addenda/ADD-08-qbd-sdk-import.md) | P35.1 (I01–I08, checkpoint PR-I1) | Active, part of the beta | Phase P35.1, right after P35 and before P36 (Q-366); I04 needs owner review of the engine PRs before I05 |
 
 ## Critical path and parallel lanes
 

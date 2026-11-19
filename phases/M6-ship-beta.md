@@ -1,4 +1,4 @@
-# M6 — Ship beta (P35–P39)
+# M6 — Ship beta (P35–P39, including P35.1)
 
 **Outcome:** installers for Windows x64, macOS, and Linux; safe updates and migrations; accessibility, performance, fuzzing, and security hardening; bundled help; staged beta.
 
@@ -26,6 +26,16 @@
 **Acceptance**
 - [ ] Clean installs launch and create a company offline.
 - [ ] Uninstall keeps company data by default.
+
+---
+
+## P35.1 — QuickBooks Desktop import through the QuickBooks SDK (ADD-08)
+
+Runs right after P35 and before P36 (owner 2026-11-19, Q-366). Scope, work packages I01–I08, checkpoint PR-I1, decisions Q-355–Q-367 and engine requests U-274–U-278 are in [addenda/ADD-08-qbd-sdk-import.md](../addenda/ADD-08-qbd-sdk-import.md); read that file for the phase. It imports into the open company as a P31-style batch (Q-359, reworded 2026-11-19).
+
+| Tier | Size | Depends on | Implementer | Reviews |
+| --- | --- | --- | --- | --- |
+| H | M | P35, P31 | per the addendum (opus) | reviewer (opus); **PR-I1** process-reviewer (opus, xhigh) |
 
 ---
 
