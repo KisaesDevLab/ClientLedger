@@ -86,9 +86,11 @@ mod contract_sales_tax_ssuta;
 mod contract_sensitive;
 mod contract_session;
 mod contract_tags;
+// P32: transfer files (U-282 to U-284).
 mod contract_team;
 mod contract_templates;
 mod contract_thresholds_1099;
+mod contract_transfer;
 #[path = "../support/imports_expect.rs"]
 mod imports_expect;
 #[path = "../support/payroll_expect.rs"]
@@ -1020,6 +1022,10 @@ fn main() -> std::process::ExitCode {
         (
             "report_defs_archive::memorized_reports_survive_an_archive_round_trip",
             contract_report_defs_archive::memorized_reports_survive_an_archive_round_trip,
+        ),
+        (
+            "transfer::export_preview_and_refusal_u284",
+            contract_transfer::transfer_export_preview_and_refusal_u284,
         ),
         // P23 WP-4: sales tax, in one company of its own. The cash-basis
         // tests run last, on the fullest company (U-155: cash reports stay

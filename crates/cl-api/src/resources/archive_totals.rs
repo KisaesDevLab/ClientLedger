@@ -225,7 +225,8 @@ pub struct ManifestSummary {
     /// The totals in the file.
     #[serde(default)]
     pub verification_totals: Option<VerificationTotals>,
-    /// What the file leaves out.
+    /// What the file leaves out (not in the engine's summary at pin
+    /// `dd11f2b4`; empty then).
     #[serde(default)]
     pub omitted: Vec<String>,
 }
