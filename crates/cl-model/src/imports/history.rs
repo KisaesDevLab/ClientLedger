@@ -100,6 +100,9 @@ pub struct Actions {
     pub check_status: bool,
     /// Restore the before-import backup instead.
     pub restore: bool,
+    /// Import a batch made and never sent (the window was closed during
+    /// its backup, P31 QA-20): its files are pinned to it (Admin).
+    pub finish: bool,
 }
 
 /// The actions of `e` for a user who is (or is not) the company Admin.
@@ -113,6 +116,7 @@ pub fn actions(e: &Entry, admin: bool) -> Actions {
         retry: admin && e.status == BatchStatus::Failed,
         check_status: e.status.is_running(),
         restore: admin && committed && e.backup_ref.is_some() && e.backup_present,
+        finish: admin && e.status == BatchStatus::Draft,
     }
 }
 
@@ -203,6 +207,23 @@ mod tests {
         assert_eq!(
             actions(&entry("e", BatchStatus::Undone, false, "2026-11-01"), true),
             Actions::default()
+        );
+    }
+
+    /// P31 QA-20: a batch made and never sent (closed during its backup) can
+    /// be imported from History by the Admin; nothing else on it.
+    #[test]
+    fn a_draft_offers_import_now_to_the_admin() {
+        let e = entry("d", BatchStatus::Draft, false, "2026-11-01");
+        let a = actions(&e, true);
+        assert!(a.finish && !a.undo && !a.tieout && !a.retry);
+        assert!(!actions(&e, false).finish);
+        assert!(
+            !actions(
+                &entry("c", BatchStatus::Committed, false, "2026-11-01"),
+                true
+            )
+            .finish
         );
     }
 

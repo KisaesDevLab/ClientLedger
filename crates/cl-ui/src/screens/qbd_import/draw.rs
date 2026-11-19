@@ -879,6 +879,16 @@ impl ImportScreen {
                         {
                             self.retry_batch(b);
                         }
+                        if a.finish
+                            && ui
+                                .add_enabled(
+                                    !locked,
+                                    egui::Button::new(t("imports.history.finish")),
+                                )
+                                .clicked()
+                        {
+                            self.retry_batch(b);
+                        }
                         if a.undo
                             && ui
                                 .add_enabled(!locked, egui::Button::new(t("imports.undo.button")))
@@ -1050,7 +1060,11 @@ fn file_status(
             rows.sort_unstable();
             rows.dedup();
             if rows.is_empty() {
-                return t("imports.file.unreadable");
+                // Only whole-file problems: it isn't this card's report.
+                return t_with(
+                    "imports.file.wrong_report_named",
+                    &[("report", &slot_name(slot.key))],
+                );
             }
             let shown: Vec<String> = rows.iter().take(5).map(u64::to_string).collect();
             crate::i18n::t_count(

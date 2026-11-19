@@ -944,7 +944,10 @@ impl ImportScreen {
     /// Retry from History: a failed batch is imported again, a backup
     /// first and a new key (a new attempt, never the failed one's key).
     pub(crate) fn retry_batch(&mut self, b: &ImportBatch) {
-        if !self.allowed() || b.status != BatchStatus::Failed || self.locked() {
+        if !self.allowed()
+            || !matches!(b.status, BatchStatus::Failed | BatchStatus::Draft)
+            || self.locked()
+        {
             return;
         }
         // A batch whose options can't succeed (an account with no match, a
