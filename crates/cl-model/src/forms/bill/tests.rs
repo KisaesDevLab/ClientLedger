@@ -243,14 +243,18 @@ fn line_problems() {
     );
     assert_eq!(found[1].field(), BillField::LineAccount(i));
 
+    // A zero line is still refused; a negative one is not (Q-P31ae).
     let mut f = mockup(&mut keys);
     let e = f.expenses.lines[0].key;
-    f.expenses.lines[0].amount = Some(money("-1"));
-    f.amount_due = Some(money("149"));
+    f.expenses.lines[0].amount = Some(Money::ZERO);
+    f.amount_due = Some(money("150"));
     assert_eq!(
         problems(&f, &ctx(&tags, &terms, ALL)),
-        vec![BillProblem::LineAmountNotPositive(e)]
+        vec![BillProblem::LineAmountMissing(e)]
     );
+    f.expenses.lines[0].amount = Some(money("-1"));
+    f.amount_due = Some(money("149"));
+    assert!(check(&f, &ctx(&tags, &terms, ALL)).is_ok());
 
     let mut f = mockup(&mut keys);
     let e = f.expenses.lines[0].key;
@@ -262,6 +266,103 @@ fn line_problems() {
     let checked = check(&f, &ctx(&tags, &terms, ALL)).expect("ok");
     assert!(checked.expense_lines[0].billable);
     assert_eq!(checked.expense_lines[0].contact, Some(contact(9)));
+}
+
+/// Q-P31ae (owner 2026-11-19): a bill or vendor credit may carry negative
+/// lines (discounts, credits) when its total stays above zero, as the
+/// spreadsheet import writes them: 212.40 and (12.40) for 200.00.
+#[test]
+fn negative_lines_are_allowed_when_the_total_stays_positive() {
+    let mut keys = RowKeyGen::new();
+    let tags = no_tags();
+    let terms = PaymentTerm::fixed();
+    let c = ctx(&tags, &terms, ALL);
+    for kind in [BillKind::Bill, BillKind::Credit] {
+        let mut f = BillForm::new(Some(ymd(2026, 11, 3)), &mut keys);
+        f.kind = kind;
+        f.vendor = Some(contact(1));
+        f.expenses.lines[0].account = Some(account(6210));
+        f.expenses.lines[0].amount = Some(money("212.40"));
+        f.expenses.ensure_entry(&mut keys);
+        f.expenses.lines[1].account = Some(account(6220));
+        f.expenses.lines[1].amount = Some(money("-12.40"));
+        f.expenses.ensure_entry(&mut keys);
+        f.amount_due = Some(money("200.00"));
+        let ok = check(&f, &c).unwrap_or_else(|p| panic!("{kind:?}: {p:?}"));
+        assert_eq!(ok.amount, money("200.00"));
+        let amounts: Vec<Money> = ok.expense_lines.iter().map(|l| l.amount).collect();
+        assert_eq!(amounts, [money("212.40"), money("-12.40")]);
+        // A blank amount due takes the (positive) lines total.
+        f.amount_due = None;
+        assert_eq!(check(&f, &c).expect("from lines").amount, money("200.00"));
+        // The "lines differ from amount due" check stays.
+        f.amount_due = Some(money("212.40"));
+        assert_eq!(
+            problems(&f, &c),
+            vec![BillProblem::LinesDisagree {
+                difference: money("12.40")
+            }]
+        );
+    }
+
+    // An item line with a typed negative amount (no cost) is a discount.
+    let mut f = mockup(&mut keys);
+    let k = f.items.lines[0].key;
+    let l = f.items.get_mut(k).expect("line");
+    l.set_rate(None);
+    l.set_qty(None);
+    l.set_amount(Some(money("-30")));
+    f.amount_due = Some(money("1300"));
+    let ok = check(&f, &c).expect("valid");
+    assert_eq!(ok.item_lines[0].amount, money("-30"));
+    assert_eq!(ok.amount, money("1300"));
+    // With a quantity it would be stock received at a negative cost
+    // (Q-P31af): refused, pointing at the quantity.
+    f.items.get_mut(k).expect("line").set_qty(Some(qty("2")));
+    assert_eq!(problems(&f, &c), vec![BillProblem::ItemNegativeWithQty(k)]);
+    assert_eq!(
+        BillProblem::ItemNegativeWithQty(k).field(),
+        BillField::LineQty(k)
+    );
+}
+
+/// Q-P31ae: the total must still be above zero, typed or from the lines.
+#[test]
+fn a_total_of_zero_or_less_is_refused() {
+    let mut keys = RowKeyGen::new();
+    let tags = no_tags();
+    let terms = PaymentTerm::fixed();
+    let c = ctx(&tags, &terms, ALL);
+    let mut f = BillForm::new(Some(ymd(2026, 11, 3)), &mut keys);
+    f.vendor = Some(contact(1));
+    f.expenses.lines[0].account = Some(account(6210));
+    f.expenses.lines[0].amount = Some(money("100"));
+    f.expenses.ensure_entry(&mut keys);
+    f.expenses.lines[1].account = Some(account(6220));
+    f.expenses.lines[1].amount = Some(money("-100"));
+    f.expenses.ensure_entry(&mut keys);
+    // From the lines: 100 − 100 = 0.
+    f.amount_due = None;
+    assert_eq!(problems(&f, &c), vec![BillProblem::AmountNotPositive]);
+    // Typed.
+    f.amount_due = Some(Money::ZERO);
+    assert_eq!(problems(&f, &c), vec![BillProblem::AmountNotPositive]);
+    // Below zero, from the lines and typed.
+    f.expenses.lines[1].amount = Some(money("-120"));
+    f.amount_due = None;
+    assert_eq!(problems(&f, &c), vec![BillProblem::AmountNotPositive]);
+    f.amount_due = Some(money("-20"));
+    assert_eq!(problems(&f, &c), vec![BillProblem::AmountNotPositive]);
+
+    // A line with an account and no amount yet (no amount due either) is
+    // only that line's problem, not a total below zero.
+    let mut g = BillForm::new(Some(ymd(2026, 11, 3)), &mut keys);
+    g.vendor = Some(contact(1));
+    g.expenses.lines[0].account = Some(account(6210));
+    let k = g.expenses.lines[0].key;
+    g.expenses.ensure_entry(&mut keys);
+    assert!(!g.has_negative_line());
+    assert_eq!(problems(&g, &c), vec![BillProblem::LineAmountMissing(k)]);
 }
 
 #[test]
@@ -301,10 +402,7 @@ fn item_line_problems() {
     let mut f = base.clone();
     f.items.lines[0].set_rate(Some(Money::ZERO));
     f.amount_due = Some(money("1330"));
-    assert_eq!(
-        problems(&f, &c),
-        vec![BillProblem::LineAmountNotPositive(i)]
-    );
+    assert_eq!(problems(&f, &c), vec![BillProblem::LineAmountMissing(i)]);
 
     // Qty + amount without a rate (S2).
     let mut f = base.clone();
@@ -719,7 +817,7 @@ fn every_problem_has_a_bill_key() {
             difference: Money::ZERO,
         },
         BillProblem::LineAccountMissing(k),
-        BillProblem::LineAmountNotPositive(k),
+        BillProblem::LineAmountMissing(k),
         BillProblem::BillableNeedsCustomer(k),
         BillProblem::LineDetailNeedsUpdate(k),
         BillProblem::ItemsNeedUpdate,
@@ -727,6 +825,7 @@ fn every_problem_has_a_bill_key() {
         BillProblem::ItemQtyNotPositive(k),
         BillProblem::ItemRateNegative(k),
         BillProblem::ItemAmountTooLarge(k),
+        BillProblem::ItemNegativeWithQty(k),
         BillProblem::ReadNotAccepted,
     ];
     let mut keys: Vec<&str> = all.iter().map(|p| p.key().as_str()).collect();

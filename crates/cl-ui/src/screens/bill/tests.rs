@@ -580,6 +580,70 @@ fn a_paid_bill_keeps_vendor_date_and_amount_and_is_not_voided() {
     assert_eq!(s.state()["void_open"], false);
 }
 
+/// Q-P31ae (owner 2026-11-19): a spreadsheet-imported bill of 212.40 and
+/// (12.40) opens balanced and saves after a memo edit, its negative line
+/// unchanged; a zero line or a total of zero is still refused.
+#[test]
+fn an_imported_negative_line_saves_after_a_memo_edit() {
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let vendor = contact(&s, demo_bills::STORY_VENDOR);
+    let a = account(&s, "6210");
+    let draft = BillDraft {
+        vendor,
+        date: today(),
+        vendor_invoice_number: Some("HF-1".into()),
+        terms: None,
+        due_date: None,
+        memo: None,
+        amount_due: money("200.00"),
+        lines: vec![
+            cl_api::BillLineDraft::expense(a, money("212.40")),
+            cl_api::BillLineDraft::expense(a, money("-12.40")),
+        ],
+        received: true,
+        draft_attachment: None,
+    };
+    // As the import writes it (the engine takes negative lines).
+    let id = demo_bills::create_bill(&mut link.demo_state().expect("demo"), &draft, None)
+        .expect("imported bill");
+    assert_eq!(owed(&link, vendor), money("200.00"));
+
+    s.read_bill(id, Some(BillKind::Bill));
+    assert_eq!(s.state()["totals"], "balanced");
+    s.header
+        .edit_step(|h| h.memo = "Checked against the invoice".into());
+    s.sync_inputs();
+    s.recheck_problems();
+    assert_eq!(s.state()["save"]["problems"], 0);
+    let before = writes(&link);
+    assert!(s.start_save(SaveIntent::Save, None));
+    assert_eq!(writes(&link), before + 1, "sent once");
+    {
+        let mut demo = link.demo_state().expect("demo");
+        let v = demo_bills::get(&mut demo, id).expect("bill");
+        let amounts: Vec<Money> = v.record.lines.iter().map(|l| l.amount).collect();
+        assert_eq!(amounts, [money("212.40"), money("-12.40")]);
+        assert_eq!(
+            v.record.txn.memo.as_deref(),
+            Some("Checked against the invoice")
+        );
+    }
+    assert_eq!(owed(&link, vendor), money("200.00"), "the net total");
+
+    // The negative line made as large as the other: the total is zero.
+    s.read_bill(id, Some(BillKind::Bill));
+    s.expenses
+        .form_mut()
+        .edit_step(|v| v.lines[1].amount = Some(money("-212.40")));
+    s.header.edit_step(|h| h.set_amount_due(Some(Money::ZERO)));
+    s.sync_inputs();
+    let before = writes(&link);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(s.state()["save"]["refused"], "amount_not_positive");
+    assert_eq!(writes(&link), before, "nothing sent");
+}
+
 #[test]
 fn without_bill_lines_the_items_tab_and_line_customers_wait() {
     let (_d, link) = link();

@@ -1272,3 +1272,266 @@ fn ocr_text_pdf_reads(h: &Harness, s: &Session) {
     h.run(s.attachments().delete(up.id, key()))
         .expect("clean up");
 }
+
+/// The posted lines of `id` in line order: (account, debit, credit) as
+/// exact wire strings.
+fn postings(h: &Harness, s: &Session, id: TransactionId) -> Vec<(AccountId, String, String)> {
+    let txn = h.run(s.transactions().get(id)).expect("txn").record;
+    let mut lines: Vec<_> = txn.lines.iter().collect();
+    lines.sort_by_key(|l| l.line_order.unwrap_or(0));
+    lines
+        .iter()
+        .map(|l| (l.account_id, l.debit.to_wire(), l.credit.to_wire()))
+        .collect()
+}
+
+/// Q-P31ae (owner 2026-11-19): a bill may carry a negative line (a
+/// discount or credit) when its total stays above zero, as the spreadsheet
+/// import writes it. The engine posts the negative line as a negative
+/// debit and credits A/P with the net; an edit re-posts the new net; Pay
+/// Bills, the A/P aging and the bill list all show the net; paying the net
+/// pays the bill.
+pub fn negative_bill_line_posts_the_net_live(h: &Harness) {
+    if !h.require_cap(Capabilities::AP_EDIT, "U-84") {
+        return;
+    }
+    let s = &h.s1;
+    let supplies = account(h, s, AccountType::Expense, "Q-P31ae supplies");
+    let discount = account(h, s, AccountType::Expense, "Q-P31ae discount");
+    let ap = payables_account(h, s);
+    let bank = detail_account(h, s, AccountType::Asset, "bank");
+    let v = vendor(h, s);
+    let ap_before = balance(h, s, ap);
+    let draft = |big: &str, minus: &str, net: &str| BillDraft {
+        vendor: v,
+        date: date(2026, 11, 3),
+        vendor_invoice_number: Some(unique("HF").replace(' ', "-")),
+        terms: None,
+        due_date: Some(date(2026, 11, 20)),
+        memo: None,
+        amount_due: m(net),
+        lines: vec![
+            BillLineDraft::expense(supplies.id, m(big)),
+            BillLineDraft::expense(discount.id, m(minus)),
+        ],
+        received: true,
+        draft_attachment: None,
+    };
+    let first = draft("212.40", "-12.40", "200.00");
+    let saved = h
+        .run(s.bills().create(&first, &PostingOptions::default(), key()))
+        .unwrap_or_else(|e| panic!("create: {e:?}"));
+    let id = saved.record.txn.id;
+    assert_eq!(saved.record.txn.total, Some(m("200.0000")));
+    assert_eq!(saved.record.balance_due, Some(m("200.0000")));
+    let amounts: Vec<Money> = saved.record.lines.iter().map(|l| l.amount).collect();
+    assert_eq!(amounts, [m("212.40"), m("-12.40")], "read back as entered");
+    assert_eq!(
+        postings(h, s, id),
+        vec![
+            (supplies.id, "212.4000".into(), "0.0000".into()),
+            (discount.id, "-12.4000".into(), "0.0000".into()),
+            (ap, "0.0000".into(), "200.0000".into()),
+        ]
+    );
+    assert_eq!(balance(h, s, supplies.id), m("212.40"));
+    assert_eq!(balance(h, s, discount.id), m("-12.40"));
+    let moved = |want: &str| {
+        let d = balance(h, s, ap)
+            .checked_sub(ap_before)
+            .expect("delta")
+            .abs();
+        assert_eq!(d, m(want), "A/P moved by exactly the net");
+    };
+    moved("200.00");
+
+    // The edit (PUT): 250.00 and (25.00) = 225.00 re-posts the new net.
+    let second = draft("250.00", "-25.00", "225.00");
+    let edited = h
+        .run(
+            s.bills()
+                .update(id, &saved, &second, &PostingOptions::default(), key()),
+        )
+        .unwrap_or_else(|e| panic!("update: {e:?}"));
+    assert_eq!(edited.record.txn.total, Some(m("225.0000")));
+    assert_eq!(edited.record.balance_due, Some(m("225.0000")));
+    assert_eq!(
+        postings(h, s, id),
+        vec![
+            (supplies.id, "250.0000".into(), "0.0000".into()),
+            (discount.id, "-25.0000".into(), "0.0000".into()),
+            (ap, "0.0000".into(), "225.0000".into()),
+        ]
+    );
+    assert_eq!(balance(h, s, supplies.id), m("250.00"));
+    assert_eq!(balance(h, s, discount.id), m("-25.00"));
+    moved("225.00");
+
+    // Pay Bills, the A/P aging and the bill list show the net.
+    let list = h
+        .run(s.bills().payable_list(&cl_api::PayableFilter {
+            vendor: Some(v),
+            ..cl_api::PayableFilter::default()
+        }))
+        .expect("payable");
+    let row = list.bills.iter().find(|r| r.id == id).expect("listed");
+    assert_eq!(row.balance_due, m("225.00"));
+    let aging = h
+        .run(s.reports().ap_aging_summary(date(2026, 11, 30)))
+        .expect("aging");
+    let open = aging.total_of(v).expect("the vendor is listed");
+    assert_eq!(open.display(2).as_deref(), Some("225.00"));
+    let found = h
+        .run(s.bills().list_capped(
+            &BillListQuery {
+                vendor: Some(v),
+                ..BillListQuery::default()
+            },
+            50,
+            20,
+        ))
+        .expect("list");
+    assert_eq!(found.rows.len(), 1);
+    assert_eq!(found.rows[0].total, Some(m("225.0000")));
+
+    // Paying the net pays the bill.
+    let paid = h
+        .run(s.bill_payments().pay(
+            &crate::contract_pay_bills::request(
+                bank,
+                vec![cl_api::BillToPay {
+                    bill: id,
+                    cash: m("225.00"),
+                    discount: Money::ZERO,
+                }],
+                Vec::new(),
+            ),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("pay: {e:?}"));
+    assert_eq!(paid.len(), 1);
+    let after = h.run(s.bills().get(id)).expect("get").record;
+    assert_eq!(after.balance_due, Some(m("0.0000")));
+    assert!(after.has_payments());
+    moved("0.00");
+
+    // An item line can be the discount too: a service item with a typed
+    // negative amount and no quantity posts like the expense line.
+    let item = h
+        .run(s.items().create(
+            &cl_api::ItemFields {
+                purchase: cl_api::ItemPurchase::default(),
+                name: unique("Q-P31ae early-pay discount"),
+                description: None,
+                unit_price: None,
+                income_account_id: account(h, s, AccountType::Revenue, "Q-P31ae income").id,
+                is_taxable: false,
+                item_type: cl_api::ItemType::Service,
+                discount_percent: None,
+                tax_code_id: None,
+            },
+            key(),
+        ))
+        .expect("item")
+        .record
+        .id;
+    let mut third = draft("100.00", "-5.00", "95.00");
+    third.lines[1].item = Some(item);
+    let saved = h
+        .run(s.bills().create(&third, &PostingOptions::default(), key()))
+        .unwrap_or_else(|e| panic!("item discount: {e:?}"));
+    assert_eq!(saved.record.txn.total, Some(m("95.0000")));
+    assert_eq!(saved.record.lines[1].item, Some(item));
+    assert_eq!(saved.record.lines[1].amount, m("-5.00"));
+    assert_eq!(
+        postings(h, s, saved.record.txn.id),
+        vec![
+            (supplies.id, "100.0000".into(), "0.0000".into()),
+            (discount.id, "-5.0000".into(), "0.0000".into()),
+            (ap, "0.0000".into(), "95.0000".into()),
+        ]
+    );
+    h.run(s.bills().void(
+        saved.record.txn.id,
+        "contract clean-up",
+        &ApWriteOptions::default(),
+        key(),
+    ))
+    .expect("void");
+}
+
+/// Q-P31ae: the same for a vendor credit. A negative line posts as a
+/// negative credit, A/P is debited with the net, an edit re-posts it, and
+/// Pay Bills offers the net credit.
+pub fn negative_vendor_credit_line_posts_the_net_live(h: &Harness) {
+    if !h.require_cap(Capabilities::AP_EDIT, "U-84") {
+        return;
+    }
+    let s = &h.s1;
+    let returns = account(h, s, AccountType::Expense, "Q-P31ae returns");
+    let restock = account(h, s, AccountType::Expense, "Q-P31ae restocking");
+    let ap = payables_account(h, s);
+    let v = vendor(h, s);
+    let draft = |big: &str, minus: &str, net: &str| VendorCreditDraft {
+        vendor: v,
+        date: date(2026, 11, 3),
+        vendor_invoice_number: Some(unique("CM").replace(' ', "-")),
+        memo: None,
+        amount: m(net),
+        lines: vec![
+            BillLineDraft::expense(returns.id, m(big)),
+            BillLineDraft::expense(restock.id, m(minus)),
+        ],
+        draft_attachment: None,
+    };
+    let saved = h
+        .run(s.vendor_credits().create(
+            &draft("60.00", "-10.00", "50.00"),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("create: {e:?}"));
+    let id = saved.record.txn.id;
+    assert_eq!(saved.record.txn.total, Some(m("50.0000")));
+    let amounts: Vec<Money> = saved.record.lines.iter().map(|l| l.amount).collect();
+    assert_eq!(amounts, [m("60.00"), m("-10.00")], "read back as entered");
+    assert_eq!(
+        postings(h, s, id),
+        vec![
+            (ap, "50.0000".into(), "0.0000".into()),
+            (returns.id, "0.0000".into(), "60.0000".into()),
+            (restock.id, "0.0000".into(), "-10.0000".into()),
+        ]
+    );
+    let edited = h
+        .run(s.vendor_credits().update(
+            id,
+            &saved,
+            &draft("80.00", "-20.00", "60.00"),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .unwrap_or_else(|e| panic!("update: {e:?}"));
+    assert_eq!(edited.record.txn.total, Some(m("60.0000")));
+    assert_eq!(
+        postings(h, s, id),
+        vec![
+            (ap, "60.0000".into(), "0.0000".into()),
+            (returns.id, "0.0000".into(), "80.0000".into()),
+            (restock.id, "0.0000".into(), "-20.0000".into()),
+        ]
+    );
+    // The vendor's available credit is the net (Pay Bills lists credits
+    // only beside an open bill, so the summary is read here).
+    let summary = h.run(s.bills().vendor_summary(v)).expect("summary");
+    assert_eq!(summary.available_credits_count, 1);
+    assert_eq!(summary.total_available_credits, m("60.00"));
+    // Clean up: an open credit would be offered to later tests' vendors
+    // only, but keep A/P tidy anyway.
+    h.run(
+        s.vendor_credits()
+            .void(id, "contract clean-up", &ApWriteOptions::default(), key()),
+    )
+    .expect("void");
+}
