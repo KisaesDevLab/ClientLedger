@@ -348,6 +348,62 @@ pub fn recommit(h: &Harness) {
     assert_eq!(again.status, BatchStatus::Committed);
 }
 
+/// P31 QA: a spreadsheet bill with a negative line (212.40 and (12.40))
+/// and an invoice with a discount line read back with every line, and the
+/// lines add up to the engine's total. The engine stores the bill's
+/// negative line as a negative debit; the bill reader once kept only
+/// positive debits and dropped it.
+pub fn negative_lines_read_back(h: &Harness) {
+    if !caps(h) {
+        return;
+    }
+    let s = fresh_company(h, "Txn Import Negative");
+    let n = names(h, &s);
+    let head = "group_id,type,date,number,name,due_date,memo,line_account,line_item,line_description,line_amount,line_debit,line_credit,line_tag";
+    let csv = format!(
+        "{head}\r\n\
+         A,invoice,2026-03-02,3001,{c},2026-04-01,,{sales},,Mowing,480.00,,,\r\n\
+         A,invoice,2026-03-02,3001,{c},2026-04-01,,{sales},,Discount,(30.00),,,\r\n\
+         B,bill,2026-03-05,HF-1,{v},,,{sup},,Fuel,212.40,,,\r\n\
+         B,bill,2026-03-05,HF-1,{v},,,{sup},,Refund,(12.40),,,\r\n",
+        c = n.customer,
+        v = n.vendor,
+        sales = n.sales,
+        sup = n.supplies,
+    );
+    let (_, b) = import(h, &s, csv.as_bytes());
+    assert_eq!(b.status, BatchStatus::Committed, "{:?}", b.error);
+    let m = |v: &str| Money::parse_wire(v).expect("money");
+    let page = cl_api::PageRequest::new(50, 0).expect("page");
+
+    let bills = h
+        .run(s.bills().list(&cl_api::BillListQuery::default(), page))
+        .unwrap_or_else(|e| panic!("bills: {e}"));
+    assert_eq!(bills.data.len(), 1);
+    let bill = h
+        .run(s.bills().get(bills.data[0].id))
+        .unwrap_or_else(|e| panic!("bill: {e}"))
+        .record;
+    let amounts: Vec<Money> = bill.lines.iter().map(|l| l.amount).collect();
+    assert_eq!(amounts, vec![m("212.40"), m("-12.40")]);
+    assert_eq!(bill.txn.total, Some(m("200.00")));
+
+    let invoices = h
+        .run(
+            s.invoices()
+                .list(&cl_api::InvoiceListQuery::default(), page),
+        )
+        .unwrap_or_else(|e| panic!("invoices: {e}"));
+    assert_eq!(invoices.data.len(), 1);
+    let inv = h
+        .run(s.invoices().get(invoices.data[0].id))
+        .unwrap_or_else(|e| panic!("invoice: {e}"))
+        .record;
+    let amounts: Vec<Money> = inv.lines.iter().map(|l| l.amount).collect();
+    assert_eq!(amounts, vec![m("480.00"), m("-30.00")]);
+    assert_eq!(inv.txn.total, Some(m("450.00")));
+}
+
 /// Review B1: the desktop sends the owner's own amount text (the engine's
 /// parser decides): `$1,234.50`, `(25.50)` on an invoice line, NBSP
 /// thousands, U+2212 and a trailing `CR` in a signed journal `line_amount`,

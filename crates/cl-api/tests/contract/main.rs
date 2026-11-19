@@ -1214,7 +1214,11 @@ fn main() -> std::process::ExitCode {
             contract_import_transactions::owner_amount_text_reads_exactly,
         ),
         (
-            "import_transactions::unknown_refs",
+            "import_transactions::negative_lines_read_back",
+        contract_import_transactions::negative_lines_read_back,
+    ),
+    (
+        "import_transactions::unknown_refs",
             contract_import_transactions::unknown_refs,
         ),
         (
