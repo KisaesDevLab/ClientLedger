@@ -1,0 +1,36 @@
+!ACCNT	NAME	ACCNTTYPE	DESC	ACCNUM
+ACCNT	Accounts Payable	AP		
+ACCNT	Accounts Receivable	AR		1200
+ACCNT	Company Card	CCARD		
+ACCNT	Lawn Care	INC		
+ACCNT	Operating Checking	BANK		
+ACCNT	Owner Equity	EQUITY		
+ACCNT	Supplies	EXP		
+ACCNT	Supplies:Fuel	EXP		
+!CUST	NAME
+CUST	Maple Street HOA
+CUST	Ridge Partners
+!VEND	NAME
+VEND	Green Supply – Joplin
+VEND	Ridge Partners (V)
+!INVITEM	NAME	INVITEMTYPE	DESC	ACCNT
+INVITEM	Mowing	SERV	Weekly mowing	Lawn Care
+!TRNS	TRNSID	TRNSTYPE	DATE	ACCNT	NAME	AMOUNT	DOCNUM	MEMO
+!SPL	SPLID	TRNSTYPE	DATE	ACCNT	NAME	AMOUNT	DOCNUM	MEMO
+!ENDTRNS
+TRNS		GENERAL JOURNAL	01/02/2026	Operating Checking		5000.00	1001	Opening cash
+SPL		GENERAL JOURNAL	01/02/2026	Owner Equity		-5000.00	1001	Opening cash
+ENDTRNS
+TRNS		GENERAL JOURNAL	01/15/2026	Accounts Receivable	Maple Street HOA	1250.00	1002	January mowing
+SPL		GENERAL JOURNAL	01/15/2026	Lawn Care	Maple Street HOA	-1250.00	1002	January mowing
+ENDTRNS
+TRNS		GENERAL JOURNAL	01/20/2026	Supplies	Green Supply – Joplin	312.49	1003	Mulch “premium”
+SPL		GENERAL JOURNAL	01/20/2026	Supplies:Fuel	Green Supply – Joplin	87.51	1003	Mulch “premium”
+SPL		GENERAL JOURNAL	01/20/2026	Accounts Payable	Green Supply – Joplin	-400.00	1003	Mulch “premium”
+ENDTRNS
+TRNS		GENERAL JOURNAL	02/01/2026	Operating Checking	Ridge Partners	300.00	1004	
+SPL		GENERAL JOURNAL	02/01/2026	Accounts Receivable	Ridge Partners	-300.00	1004	
+ENDTRNS
+TRNS		GENERAL JOURNAL	02/03/2026	Supplies:Fuel		45.10	1005	Fuel
+SPL		GENERAL JOURNAL	02/03/2026	Company Card		-45.10	1005	Fuel
+ENDTRNS

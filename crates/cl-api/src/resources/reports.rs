@@ -18,6 +18,7 @@ pub mod draft;
 pub mod email;
 pub mod list_run;
 pub mod run;
+pub mod txn_list;
 
 use cl_core::ids::{AccountId, ContactId, TransactionId};
 use cl_core::{CalendarDate, Money, Timestamp};

@@ -135,6 +135,7 @@ pub use resources::report_builder::{
     BuilderRefusal, BuilderRun, ColumnLayout, DetailPage, DetailRequest, ReportBuilder, RunDates,
     RunPurpose, RunRef, RunRequest, Starter, builder_refusal,
 };
+pub use resources::reports::txn_list::{TxnList, TxnListRow, parse_txn_list};
 pub use resources::reports::{
     AccountReport, AccountReportLine, ApAgingSummary, ApAgingVendor, ArAgingCustomer,
     ArAgingSummary, BalanceSheet, BalanceSheetEntry, CustomerBalanceRow, CustomerBalanceSummary,

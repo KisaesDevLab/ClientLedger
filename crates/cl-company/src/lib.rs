@@ -21,6 +21,7 @@ pub mod backup;
 pub mod delete;
 pub mod error;
 pub mod export_all;
+pub mod iif;
 pub mod intake;
 pub mod lifecycle;
 pub mod report_story;

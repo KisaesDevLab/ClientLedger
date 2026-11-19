@@ -1966,6 +1966,8 @@ pub(crate) const REPORT_EXPENSE_BY_VENDOR: Operation = read("/api/v1/reports/exp
 /// `transaction-list-by-vendor` (P28 WP3).
 pub(crate) const REPORT_TRANSACTION_LIST_BY_VENDOR: Operation =
     read("/api/v1/reports/transaction-list-by-vendor");
+/// `transaction-list?exact=1` read window by window by the IIF export (P32).
+pub(crate) const REPORT_TRANSACTION_LIST: Operation = read("/api/v1/reports/transaction-list");
 /// `bill-payment-history` (P28 WP3).
 pub(crate) const REPORT_BILL_PAYMENT_HISTORY: Operation =
     read("/api/v1/reports/bill-payment-history");
@@ -2122,7 +2124,7 @@ const NEVER_RETRIED: [(&str, &str); 7] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 469] = [
+pub const OPERATIONS: [Operation; 470] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2540,6 +2542,7 @@ pub const OPERATIONS: [Operation; 469] = [
     REPORT_SALES_BY_ITEM,
     REPORT_EXPENSE_BY_VENDOR,
     REPORT_TRANSACTION_LIST_BY_VENDOR,
+    REPORT_TRANSACTION_LIST,
     REPORT_BILL_PAYMENT_HISTORY,
     REPORT_VENDOR_1099_SUMMARY,
     REPORT_AP_1099_PREP,

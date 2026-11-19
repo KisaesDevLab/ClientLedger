@@ -483,6 +483,7 @@ GET     /api/v1/reports/sales-by-customer       idempotent
 GET     /api/v1/reports/sales-by-item           idempotent
 GET     /api/v1/reports/expense-by-vendor       idempotent
 GET     /api/v1/reports/transaction-list-by-vendor idempotent
+GET     /api/v1/reports/transaction-list        idempotent
 GET     /api/v1/reports/bill-payment-history    idempotent
 GET     /api/v1/reports/vendor-1099-summary     idempotent
 GET     /api/v1/reports/ap-1099-prep            idempotent
