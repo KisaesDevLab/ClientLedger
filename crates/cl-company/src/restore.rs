@@ -250,6 +250,12 @@ pub async fn restore(
         .as_ref()
         .and_then(|h| h.get("prefs"))
         .and_then(|f| serde_json::from_value(f.clone()).ok());
+    let host_transfers: Vec<cl_settings::TransferRecord> = imported
+        .host
+        .as_ref()
+        .and_then(|h| h.get("transfers"))
+        .and_then(|f| serde_json::from_value(f.clone()).ok())
+        .unwrap_or_default();
     let original_name = previous_rec
         .as_ref()
         .map_or_else(|| imported.name.clone(), |r| base_name(&r.name).to_string());
@@ -290,6 +296,13 @@ pub async fn restore(
         rec.accent = accent;
         rec.flags = flags;
         rec.prefs = prefs;
+        // "Sent before" (P32): this computer's history of the company it
+        // replaces, else what the backup carried.
+        rec.transfers = previous_rec
+            .as_ref()
+            .map(|r| r.transfers.clone())
+            .filter(|t| !t.is_empty())
+            .unwrap_or(host_transfers);
         rec.source = Some("restore".into());
         // PR-A1 S2 (Q-PRA1c): the restored drafts are this computer's own;
         // documents handled after the backup are offered back once.

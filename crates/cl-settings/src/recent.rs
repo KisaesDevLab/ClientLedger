@@ -172,6 +172,51 @@ pub struct CompanyRecord {
     /// PR-A1 S2 (Q-PRA1c): restored from a backup on this computer.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restored: Option<RestoreNote>,
+    /// Transfer files sent to the accountant (P32 "Sent before"), oldest
+    /// first, at most [`TRANSFER_HISTORY`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transfers: Vec<TransferRecord>,
+}
+
+/// How many transfer files a company remembers.
+pub const TRANSFER_HISTORY: usize = 100;
+
+/// The headline totals in a transfer file, exact (decimal strings on
+/// disk, never floats). Shown with `display_amount`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferTotals {
+    /// As-of date.
+    pub as_of: cl_core::CalendarDate,
+    /// Total assets.
+    pub total_assets: cl_core::Money,
+    /// Total liabilities.
+    pub total_liabilities: cl_core::Money,
+    /// Total equity.
+    pub total_equity: cl_core::Money,
+    /// Net income, fiscal year to date.
+    pub net_income: cl_core::Money,
+    /// Transactions in the file.
+    pub transactions: u64,
+    /// Attachment files in the file.
+    pub attachments: u64,
+}
+
+/// One transfer file this app wrote (P32).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferRecord {
+    /// Where the file was saved.
+    pub path: PathBuf,
+    /// SHA-256 of the file, lowercase hex.
+    pub sha256: String,
+    /// The engine's archive id.
+    pub archive_id: String,
+    /// When.
+    pub created_at: Timestamp,
+    /// The totals in the file, when the engine reported them.
+    #[serde(default)]
+    pub totals: Option<TransferTotals>,
 }
 
 /// A restore on this computer (PR-A1 S2, Q-PRA1c): its drafts made before
@@ -215,6 +260,7 @@ impl CompanyRecord {
             deleted_at: None,
             delete_receipt: None,
             restored: None,
+            transfers: Vec::new(),
         }
     }
 
@@ -330,6 +376,17 @@ impl RecentCompanies {
             if c.backups.len() > BACKUP_HISTORY {
                 let drop = c.backups.len() - BACKUP_HISTORY;
                 c.backups.drain(..drop);
+            }
+        }
+    }
+
+    /// Adds a transfer file to a company's "Sent before" history.
+    pub fn record_transfer(&mut self, id: TenantId, transfer: TransferRecord) {
+        if let Some(c) = self.get_mut(id) {
+            c.transfers.push(transfer);
+            if c.transfers.len() > TRANSFER_HISTORY {
+                let drop = c.transfers.len() - TRANSFER_HISTORY;
+                c.transfers.drain(..drop);
             }
         }
     }

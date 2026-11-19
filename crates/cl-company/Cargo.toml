@@ -19,6 +19,10 @@ serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
 thiserror = "2.0.21"
+# P32: the transfer passphrase generator (OS random source) and its
+# zeroized buffers; both already in the tree (cl-pg). MIT OR Apache-2.0.
+getrandom = "0.4.3"
+zeroize = { version = "1.9.1", default-features = false, features = ["alloc"] }
 tokio = { version = "1.53.3", features = ["rt", "time"] }
 tracing = "0.1.44"
 # Stored (uncompressed) entries only: the engine archive is already

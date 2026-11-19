@@ -31,6 +31,7 @@ pub mod sample;
 pub mod setup;
 pub mod statistics;
 pub mod templates;
+pub mod transfer;
 pub mod year_end;
 mod zipfile;
 

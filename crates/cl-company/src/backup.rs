@@ -48,7 +48,15 @@ pub struct HostMetadata {
     /// (`CompanyPrefs::for_archive`, Q-P09c); absent in P08 archives.
     #[serde(default)]
     pub prefs: cl_settings::CompanyPrefs,
+    /// The newest transfer files sent to the accountant (P32 "Sent
+    /// before"), so a restore keeps them; absent before P32.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transfers: Vec<cl_settings::TransferRecord>,
 }
+
+/// How many transfer records a backup carries in `manifest.host` (the
+/// engine caps it at 16 KiB).
+pub const HOST_TRANSFERS: usize = 20;
 
 impl HostMetadata {
     /// Builds the metadata for a company.
@@ -74,6 +82,7 @@ impl HostMetadata {
             accent: accent.hex(),
             flags,
             prefs,
+            transfers: Vec::new(),
         }
     }
 }
@@ -222,6 +231,25 @@ pub async fn wait_for_job(
     job: &JobId,
     progress: &ProgressSink,
 ) -> Result<ArchiveJobStatus, CompanyError> {
+    let status = poll_job(session, job, progress).await?;
+    match status.status {
+        JobState::Failed => Err(CompanyError::JobFailed {
+            code: status.error_code(),
+        }),
+        _ => Ok(status),
+    }
+}
+
+/// Polls an archive job until it succeeds or fails and returns its last
+/// status either way (a failure keeps the engine's `details`).
+///
+/// # Errors
+/// `JobFailed` with `TIMEOUT` or `JOB_UNKNOWN`; `Api`.
+pub async fn poll_job(
+    session: &Session,
+    job: &JobId,
+    progress: &ProgressSink,
+) -> Result<ArchiveJobStatus, CompanyError> {
     let deadline = tokio::time::Instant::now() + EXPORT_DEADLINE;
     loop {
         let status = match session.tenants().archive_job(job).await {
@@ -234,12 +262,7 @@ pub async fn wait_for_job(
             Err(e) => return Err(e.into()),
         };
         match status.status {
-            JobState::Succeeded => return Ok(status),
-            JobState::Failed => {
-                return Err(CompanyError::JobFailed {
-                    code: status.error_code(),
-                });
-            }
+            JobState::Succeeded | JobState::Failed => return Ok(status),
             JobState::Queued | JobState::Running => {
                 progress(Progress::Working {
                     percent: status.progress,
@@ -330,13 +353,15 @@ pub async fn backup(
         .get(req.tenant_id)
         .cloned()
         .ok_or(CompanyError::UnknownCompany)?;
-    let host = HostMetadata::new(
+    let mut host = HostMetadata::new(
         req.kind,
         &rec.name,
         rec.accent,
         rec.flags,
         rec.prefs.for_archive(),
     );
+    let skip = rec.transfers.len().saturating_sub(HOST_TRANSFERS);
+    host.transfers = rec.transfers[skip..].to_vec();
     progress(Progress::Starting);
     let job = session
         .tenants()
