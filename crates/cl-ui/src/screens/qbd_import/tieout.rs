@@ -193,7 +193,9 @@ pub fn rows_in(t: &TieOut) -> Vec<RowIn> {
         .map(|a| RowIn {
             section: Section::Accounts,
             label: a.label(),
-            number: a.number.clone(),
+            // QA-10: ordered by the owner's own number (a row merged into a
+            // system account sits where the QuickBooks number puts it).
+            number: a.source_keys.first().cloned().or_else(|| a.number.clone()),
             source_row: a.source_row,
             source: Some(a.source),
             books: Some(a.books),
@@ -247,7 +249,7 @@ impl TieState {
     /// The view of `t`, on the Trial balance.
     #[must_use]
     pub fn new(t: &TieOut) -> TieState {
-        TieState {
+        let mut st = TieState {
             view: View::new(rows_in(t), t.all_zero),
             tab: Tab::TrialBalance,
             focus: None,
@@ -255,6 +257,28 @@ impl TieState {
                 .into_iter()
                 .filter(|tab| tab.total(t).is_some_and(|x| !x.diff.is_zero()))
                 .collect(),
+        };
+        st.mark_first_difference();
+        st
+    }
+
+    /// QA-10: a tie-out that differs opens on the first tab with a
+    /// difference, its first differing row marked (the table scrolls to it).
+    pub fn mark_first_difference(&mut self) {
+        if self.view.checkmark() {
+            return;
+        }
+        for tab in self.tabs() {
+            let first = self
+                .indexed(tab)
+                .into_iter()
+                .find(|(_, r)| !r.zero)
+                .map(|(i, _)| i);
+            if let Some(i) = first {
+                self.tab = tab;
+                self.focus = Some(i);
+                return;
+            }
         }
     }
 
@@ -885,8 +909,25 @@ fn table_ui(ui: &mut Ui, tokens: &Tokens, width: f32, st: &TieState, tie: &TieOu
                 );
             } else {
                 // Virtualized: only the rows on screen are laid out.
-                egui::ScrollArea::vertical()
-                    .id_salt("imports/tieout/rows")
+                // QA-10: scroll once to the marked row (a row above it shows
+                // too), each time another row is marked.
+                let seen = ui.scope_id().with("imports/tieout/scrolled_to");
+                let pos = rows.iter().position(|(i, _)| st.focus == Some(*i));
+                let mut area = egui::ScrollArea::vertical();
+                if let Some(p) = pos
+                    && ui.data(|d| d.get_temp::<(usize, usize)>(seen)) != Some((p, rows.len()))
+                {
+                    ui.data_mut(|d| d.insert_temp(seen, (p, rows.len())));
+                    let step = ROW_H + ui.spacing().item_spacing.y;
+                    #[allow(
+                        clippy::cast_precision_loss,
+                        clippy::float_arithmetic,
+                        reason = "layout pixels"
+                    )]
+                    let y = (p.saturating_sub(1) as f32) * step;
+                    area = area.vertical_scroll_offset(y);
+                }
+                area.id_salt("imports/tieout/rows")
                     .max_height(rows_h)
                     .auto_shrink([false, true])
                     .show_rows(ui, ROW_H, rows.len(), |ui, range| {

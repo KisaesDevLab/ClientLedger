@@ -414,6 +414,8 @@ pub struct ImportScreen {
     pub(crate) date_check: Option<cl_api::imports::DateCheck>,
     // Dates.
     pub(crate) date_text: String,
+    /// The switch date as last filled in from the reference file (QA-4).
+    date_from_file: Option<String>,
     pub(crate) opening_text: String,
     // Import.
     batch_create_job: Option<Job<ImportBatch>>,
@@ -560,6 +562,11 @@ pub(crate) fn show_date(d: CalendarDate) -> String {
     format!("{:02}/{:02}/{:04}", d.month(), d.day(), d.year())
 }
 
+/// [`show_date`] for the other import screens.
+pub(crate) fn show_date_pub(d: CalendarDate) -> String {
+    show_date(d)
+}
+
 pub(crate) fn parse_date(s: &str) -> Option<CalendarDate> {
     let s = s.trim();
     if let Ok(d) = CalendarDate::parse_wire(s) {
@@ -598,6 +605,7 @@ impl ImportScreen {
             rebuild: None,
             date_check: None,
             date_text: String::new(),
+            date_from_file: None,
             opening_text: String::new(),
             batch_create_job: None,
             batch: None,
@@ -872,11 +880,16 @@ impl ImportScreen {
             .filter(|(_, v)| !v.is_empty())
             .map(|(k, v)| (*k, v.iter().map(SlotFile::dropped).collect()))
             .collect();
+        // QA-4: the switch date follows the reference trial balance until
+        // the owner types one (a misfiled file removed or replaced no longer
+        // leaves its date behind).
         if self.wizard.source.is_conversion()
-            && self.date_text.trim().is_empty()
-            && let Some(d) = self.wizard.reference_date()
+            && (self.date_text.trim().is_empty()
+                || self.date_from_file.as_deref() == Some(self.date_text.as_str()))
         {
-            self.date_text = show_date(d);
+            let d = self.wizard.reference_date().map(show_date);
+            self.date_text = d.clone().unwrap_or_default();
+            self.date_from_file = d;
         }
         self.sync_mapping();
     }
@@ -1086,6 +1099,7 @@ impl ImportScreen {
         self.date_check = None;
         self.failure = None;
         self.date_text.clear();
+        self.date_from_file = None;
         self.opening_text.clear();
         self.batch = None;
         self.held = None;

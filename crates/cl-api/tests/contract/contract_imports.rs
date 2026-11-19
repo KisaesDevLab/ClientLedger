@@ -350,9 +350,9 @@ pub fn qbo_csv_reports_are_refused(h: &Harness) {
 }
 
 /// P31 QA-1 (Q-P31ac): a QBD conversion into a company made with a starter
-/// chart. Every number the starter chart shares with the QuickBooks list
-/// goes to `"create"` (the QuickBooks account, not the starter one). Prints
-/// what the engine did; asserts the commit ties out.
+/// chart (the app's General service). The account list is uploaded with
+/// `updateExistingCoa`: a starter account with a `QuickBooks` number takes
+/// the `QuickBooks` name, the tie-out is zero, and undo puts it back.
 pub fn qbd_into_a_starter_chart(h: &Harness) {
     if !caps(h, Flow::QbdConversion) {
         return;

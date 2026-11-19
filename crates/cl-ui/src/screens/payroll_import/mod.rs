@@ -59,7 +59,7 @@ use crate::company::{CompanyEvent, CompanyLink, Task};
 use crate::i18n::t;
 use crate::windows::Screen;
 
-mod draw;
+pub(crate) mod draw;
 #[cfg(test)]
 mod tests;
 

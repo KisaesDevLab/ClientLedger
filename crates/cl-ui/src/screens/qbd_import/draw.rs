@@ -100,10 +100,11 @@ pub(crate) fn entry_of(b: &ImportBatch) -> Entry {
         source,
         status: history::BatchStatus::from_wire(b.status.as_wire())
             .unwrap_or(history::BatchStatus::Draft),
+        // QA-14: this computer's day, not the UTC one.
         created: b
             .created_at
             .as_deref()
-            .and_then(|s| cl_core::CalendarDate::parse_wire(s.get(..10)?).ok()),
+            .and_then(crate::screens::payroll_import::draw::posted_day),
         conversion_date: b.conversion_date,
         verified: b.is_verified(),
         backup_ref: b.backup_ref.clone(),
@@ -1079,7 +1080,7 @@ pub(crate) fn refusal_text(r: &ImportRefusal) -> String {
         ImportRefusal::AlreadyCommitted { committed_at, .. } => {
             let when = committed_at
                 .as_deref()
-                .and_then(|s| cl_core::CalendarDate::parse_wire(s.get(..10)?).ok())
+                .and_then(crate::screens::payroll_import::draw::posted_day)
                 .map(show_date);
             match when {
                 Some(d) => t_with("imports.refusal.already_committed_on", &[("date", &d)]),

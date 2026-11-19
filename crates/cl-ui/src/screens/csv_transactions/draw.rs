@@ -408,7 +408,12 @@ impl CsvTransactionsScreen {
                     "txn_import.already",
                     &[(
                         "when",
-                        when.as_deref().map_or("", |w| w.get(..10).unwrap_or(w)),
+                        // QA-17: this computer's day, MM/DD/YYYY.
+                        &when
+                            .as_deref()
+                            .and_then(crate::screens::payroll_import::draw::posted_day)
+                            .map(crate::screens::qbd_import::show_date_pub)
+                            .unwrap_or_default(),
                     )],
                 ),
             ),

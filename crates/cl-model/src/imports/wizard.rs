@@ -748,11 +748,19 @@ impl Wizard {
     /// conversion's date is prefilled from it).
     #[must_use]
     pub fn reference_date(&self) -> Option<CalendarDate> {
-        self.source
-            .slots()
-            .iter()
-            .filter(|s| s.role == Role::Reference)
-            .find_map(|s| self.files.get(s.key)?.first()?.report_date)
+        // QA-4: the reference trial balance first, and only a file that was
+        // read cleanly (a refused or misfiled file's date never sticks).
+        let of = |tb: bool| {
+            self.source
+                .slots()
+                .iter()
+                .filter(|s| s.role == Role::Reference && (s.kind == "trial_balance") == tb)
+                .find_map(|s| {
+                    let f = self.files.get(s.key)?.first()?;
+                    f.is_clean().then_some(f.report_date).flatten()
+                })
+        };
+        of(true).or_else(|| of(false))
     }
 
     /// Adds a dropped file to a slot (a single-file slot's file is replaced).
