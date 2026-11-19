@@ -1525,3 +1525,50 @@ fn action_key_of(a: &str) -> &'static str {
         _ => "bill.history.other",
     }
 }
+
+#[cfg(test)]
+mod form_of_tests {
+    use cl_core::Money;
+    use cl_model::rowkey::RowKeyGen;
+
+    use super::form_of;
+
+    const A: &str = "2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+    const AP: &str = "2c0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+
+    fn line(order: u8, account: &str, debit: &str, credit: &str) -> String {
+        format!(
+            r#"{{"id":"8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a0{order}","accountId":"{account}","debit":"{debit}",
+            "credit":"{credit}","description":null,"lineOrder":{order},"tagId":null,"contactId":null,
+            "itemId":null,"quantity":null,"unitPrice":null}}"#
+        )
+    }
+
+    /// P31 QA: a spreadsheet-imported bill of 212.40 and (12.40) opens
+    /// with both expense lines, and they add up to the 200.00 amount due
+    /// (no "lines are 12.40 more" message).
+    #[test]
+    fn a_negative_imported_line_opens_on_the_expenses_tab() {
+        let json = format!(
+            r#"{{"id":"4b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","txnType":"bill","txnNumber":"B-1",
+            "txnDate":"2026-11-03","status":"posted","basis":"both",
+            "contactId":"3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01","memo":null,"total":"200.0000",
+            "vendorInvoiceNumber":"HF-1","balanceDue":"200.0000",
+            "createdAt":"2199-01-01T00:00:00.000Z","updatedAt":"2026-11-03T10:00:00.120Z",
+            "lines":[{},{},{}]}}"#,
+            line(0, A, "212.4000", "0.0000"),
+            line(1, A, "-12.4000", "0.0000"),
+            line(2, AP, "0.0000", "200.0000"),
+        );
+        let r: cl_api::BillRecord = serde_json::from_str(&json).expect("record");
+        let (mut f, expenses, items) = form_of(&r, &mut RowKeyGen::new(), &mut RowKeyGen::new());
+        let amounts: Vec<Option<Money>> = expenses.used().map(|l| l.amount).collect();
+        let m = |s: &str| Money::parse_wire(s).ok();
+        assert_eq!(amounts, vec![m("212.40"), m("-12.40")]);
+        assert_eq!(items.used().count(), 0);
+        f.expenses = expenses;
+        f.items = items;
+        assert_eq!(f.lines_total(), f.amount_due);
+        assert_eq!(f.amount_due, m("200.00"));
+    }
+}
