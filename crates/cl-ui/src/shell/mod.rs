@@ -1062,6 +1062,16 @@ impl Shell {
             }
             return;
         }
+        // Q-P32u: a transfer file being made blocks Close Company, Restore
+        // and Delete (a shortcut or the palette).
+        if crate::screens::send_to_accountant::transfer_running()
+            && crate::screens::send_to_accountant::BLOCKED_WHILE_SENDING.contains(&id.as_str())
+        {
+            if let Some(ctx) = ctx {
+                self.toast(ctx, "send.busy_tip");
+            }
+            return;
+        }
         // P29: a list the role may only look at takes no changes (New,
         // Make inactive, Merge, Delete); the engine would refuse them.
         if let Some(resource) = target
@@ -2057,6 +2067,7 @@ fn make_any(
             .chain(&crate::screens::P29_SCREENS)
             .chain(&crate::screens::P30_SCREENS)
             .chain(&crate::screens::P31_SCREENS)
+            .chain(&crate::screens::P32_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;

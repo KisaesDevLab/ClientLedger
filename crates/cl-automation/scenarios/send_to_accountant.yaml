@@ -1,0 +1,97 @@
+# Send to My Accountant (P32 D4) against `clientledger --demo`: the check
+# totals preview, a short passphrase refused inline, Make one for me, the
+# payroll-draft prompt (Cancel stops, Discard continues), Save through the
+# Save dialog to the result panel and a Sent before row, the totals in the
+# file differing after a post (Q-P32l), missing files listed in one run,
+# busy, and the IIF link. Synthetic data only; the demo writes placeholder
+# bytes, never an archive.
+name: send_to_accountant
+description: Send to My Accountant preview, passphrase, payroll prompt, save, failures and the IIF link.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: dev.demo_rights_all
+  - command: company.send_to_accountant
+  - wait: {ms: 300}
+  - assert_exists: {role: tab, label: Send to My Accountant}
+  - assert_state: {key: screen.screen, equals: send_to_accountant}
+  - assert_state: {key: screen.preview_loaded, equals: true}
+  - assert_exists: {label: Total assets}
+  - assert_exists: {label: "412,906.33"}
+  - assert_exists: {label_contains: "Hidden accounts"}
+  - assert_exists: {label_contains: "Never passwords"}
+  - assert_exists: {role: button, label: "Save transfer file…"}
+  - assert_no_clipping: {}
+  - screenshot: send-to-accountant
+  # A short passphrase is refused inline; nothing is sent.
+  - click: {role: password_input, label: New passphrase}
+  - type: {text: short}
+  - click: {role: password_input, label: Type it again}
+  - type: {text: short}
+  - click: {role: button, label: "Save transfer file…"}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.error, equals: error.transfer.passphrase_short}
+  - assert_exists: {label_contains: "at least 12 characters"}
+  - screenshot: passphrase-short
+  # Make one for me fills both boxes.
+  - click: {role: button, label: Make one for me}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.generated, equals: true}
+  - assert_state: {key: screen.passphrase_filled, equals: true}
+  # A payroll draft is waiting: the prompt; Cancel stops.
+  - command: dev.transfer_demo_payroll_draft
+  - wait: {ms: 200}
+  - click: {role: button, label: "Save transfer file…"}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.payroll_prompt, equals: true}
+  - assert_exists: {label_contains: "unposted payroll imports first?"}
+  - screenshot: payroll-prompt
+  - click: {role: button, label: Cancel}
+  - wait: {ms: 200}
+  - assert_state: {key: screen.payroll_prompt, equals: false}
+  - assert_state: {key: screen.done, equals: false}
+  # Discard continues to the Save dialog and the result.
+  - command: dev.transfer_demo_post
+  - click: {role: button, label: "Save transfer file…"}
+  - wait: {ms: 200}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/send_to_accountant/Ozark-{theme}.clxfer"]}
+  - click: {role: button, label: Discard and continue}
+  - wait: {ms: 500}
+  - assert_state: {key: screen.done, equals: true}
+  - assert_state: {key: screen.totals_differ, equals: true}
+  - assert_exists: {label: Transfer file saved}
+  - assert_exists: {label_contains: "Your books changed while the file was made"}
+  - assert_exists: {role: button, label: Open folder}
+  - assert_exists: {label: Transfer file}
+  - assert_state: {key: screen.passphrase_filled, equals: false}
+  - screenshot: saved
+  # Missing files are all listed with Open record.
+  - command: dev.transfer_demo_missing_files
+  - click: {role: button, label: Make one for me}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/send_to_accountant/missing-{theme}.clxfer"]}
+  - click: {role: button, label: "Save transfer file…"}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.missing_files, equals: 3}
+  - assert_exists: {label: Receipt-Fuel-0412.pdf}
+  - assert_exists: {label: Kept outside the company folder}
+  - assert_count: {target: {role: button, label: Open record}, count: 3}
+  - screenshot: missing-files
+  # Another backup or restore is running.
+  - command: dev.transfer_demo_busy
+  - click: {role: button, label: Make one for me}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/send_to_accountant/busy-{theme}.clxfer"]}
+  - click: {role: button, label: "Save transfer file…"}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.error, equals: error.company.busy}
+  - assert_exists: {label_contains: "already running"}
+  # The IIF link opens Export IIF File.
+  - click: {role: link, label: Export an IIF file}
+  - wait: {ms: 300}
+  - assert_exists: {role: tab, label: Export IIF File}
+  - command: file.close_window
+  - command: file.close_window
+  - wait: {ms: 200}
+compare:
+  - command: company.send_to_accountant
+  - wait: {ms: 300}
+  - assert_state: {key: screen.preview_loaded, equals: true}

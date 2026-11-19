@@ -166,9 +166,12 @@ mod audit;
 mod auth;
 // P29: sensitive accounts (U-33).
 mod sensitive;
+// P32: Send to My Accountant and the IIF export.
+mod send_to_accountant;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 61] = [
+const TABLES: [&[(&str, &str)]; 62] = [
+    send_to_accountant::ENGLISH,
     audit::ENGLISH,
     auth::ENGLISH,
     sensitive::ENGLISH,

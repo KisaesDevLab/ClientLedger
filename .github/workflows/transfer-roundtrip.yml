@@ -1,0 +1,60 @@
+name: transfer-roundtrip
+
+# P32 (Q-74, Q-P32d): a transfer file made by the desktop imports into the
+# same pinned engine in server mode with every verification total equal,
+# and no secret travels. No secrets are needed: the company and the
+# passphrase are synthetic, and the only network steps are the pinned,
+# hash-verified downloads (PostgreSQL, npm ci for the engine).
+
+on:
+  push:
+    branches: [main, "release/**"]
+  pull_request:
+    paths:
+      - crates/cl-company/src/transfer.rs
+      - engine
+      - .github/workflows/transfer-roundtrip.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CL_OFFLINE_TESTS: "1"
+  CL_PG_REQUIRE: "1"
+
+jobs:
+  roundtrip:
+    name: transfer round trip (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: Swatinem/rust-cache@v2
+      - name: Engine commit
+        id: engine
+        shell: bash
+        run: echo "commit=$(git rev-parse HEAD:engine)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: target/engine/.cache
+          key: engine-ubuntu-22.04-${{ steps.engine.outputs.commit }}-node24
+      - uses: actions/cache@v6
+        with:
+          path: target/pg/.cache
+          key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
+      - name: Fetch pinned PostgreSQL (hash-verified)
+        run: cargo xtask pg-fetch
+      - name: Build the engine executable
+        run: cargo xtask engine
+      - name: Engine dependencies for its test suite
+        working-directory: engine
+        run: npm ci
+      - name: Make, import and compare a transfer file
+        run: cargo xtask transfer-roundtrip

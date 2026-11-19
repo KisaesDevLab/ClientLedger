@@ -87,6 +87,9 @@ pub mod login;
 pub mod my_sign_in;
 pub mod recovery;
 pub mod users;
+// P32: Send to My Accountant and the IIF export.
+pub mod iif_export;
+pub mod send_to_accountant;
 
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
@@ -166,6 +169,10 @@ pub(crate) const P31_SCREENS: [crate::shell::MakeScreen; 3] = [
     system_import::make,
     csv_transactions::make,
 ];
+
+/// P32: Send to My Accountant and Export IIF File.
+pub(crate) const P32_SCREENS: [crate::shell::MakeScreen; 2] =
+    [send_to_accountant::make, iif_export::make];
 
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
 

@@ -24,6 +24,7 @@ mod pg_fetch;
 mod preview;
 mod qa_company;
 mod run;
+mod transfer_roundtrip;
 mod ui_check;
 mod unsafe_check;
 
@@ -75,6 +76,8 @@ usage: cargo xtask <command>
   golden-reports [--bless]
                      golden company reports against the real engine: cross-checks, then compare
                      (or write, --bless) fixtures/golden/reports
+  transfer-roundtrip make a .clxfer on the desktop side, import it with the pinned
+                     engine in server mode, compare totals and scan for secrets (P32)
   qa-company [--out DIR] [--fresh]
                      a seeded synthetic QA company (P29, Q-PRA2i) in target/qa-company,
                      file-based secrets, sign-ins in its git-ignored credentials.txt
@@ -199,6 +202,7 @@ fn main() -> Result<()> {
         Some("keymap-doc") => keymap_doc::keymap_doc(&args[1..]),
         Some("gen-sample") => gen_sample::gen_sample(&args[1..]),
         Some("golden-reports") => golden_reports::golden_reports(&args[1..]),
+        Some("transfer-roundtrip") => transfer_roundtrip::transfer_roundtrip(&args[1..]),
         Some("gen-invoices") => gen_invoices::gen_invoices(&args[1..]),
         Some("docread-accuracy") => docread_accuracy::docread_accuracy(&args[1..]),
         Some("grid-bench") => grid_bench::grid_bench(&args[1..]),
