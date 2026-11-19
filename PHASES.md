@@ -60,6 +60,7 @@ Tier and agent routing: docs/AGENTS.md. Size: S ≈ under a day of agent work, M
 | P33 | LAN multi-user | H | L | P29 |
 | P34 | Backup scheduling, recovery, and data integrity | H | M | P08, P33 |
 | P35 | Packaging | L | L | P00–P34 |
+| P35.1 | QuickBooks Desktop import through the SDK (ADD-08) | H | M | P35, P31 |
 | P36 | Updates and migrations | H | M | P35 |
 | P37 | Hardening | L | L | P35 |
 | P38 | Documentation | L | M | P35 |
@@ -73,7 +74,7 @@ Tier and agent routing: docs/AGENTS.md. Size: S ≈ under a day of agent work, M
 | ADD-01 Document intake, local reading, pop-out viewer | [addenda/ADD-01-document-intake.md](addenda/ADD-01-document-intake.md) | A01–A05 | Active, part of the beta | A01–A04 right after P17 merges, before P18; A05 right after P26; checkpoint PR-A1 after A05 |
 | ADD-03 Report Builder and Memorized Reports | [addenda/ADD-03-report-builder.md](addenda/ADD-03-report-builder.md) | A07–A10 | Active, part of the beta | Right after P28 and PR-6, before P29; mockup approved before A08 |
 | ADD-04 Distribution through winget | [addenda/ADD-04-winget.md](addenda/ADD-04-winget.md) | — (inside P35/P36) | Active, part of the beta | Built with P35/P36; enabled at P39 stage 2 |
-| ADD-08 Import from QuickBooks Desktop through the SDK | [addenda/ADD-08-qbd-sdk-import.md](addenda/ADD-08-qbd-sdk-import.md) | I01–I08, checkpoint PR-I1 | Active, post-beta | At the end of the project, after P48 (Q-366); I04 needs owner review of the engine PRs before I05 |
+| ADD-08 Import from QuickBooks Desktop through the SDK | [addenda/ADD-08-qbd-sdk-import.md](addenda/ADD-08-qbd-sdk-import.md) | P35.1 (I01–I08, checkpoint PR-I1) | Active, part of the beta | Phase P35.1, right after P35 and before P36 (Q-366); I04 needs owner review of the engine PRs before I05 |
 
 ## Critical path and parallel lanes
 

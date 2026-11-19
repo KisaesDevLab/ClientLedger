@@ -1,8 +1,8 @@
 # ADD-08 — Import from QuickBooks Desktop through the SDK
 
-**Status:** Active (added 2026-11-19, during the build) · **Post-beta, at the END of the project** · Phases **I01–I08** · Checkpoint **PR-I1** · Decisions Q-355–Q-367 (was QB-01–QB-13) · Engine requests U-274–U-278 (was ER-QB1–ER-QB5) · Open questions Q-ADD8a–g
+**Status:** Active (added 2026-11-19, during the build) · **Part of the beta: phase P35.1** (after P35, before P36) · Work packages **I01–I08** · Checkpoint **PR-I1** · Decisions Q-355–Q-367 (was QB-01–QB-13) · Engine requests U-274–U-278 (was ER-QB1–ER-QB5) · Open questions Q-ADD8a–g
 
-Owner request, 2026-11-18, with scheduling decided 2026-11-19: "Add this as a phase at the end of the project." (Written first as "ADD-05"; ADD-05 is the community license addendum, so this is ADD-08.)
+Owner request, 2026-11-18; scheduling decided 2026-11-19 (first "at the end of the project", then "Change ADD-08 to P35.1") (Written first as "ADD-05"; ADD-05 is the community license addendum, so this is ADD-08.)
 
 ADD-08 adds Import from QuickBooks Desktop: a new ClientLedger company built from a QuickBooks Desktop company file, with full transaction history, accepted only after it ties to QuickBooks' own reports. QuickBooks itself opens the file and answers queries through its SDK. ClientLedger never parses the file's bytes.
 
@@ -10,10 +10,10 @@ Models: opus for all work; architect plan required for I03, I04, I06 and I07 (Ti
 
 ## When to run it (scheduling rule)
 
-1. **I01–I08 run after P48**, the last post-beta phase, in order. Owner 2026-11-19 (Q-366). This supersedes the source document's default of "after P39, ahead of estimates and sales orders".
+1. **ADD-08 is phase P35.1 on the beta track: it runs right after P35 (Packaging) merges and before P36 (Updates and migrations).** Its work packages I01–I08 keep their IDs and run in order inside P35.1. Owner 2026-11-19 (Q-366). This supersedes the source document's default of "after P39" and the earlier "after P48".
 2. **I04 lands in the engine repo** (`KisaesDevLab/kisaes-gl-engine`) and needs owner review before I05 starts.
 3. **Checkpoint PR-I1** (opus, xhigh) runs right after I08 merges.
-4. Branches `phase/I0x-short-name`; PRs `I0x — <title>`; final commit of the last phase `docs(state): complete I08, next PR-I1`.
+4. Branches `phase/P35.1-qbd-sdk-import` (or `phase/I0x-short-name` per work package); PRs `I0x — <title>`; final commit `docs(state): complete P35.1, next PR-I1`. STATE.md carries one board row for P35.1; the I01–I08 and PR-I1 sub-table is under ADD-08 in Active addenda.
 5. Claude Code cannot run QuickBooks. I01–I03 are built against recorded qbXML fixtures, and each ends with a short manual check on a Windows PC that has QuickBooks installed.
 
 ## Relation to P31
@@ -57,7 +57,7 @@ Thirteen decisions fixed for the build (owner 2026-11-18/19). Q-365 (QB-11) is t
 | Q-363 | QB-09 | Estimates, sales orders and purchase orders are extracted into the package but not imported yet. | Those features come in P40/P41. No second extraction needed later. |
 | Q-364 | QB-10 | No sensitive personal data is requested: no Social Security numbers, no card numbers. Employees arrive as names only. | Nothing to protect that was never read. |
 | Q-365 | QB-11 | The import is free under the Community License, not Pro-gated. | It is how an owner gets their own books in. |
-| Q-366 | QB-12 | The phases run at the end of the project, after P48. | Owner 2026-11-19: "Add this as a phase at the end of the project." Supersedes the source doc's "after P39" default. |
+| Q-366 | QB-12 | The work runs as phase P35.1, right after P35 and before P36, inside the beta. | Owner 2026-11-19: "Change ADD-08 to P35.1". Supersedes the source doc's "after P39" default and the earlier "after P48". |
 | Q-367 | QB-13 | Menu name: Import from QuickBooks Desktop. No Intuit logos. Footer line on the first wizard page: "QuickBooks is a registered trademark of Intuit Inc. ClientLedger is not affiliated with or endorsed by Intuit." | Plain naming of the source product only. |
 
 Cutoff mode (Q-360). One opening journal entry dated the day before the cutoff carries every account except AR, AP and inventory. Open invoices, open bills and an opening inventory adjustment bring those three in, all offset to Opening Balance Equity. The import fails if Opening Balance Equity does not net to zero.
@@ -99,7 +99,7 @@ Rules:
 
 ## Build phases
 
-Eight phases, I01 to I08, run in order after P48; I04 lands in the Kisaes GL Engine repo and needs owner review before I05 starts. A process review (PR-I1) follows I08.
+Eight phases, I01 to I08, run in order inside P35.1; I04 lands in the Kisaes GL Engine repo and needs owner review before I05 starts. A process review (PR-I1) follows I08.
 
 ### I01: SDK connection layer (Tier M)
 
@@ -252,7 +252,7 @@ Each has a default the plan already assumes. Rows are in QUESTIONS.md (Q-ADD8a�
 | ID | Question | Default / answer |
 | --- | --- | --- |
 | Q-ADD8a | Is ADD-08 the next free addendum number? | Answered: ADD-08 (the source's "ADD-05" was taken by the community license addendum). |
-| Q-ADD8b | Where does it run? | Answered, owner 2026-11-19: end of the project, after P48 (Q-366). |
+| Q-ADD8b | Where does it run? | Answered, owner 2026-11-19: phase P35.1, after P35 and before P36, in the beta (Q-366). |
 | Q-ADD8c | Free for everyone, or part of the Pro tools? | Free (Q-365). |
 | Q-ADD8d | Which QuickBooks versions will you have for the manual checks? | Enterprise 24.0 trial plus one older Pro or Premier file. |
 | Q-ADD8e | Are U-274–U-278 acceptable as engine pull requests, given that only the owner merges engine changes? | Yes; per Q-301 engine PRs merge when green. |
@@ -263,5 +263,5 @@ Each has a default the plan already assumes. Rows are in QUESTIONS.md (Q-ADD8a�
 
 - **P31:** unchanged; ADD-08 reuses its capabilities (see Relation to P31).
 - **P40/P41 (estimates, sales orders, POs):** may later read the estimates, sales orders and purchase orders already held in `.clqb` packages (Q-363).
-- **P35/P36 (packaging):** not affected; the extractor ships with I08, after P48.
+- **P35/P36 (packaging):** the extractor is bundled in the Windows installer built in P35, so I08 adds it to the installer components (P35.1 runs right after P35, before P36).
 - **P38 (documentation):** the QuickBooks switcher guide may mention the SDK route once I08 ships.

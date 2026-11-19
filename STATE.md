@@ -53,6 +53,7 @@
 | P33 | LAN multi-user | H | |
 | P34 | Backup scheduling, recovery, and data integrity | H | |
 | P35 | Packaging | L | |
+| P35.1 | QuickBooks Desktop import through the QuickBooks SDK (ADD-08) | H | |
 | P36 | Updates and migrations | H | |
 | P37 | Hardening | L | |
 | P38 | Documentation | L | |
@@ -90,7 +91,7 @@
 **ADD-05 — VibeMyFirm Community License: tiers, keys and Pro gating** (`addenda/ADD-05-community-license.md`; owner request and Q&A 2026-11-06, Q-336–Q-342). **Draft: license texts in `licensing/`; waiting on the engine addendum** (`GET /license`, host signature). Phases L1–L4 inside P35/P36, L5 with P39 (Q-339). Business needs no key (Q-337); replaces PolyForm (Q-336).
 **ADD-06 — MCP bookkeeper moves into the beta** (`addenda/ADD-06-mcp-beta.md`; owner 2026-11-07, Q-345). Phase **A11** (was post-beta P50) runs right after P34, before P35; checkpoint **PR-A3** (process review + security review) right after A11.
 **ADD-07 — The engine moves to its own repository** (`addenda/ADD-07-engine-repo.md`; owner 2026-11-07, Q-346–Q-349). Phase **A12** runs right after P26 (its engine PRs merged first), before A05: split `packages/api` + `packages/shared` with history into `KisaesDevLab/kisaes-gl-engine`; MyBooks Online and ClientLedger pin it as a submodule. **A12 done 2026-11-08.**
-**ADD-08 — Import from QuickBooks Desktop through the SDK** (`addenda/ADD-08-qbd-sdk-import.md`; post-beta; owner request 2026-11-18, scheduling 2026-11-19, Q-355–Q-367, Q-ADD8a–g; engine U-274–U-278). Scheduling: I01–I08 run **after P48**, the end of the project; I04 lands in the engine repo and needs owner review before I05; PR-I1 after I08. A Windows extractor reads QuickBooks through its SDK into a `.clqb` package; the importer creates a new company and ties out to QuickBooks' own reports. Reuses P31's tie-out and batch plumbing (P31 already ships the report-based import).
+**ADD-08 — Import from QuickBooks Desktop through the SDK** (`addenda/ADD-08-qbd-sdk-import.md`; part of the beta as phase P35.1; owner request 2026-11-18, scheduling 2026-11-19, Q-355–Q-367, Q-ADD8a–g; engine U-274–U-278). Scheduling: **P35.1 runs right after P35 and before P36** (owner 2026-11-19, Q-366); work packages I01–I08 run inside it; I04 lands in the engine repo and needs owner review before I05; PR-I1 after I08. A Windows extractor reads QuickBooks through its SDK into a `.clqb` package; the importer creates a new company and ties out to QuickBooks' own reports. Reuses P31's tie-out and batch plumbing (P31 already ships the report-based import).
 
 | Phase | Title | Tier | Status |
 | --- | --- | --- | --- |
