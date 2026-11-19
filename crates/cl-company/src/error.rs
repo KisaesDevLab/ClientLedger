@@ -51,6 +51,15 @@ pub enum CompanyError {
     /// The file is not a `ClientLedger` backup.
     #[error("not a backup file")]
     NotABackup,
+    /// The backup was made by a newer version (a higher archive format
+    /// than [`crate::restore::MAX_FORMAT_VERSION`]): update first.
+    #[error("archive made by a newer version")]
+    ArchiveTooNew,
+    /// A transfer file for the accountant's MyBooks was chosen for Restore
+    /// (Q-P32n): `.clxfer` by extension, or the engine's
+    /// `TRANSFER_NOT_A_BACKUP`.
+    #[error("a transfer file is not a backup")]
+    TransferNotABackup,
     /// The file's hash differs from the one recorded when it was written.
     #[error("backup file changed since it was written")]
     Tampered,
@@ -112,11 +121,23 @@ impl OwnerFacing for CompanyError {
                 "ARCHIVE_TOO_NEW" => {
                     OwnerMessage::with_fix("error.company.too_new", "fix.company.too_new")
                 }
+                "TRANSFER_NOT_A_BACKUP" => OwnerMessage::with_fix(
+                    "error.company.transfer_not_backup",
+                    "fix.company.transfer_not_backup",
+                ),
+                "TENANT_BUSY" => OwnerMessage::with_fix("error.company.busy", "fix.company.busy"),
                 _ => OwnerMessage::with_fix("error.company.job_failed", "fix.api.try_again_soon"),
             },
             CompanyError::NotABackup => {
                 OwnerMessage::with_fix("error.company.not_a_backup", "fix.company.not_a_backup")
             }
+            CompanyError::ArchiveTooNew => {
+                OwnerMessage::with_fix("error.company.too_new", "fix.company.too_new")
+            }
+            CompanyError::TransferNotABackup => OwnerMessage::with_fix(
+                "error.company.transfer_not_backup",
+                "fix.company.transfer_not_backup",
+            ),
             CompanyError::Tampered => {
                 OwnerMessage::with_fix("error.company.tampered", "fix.company.tampered")
             }

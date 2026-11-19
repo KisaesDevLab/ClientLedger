@@ -20,8 +20,23 @@ use crate::zipfile;
 
 /// The archive format the engine writes.
 pub const ARCHIVE_FORMAT: &str = "mybooks-tenant-archive";
-/// The newest format version this app reads.
+/// The newest format version this app reads. Format 2 (engine U-282,
+/// `tenant-archive-v2`) adds only optional parts; this moves to 2 in the
+/// same commit as the engine pin bump past U-282 (P32 R7), never before.
 pub const MAX_FORMAT_VERSION: u64 = 1;
+
+/// The extension of a transfer file for the accountant's MyBooks (P32).
+pub const TRANSFER_EXTENSION: &str = "clxfer";
+
+/// True for a `.clxfer` path (any case): a transfer file, never a backup
+/// (Q-P32n). Checked before anything is read or sent, because the
+/// engine's path check would otherwise answer "not found".
+#[must_use]
+pub fn is_transfer_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case(TRANSFER_EXTENSION))
+}
 
 /// The plaintext envelope of an archive (never names the company).
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
@@ -57,14 +72,22 @@ pub struct ArchiveInfo {
 /// the engine would refuse it too, but this stops before anything is sent.
 ///
 /// # Errors
-/// `Io`; `NotABackup`; `Tampered`.
+/// `TransferNotABackup` for a `.clxfer` (nothing read); `Io`;
+/// `NotABackup`; `ArchiveTooNew` for a format newer than
+/// [`MAX_FORMAT_VERSION`]; `Tampered`.
 pub fn inspect_archive(path: &Path, list: &RecentCompanies) -> Result<ArchiveInfo, CompanyError> {
+    if is_transfer_file(path) {
+        return Err(CompanyError::TransferNotABackup);
+    }
     let bytes = zipfile::read_entry(path, "envelope.json")
         .map_err(CompanyError::io("read archive"))?
         .ok_or(CompanyError::NotABackup)?;
     let env: Envelope = serde_json::from_slice(&bytes).map_err(|_| CompanyError::NotABackup)?;
-    if env.format != ARCHIVE_FORMAT || env.format_version > MAX_FORMAT_VERSION {
+    if env.format != ARCHIVE_FORMAT || env.format_version == 0 {
         return Err(CompanyError::NotABackup);
+    }
+    if env.format_version > MAX_FORMAT_VERSION {
+        return Err(CompanyError::ArchiveTooNew);
     }
     if !zipfile::has_entry(path, "manifest.json.enc").map_err(CompanyError::io("read archive"))? {
         return Err(CompanyError::NotABackup);
@@ -631,22 +654,67 @@ mod tests {
             inspect_archive(&wrong, &list).expect_err("format"),
             CompanyError::NotABackup
         ));
-        let newer = dir.path().join("n.clbackup");
+    }
+
+    fn envelope_with(dir: &Path, name: &str, version: u64) -> PathBuf {
+        let p = dir.join(name);
+        let env = format!(
+            r#"{{"format":"mybooks-tenant-archive","formatVersion":{version},"archiveId":"a{version}"}}"#
+        );
         zipfile::write_stored(
-            &newer,
+            &p,
             &[
-                (
-                    "envelope.json".into(),
-                    br#"{"format":"mybooks-tenant-archive","formatVersion":2,"archiveId":"a"}"#
-                        .to_vec(),
-                ),
+                ("envelope.json".into(), env.into_bytes()),
                 ("manifest.json.enc".into(), b"x".to_vec()),
             ],
         )
         .expect("zip");
+        p
+    }
+
+    /// Q-P32g / R7: every format up to [`MAX_FORMAT_VERSION`] is read; the
+    /// next one gets "made by a newer version", never "not a backup".
+    #[test]
+    fn formats_up_to_the_newest_known_are_read_and_newer_ones_say_update() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let list = RecentCompanies::default();
+        for v in 1..=MAX_FORMAT_VERSION {
+            let p = envelope_with(dir.path(), &format!("v{v}.clbackup"), v);
+            assert_eq!(inspect_archive(&p, &list).expect("read").format_version, v);
+        }
+        let newer = envelope_with(dir.path(), "n.clbackup", MAX_FORMAT_VERSION + 1);
+        let e = inspect_archive(&newer, &list).expect_err("version");
+        assert!(matches!(e, CompanyError::ArchiveTooNew), "{e:?}");
+        use cl_core::OwnerFacing as _;
+        assert_eq!(e.owner_message().key, "error.company.too_new");
+        let zero = envelope_with(dir.path(), "z.clbackup", 0);
         assert!(matches!(
-            inspect_archive(&newer, &list).expect_err("version"),
+            inspect_archive(&zero, &list).expect_err("zero"),
             CompanyError::NotABackup
         ));
+    }
+
+    /// Q-P32n: a transfer file is refused by its extension before it is
+    /// read, whatever it holds.
+    #[test]
+    fn a_transfer_file_is_refused_by_extension() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let list = RecentCompanies::default();
+        for name in ["t.clxfer", "t.CLXFER"] {
+            let p = envelope_with(dir.path(), name, 1);
+            let e = inspect_archive(&p, &list).expect_err("transfer");
+            assert!(matches!(e, CompanyError::TransferNotABackup), "{e:?}");
+        }
+        assert!(!is_transfer_file(Path::new("a.clbackup")));
+        assert!(!is_transfer_file(Path::new("clxfer")));
+        use cl_core::OwnerFacing as _;
+        assert_eq!(
+            CompanyError::JobFailed {
+                code: "TRANSFER_NOT_A_BACKUP".into()
+            }
+            .owner_message()
+            .key,
+            CompanyError::TransferNotABackup.owner_message().key
+        );
     }
 }
