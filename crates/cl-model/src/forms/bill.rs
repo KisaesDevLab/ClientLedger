@@ -559,8 +559,10 @@ pub enum BillProblem {
     },
     /// A used line has no account.
     LineAccountMissing(RowKey),
-    /// A used line's amount is blank, zero or less.
-    LineAmountNotPositive(RowKey),
+    /// A used line's amount is blank or zero. A negative line (a discount
+    /// or credit) is allowed as long as the bill total is above zero
+    /// (Q-P31ae).
+    LineAmountMissing(RowKey),
     /// A billable line has no customer.
     BillableNeedsCustomer(RowKey),
     /// A line has a customer, billable or (on a credit) a tag, which needs
@@ -603,9 +605,7 @@ impl BillProblem {
             BillProblem::LinesTotalTooLarge => TextKey("bill.problem.lines_total_too_large"),
             BillProblem::LinesDisagree { .. } => TextKey("bill.problem.lines_disagree"),
             BillProblem::LineAccountMissing(_) => TextKey("bill.problem.line_account_missing"),
-            BillProblem::LineAmountNotPositive(_) => {
-                TextKey("bill.problem.line_amount_not_positive")
-            }
+            BillProblem::LineAmountMissing(_) => TextKey("bill.problem.line_amount_missing"),
             BillProblem::BillableNeedsCustomer(_) => {
                 TextKey("bill.problem.billable_needs_customer")
             }
@@ -639,7 +639,7 @@ impl BillProblem {
             | BillProblem::LinesDisagree { .. } => BillField::Lines,
             BillProblem::ItemsNeedUpdate => BillField::Items,
             BillProblem::LineAccountMissing(k) => BillField::LineAccount(k),
-            BillProblem::LineAmountNotPositive(k) | BillProblem::ItemAmountTooLarge(k) => {
+            BillProblem::LineAmountMissing(k) | BillProblem::ItemAmountTooLarge(k) => {
                 BillField::LineAmount(k)
             }
             BillProblem::BillableNeedsCustomer(k) | BillProblem::LineDetailNeedsUpdate(k) => {
@@ -806,8 +806,10 @@ fn check_items(
             (None, Some(_)) => Err(BillProblem::ItemRateNeedsQty(k)),
             (Some(q), _) if !q.is_positive() => Err(BillProblem::ItemQtyNotPositive(k)),
             _ => match l.line_amount() {
-                Ok(Some(a)) if a.is_positive() => Ok(a),
-                Ok(_) => Err(BillProblem::LineAmountNotPositive(k)),
+                // Q-P31ae: a typed negative amount (no cost) is a discount
+                // or credit; qty × cost itself is never below zero.
+                Ok(Some(a)) if !a.is_zero() => Ok(a),
+                Ok(_) => Err(BillProblem::LineAmountMissing(k)),
                 Err(ItemAmountError::QuantityNotPositive) => {
                     Err(BillProblem::ItemQtyNotPositive(k))
                 }
@@ -856,12 +858,14 @@ fn check_expenses(
 ) -> Vec<PostingLine> {
     let mut out = Vec::new();
     for l in form.expenses.used() {
-        let amount = l.amount.filter(|m| m.is_positive());
+        // Q-P31ae: negative lines (discounts, credits) are allowed; the
+        // total is checked in `check`.
+        let amount = l.amount.filter(|m| !m.is_zero());
         if l.account.is_none() {
             problems.push(BillProblem::LineAccountMissing(l.key));
         }
         if amount.is_none() {
-            problems.push(BillProblem::LineAmountNotPositive(l.key));
+            problems.push(BillProblem::LineAmountMissing(l.key));
         }
         let credit = form.kind == BillKind::Credit;
         // A credit line is never billable (process review S2: dropped).
@@ -944,6 +948,10 @@ pub fn check(form: &BillForm, ctx: &BillContext<'_>) -> Result<CheckedBill, Vec<
     match amount {
         None if used == 0 => problems.push(BillProblem::AmountMissing),
         Some(m) if !m.is_positive() => problems.push(BillProblem::AmountNotPositive),
+        // Lines with negatives that add up to zero or less (Q-P31ae).
+        None if total.is_some_and(|t| !t.is_positive()) => {
+            problems.push(BillProblem::AmountNotPositive);
+        }
         _ => {}
     }
     if used == 0 {

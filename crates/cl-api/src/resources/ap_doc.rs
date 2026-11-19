@@ -344,7 +344,9 @@ pub(crate) fn check_doc(p: &DocParts<'_>, caps: &Capabilities) -> Result<(), Api
     if p.lines.len() > MAX_LINES {
         return local(LocalValidation::TooManyLines);
     }
-    if p.lines.iter().any(|l| !l.amount.is_positive()) || !p.amount.is_positive() {
+    // Q-P31ae: a line may be negative (a discount or credit, as the engine
+    // takes); a zero line and a total of zero or less are refused.
+    if p.lines.iter().any(|l| l.amount.is_zero()) || !p.amount.is_positive() {
         return local(LocalValidation::NonPositiveAmount);
     }
     for l in p.lines {

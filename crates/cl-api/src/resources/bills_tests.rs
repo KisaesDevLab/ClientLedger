@@ -495,6 +495,11 @@ async fn local_rules_refuse_before_sending() {
     let mut d = draft();
     d.lines[1].amount = Money::ZERO;
     assert_eq!(refused(d).await, LocalValidation::NonPositiveAmount);
+    // Q-P31ae: a negative line is fine, a total of zero or less is not.
+    let mut d = draft();
+    d.lines[1].amount = d.lines[0].amount.checked_neg().expect("neg");
+    d.amount_due = Money::ZERO;
+    assert_eq!(refused(d).await, LocalValidation::NonPositiveAmount);
     let mut d = draft();
     d.vendor_invoice_number = Some("x".repeat(101));
     assert_eq!(refused(d).await, LocalValidation::InvalidValue);
