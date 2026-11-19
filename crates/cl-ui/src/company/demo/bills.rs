@@ -342,7 +342,16 @@ fn save(
     let total = Money::sum(doc.lines.iter().map(|l| l.amount)).map_err(|_| invalid())?;
     if doc.lines.is_empty()
         || total != doc.amount
-        || doc.lines.iter().any(|l| !l.amount.is_positive())
+        || !total.is_positive()
+        // Q-P31ae: negative lines (discounts, credits) post as the engine
+        // posts them; a zero line is refused.
+        || doc.lines.iter().any(|l| l.amount.is_zero())
+        // Q-P31af: no negative line with a quantity (the desktop refuses
+        // it before sending).
+        || doc
+            .lines
+            .iter()
+            .any(|l| l.amount.is_negative() && l.quantity.is_some())
     {
         return Err(invalid());
     }
@@ -373,10 +382,22 @@ fn save(
     let mut lines: Vec<DemoLine> = doc
         .lines
         .iter()
-        .map(|l| DemoLine {
+        .map(|l| {
+            // The demo ledger keeps one side above zero, so a negative
+            // line (Q-P31ae) sits on the other side; `get` reads it back
+            // as the negative amount the engine would return.
+            let (debit, credit) = match (doc.credit, l.amount.is_negative()) {
+                (false, false) => (l.amount, Money::ZERO),
+                (false, true) => (Money::ZERO, l.amount.abs()),
+                (true, false) => (Money::ZERO, l.amount),
+                (true, true) => (l.amount.abs(), Money::ZERO),
+            };
+            (l, debit, credit)
+        })
+        .map(|(l, debit, credit)| DemoLine {
             account: l.account,
-            debit: if doc.credit { Money::ZERO } else { l.amount },
-            credit: if doc.credit { l.amount } else { Money::ZERO },
+            debit,
+            credit,
             memo: l
                 .description
                 .clone()
@@ -768,7 +789,15 @@ pub fn get(state: &mut DemoState, id: TransactionId) -> Option<Versioned<BillRec
         .iter()
         .map(|l| BillRecordLine {
             account: l.account_id,
-            amount: if credit { l.credit } else { l.debit },
+            // Document side minus the other side: a negative line
+            // (Q-P31ae) is stored on the other side (see `save`). Both are
+            // in the money range, so the difference is too; the fallback
+            // is never taken.
+            amount: if credit {
+                l.credit.checked_sub(l.debit).unwrap_or(l.credit)
+            } else {
+                l.debit.checked_sub(l.credit).unwrap_or(l.debit)
+            },
             description: l.description.clone(),
             tag: l.tag_id,
             customer: None,

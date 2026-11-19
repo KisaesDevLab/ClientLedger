@@ -883,6 +883,15 @@ fn main() -> std::process::ExitCode {
             "bills::expense_bill_posts_to_ap_live",
             contract_bills::expense_bill_posts_to_ap_live,
         ),
+        // P31 follow-up (Q-P31ae): negative lines, positive total.
+        (
+            "bills::negative_bill_line_posts_the_net_live",
+            contract_bills::negative_bill_line_posts_the_net_live,
+        ),
+        (
+            "bills::negative_vendor_credit_line_posts_the_net_live",
+            contract_bills::negative_vendor_credit_line_posts_the_net_live,
+        ),
         (
             "bills::vendor_summary_moves_by_the_total_live",
             contract_bills::vendor_summary_moves_by_the_total_live,
