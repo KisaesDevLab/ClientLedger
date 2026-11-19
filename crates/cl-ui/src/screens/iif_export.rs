@@ -245,6 +245,38 @@ pub fn type_text(txn_type: &str) -> String {
     }
 }
 
+/// "3 accounts, 1 client, …" with each count in its own plural.
+#[must_use]
+pub fn counts_text(c: cl_company::iif::Counts) -> String {
+    let one = |key: &str, n: u64| {
+        crate::i18n::t_count(key, usize::try_from(n).unwrap_or(usize::MAX), &[])
+    };
+    [
+        one("iif.count.accounts", c.accounts),
+        one("iif.count.clients", c.clients),
+        one("iif.count.vendors", c.vendors),
+        one("iif.count.items", c.items),
+        one("iif.count.transactions", c.transactions),
+    ]
+    .join(", ")
+}
+
+/// `path` without `.` and `..` parts, as the owner reads it.
+fn tidy(path: &std::path::Path) -> String {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out.display().to_string()
+}
+
 /// Plain words for a limitation.
 #[must_use]
 pub fn limitation_text(l: &Limitation) -> String {
@@ -282,7 +314,7 @@ impl Screen for IifScreen {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                form::heading(ui, &tokens, &t("iif.title"));
+                form::heading(ui, &tokens, &t("cmd.file.export_iif"));
                 form::hint(ui, &tokens, &t("iif.purpose"));
                 form::inline_warning(ui, &tokens, &t("iif.backup_advice"));
                 form::inline_warning(ui, &tokens, &t("iif.plaintext"));
@@ -299,6 +331,8 @@ impl Screen for IifScreen {
                             form::date_field(ui, &t("iif.range.from"), &mut self.from, self.today);
                             form::date_field(ui, &t("iif.range.to"), &mut self.to, self.today);
                         }
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(t("iif.include")).strong());
                         ui.checkbox(&mut self.lists, t("iif.lists"));
                         ui.checkbox(&mut self.transactions, t("iif.transactions"));
                     });
@@ -314,14 +348,18 @@ impl Screen for IifScreen {
                         if ui.button(t("iif.cancel")).clicked() {
                             self.cancel.store(true, Ordering::SeqCst);
                         }
-                    } else if ui
-                        .add_enabled(
-                            self.sees_hidden() && (self.lists || self.transactions),
-                            egui::Button::new(RichText::new(t("iif.save")).strong()),
-                        )
-                        .clicked()
-                    {
-                        save = true;
+                    } else {
+                        ui.horizontal(|ui| {
+                            ui.add_enabled_ui(
+                                self.sees_hidden() && (self.lists || self.transactions),
+                                |ui| {
+                                    if crate::widgets::primary_button(ui, &t("iif.save")).clicked()
+                                    {
+                                        save = true;
+                                    }
+                                },
+                            );
+                        });
                     }
                 });
                 if let Some(e) = &self.error {
@@ -363,28 +401,19 @@ impl Screen for IifScreen {
                     ui.add_space(6.0);
                     form::card(ui, &tokens, |ui| {
                         ui.label(
-                            RichText::new(t_with(
-                                "iif.done",
-                                &[("path", &o.path.display().to_string())],
-                            ))
-                            .strong(),
+                            RichText::new(t_with("iif.done", &[("path", &tidy(&o.path))])).strong(),
                         );
-                        let c = o.counts;
-                        ui.label(t_with(
-                            "iif.done.counts",
-                            &[
-                                ("accounts", &count_text(c.accounts)),
-                                ("clients", &count_text(c.clients)),
-                                ("vendors", &count_text(c.vendors)),
-                                ("items", &count_text(c.items)),
-                                ("transactions", &count_text(c.transactions)),
-                            ],
-                        ));
+                        ui.label(counts_text(o.counts));
                         ui.add_space(4.0);
                         ui.label(RichText::new(t("iif.limits")).strong());
-                        ui.label(t("iif.limit.always"));
+                        ui.add(
+                            egui::Label::new(format!("\u{2022} {}", t("iif.limit.always"))).wrap(),
+                        )
+                        .on_hover_text(t("iif.limit.cash_tip"));
                         for l in &o.limitations {
-                            ui.label(format!("\u{2022} {}", limitation_text(l)));
+                            ui.add(
+                                egui::Label::new(format!("\u{2022} {}", limitation_text(l))).wrap(),
+                            );
                         }
                     });
                 }
@@ -453,6 +482,17 @@ mod tests {
         for l in &o.limitations {
             assert!(!limitation_text(l).starts_with("iif."), "{l:?}");
         }
+        assert_eq!(
+            counts_text(cl_company::iif::Counts {
+                accounts: 5,
+                clients: 1,
+                vendors: 1,
+                items: 0,
+                transactions: 2,
+                lines: 4,
+            }),
+            "5 accounts, 1 client, 1 vendor, 0 items, 2 transactions"
+        );
         for k in [
             "iif.purpose",
             "iif.backup_advice",

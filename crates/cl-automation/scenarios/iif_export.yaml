@@ -19,6 +19,15 @@ steps:
   - assert_exists: {role: check_box, label: All dates}
   - assert_no_clipping: {}
   - screenshot: iif-export
+  - resize: {width: 960, height: 640}
+  - wait: {ms: 300}
+  # The tab strip and the scroll body's lower edge cut by design.
+  - assert_no_clipping:
+      ignore:
+        - {x: -4000, y: 0, width: 8480, height: 120}
+        - {x: -4000, y: 560, width: 8480, height: 200}
+  - resize: {width: 1280, height: 860}
+  - wait: {ms: 200}
   # An unbalanced entry: the stop list, nothing written.
   - command: dev.iif_demo_unbalanced
   - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/iif_export/stopped-{theme}.iif"]}
@@ -36,7 +45,8 @@ steps:
   - assert_state: {key: screen.done, equals: true}
   - assert_state: {key: screen.transactions, equals: 2}
   - assert_exists: {label: What the file can't carry}
-  - assert_exists: {label_contains: "couldn't be checked against Intuit"}
+  - assert_exists: {label_contains: "1 client, 1 vendor"}
+  - assert_exists: {label_contains: "couldn't be checked against QuickBooks"}
   - screenshot: saved
   - command: file.close_window
   - wait: {ms: 200}

@@ -184,9 +184,9 @@ fn items(
         if let Some(s) = row.shortcut {
             button = button.shortcut_text(s);
         }
-        // Q-P32u: no Close, Restore or Delete while a transfer file is made.
-        let blocked = crate::screens::send_to_accountant::transfer_running()
-            && crate::screens::send_to_accountant::BLOCKED_WHILE_SENDING.contains(&row.id.as_str());
+        // Q-P32u: nothing that closes or replaces the company (or the app)
+        // while a transfer file is made.
+        let blocked = crate::screens::send_to_accountant::blocked_now(row.id.as_str());
         let r = ui
             .add_enabled(!blocked, button)
             .on_disabled_hover_text(crate::i18n::t("send.busy_tip"));

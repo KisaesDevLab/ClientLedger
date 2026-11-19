@@ -51,16 +51,57 @@ use crate::windows::Screen;
 /// The window kind.
 pub const KIND: &str = "company.send_to_accountant";
 
-/// The commands a running transfer blocks (Q-P32u).
-pub const BLOCKED_WHILE_SENDING: [&str; 3] =
-    ["file.close_company", "file.restore", "file.delete_company"];
+/// The commands a running transfer blocks (Q-P32u; P32 UI S1): everything
+/// that closes or replaces the open company, or the app.
+pub const BLOCKED_WHILE_SENDING: [&str; 8] = [
+    "file.close_company",
+    "file.restore",
+    "file.delete_company",
+    "file.sign_out",
+    "file.open_company",
+    "file.new_company",
+    "file.open_practice",
+    "file.quit",
+];
 
+/// True when `id` must wait for a running transfer.
+#[must_use]
+pub fn blocked_now(id: &str) -> bool {
+    transfer_running() && BLOCKED_WHILE_SENDING.contains(&id)
+}
+
+#[cfg(not(test))]
 static RUNNING: AtomicUsize = AtomicUsize::new(0);
+
+// Unit tests run in parallel threads: each test thread counts its own
+// transfers, so a held transfer never blocks another test's Quit.
+#[cfg(test)]
+thread_local! {
+    static RUNNING: AtomicUsize = const { AtomicUsize::new(0) };
+}
+
+fn running_add(delta: isize) {
+    #[cfg(not(test))]
+    let apply = |f: &dyn Fn(&AtomicUsize)| f(&RUNNING);
+    #[cfg(test)]
+    let apply = |f: &dyn Fn(&AtomicUsize)| RUNNING.with(|r| f(r));
+    apply(&|r| {
+        if delta > 0 {
+            r.fetch_add(1, Ordering::SeqCst);
+        } else {
+            r.fetch_sub(1, Ordering::SeqCst);
+        }
+    });
+}
 
 /// True while a transfer file is being made (any window).
 #[must_use]
 pub fn transfer_running() -> bool {
-    RUNNING.load(Ordering::SeqCst) > 0
+    #[cfg(not(test))]
+    let n = RUNNING.load(Ordering::SeqCst);
+    #[cfg(test)]
+    let n = RUNNING.with(|r| r.load(Ordering::SeqCst));
+    n > 0
 }
 
 /// Counts a running transfer for as long as it lives.
@@ -68,14 +109,14 @@ struct Sending;
 
 impl Sending {
     fn start() -> Sending {
-        RUNNING.fetch_add(1, Ordering::SeqCst);
+        running_add(1);
         Sending
     }
 }
 
 impl Drop for Sending {
     fn drop(&mut self) {
-        RUNNING.fetch_sub(1, Ordering::SeqCst);
+        running_add(-1);
     }
 }
 
@@ -115,9 +156,17 @@ pub struct SendScreen {
     file_name: String,
     passphrase: SecretText,
     again: SecretText,
-    /// A passphrase made by "Make one for me", shown so it can be read
-    /// out (never in `state()`).
+    /// A passphrase made by "Make one for me" (never in `state()`).
     generated: bool,
+    /// The generated passphrase is shown (Q-P32w: hidden by default; Copy
+    /// covers sharing).
+    show_generated: bool,
+    /// The result or the missing-file list just arrived: scroll to it.
+    scroll_result: bool,
+    /// A demo transfer held open by `dev.transfer_demo_hold` (scenarios
+    /// check what a running transfer blocks).
+    held: Option<(TransferRequest, Option<cl_core::Secret>, Sending)>,
+    hold_next: bool,
     backup_needed: bool,
     backup_ask: crate::widgets::passphrase::PassphraseAsk,
     ask: Ask,
@@ -167,6 +216,10 @@ impl SendScreen {
             passphrase: SecretText::default(),
             again: SecretText::default(),
             generated: false,
+            show_generated: false,
+            scroll_result: false,
+            held: None,
+            hold_next: false,
             backup_needed,
             backup_ask: crate::widgets::passphrase::PassphraseAsk::default(),
             ask: Ask::None,
@@ -264,6 +317,7 @@ impl SendScreen {
                 Ok(o) => {
                     tracing::info!("transfer file saved");
                     self.outcome = Some(o);
+                    self.scroll_result = true;
                     self.clear_secrets();
                     self.payroll_agreed = false;
                     self.load_history();
@@ -277,6 +331,7 @@ impl SendScreen {
                 }
                 Err(e) => {
                     tracing::warn!(detail = %cl_core::OwnerFacing::scrubbed_detail(&e), "transfer refused");
+                    self.scroll_result = matches!(e, TransferError::MissingFiles(_));
                     self.error = Some(e);
                 }
             }
@@ -287,6 +342,7 @@ impl SendScreen {
         self.passphrase.clear();
         self.again.clear();
         self.generated = false;
+        self.show_generated = false;
     }
 
     /// "Make one for me": both boxes filled.
@@ -296,6 +352,7 @@ impl SendScreen {
                 self.passphrase = SecretText::from(p.expose());
                 self.again = SecretText::from(p.expose());
                 self.generated = true;
+                self.show_generated = false;
                 self.error = None;
             }
             Err(e) => self.error = Some(e),
@@ -389,10 +446,18 @@ impl SendScreen {
                 .get(cl_settings::secrets::BACKUP_PASSPHRASE)
                 .ok()
                 .flatten();
-            let demo = self
-                .link
-                .demo_state()
-                .map(|mut d| crate::company::demo::transfer::make(&mut d, &req, backup.as_ref()));
+            let demo = if self.hold_next {
+                None
+            } else {
+                self.link.demo_state().map(|mut d| {
+                    crate::company::demo::transfer::make(&mut d, &req, backup.as_ref())
+                })
+            };
+            if self.hold_next {
+                self.hold_next = false;
+                self.held = Some((req, backup, Sending::start()));
+                return;
+            }
             if let Some(r) = demo {
                 self.task = Some(Task::ready(r));
                 self.poll();
@@ -490,12 +555,41 @@ impl Screen for SendScreen {
 
     fn command(&mut self, id: CommandId) -> bool {
         use crate::company::demo::transfer::DemoTransferFailure as F;
+        if !self.link.is_demo() {
+            return false;
+        }
+        match id.as_str() {
+            "dev.transfer_demo_hold" => {
+                self.hold_next = true;
+                return true;
+            }
+            "dev.transfer_demo_release" => {
+                let Some((req, backup, sending)) = self.held.take() else {
+                    return false;
+                };
+                let r = self.link.demo_state().map(|mut d| {
+                    crate::company::demo::transfer::make(&mut d, &req, backup.as_ref())
+                });
+                drop(sending);
+                if let Some(r) = r {
+                    self.task = Some(Task::ready(r));
+                    self.poll();
+                }
+                return true;
+            }
+            "dev.transfer_demo_ask_backup_passphrase" => {
+                self.backup_needed = true;
+                return true;
+            }
+            _ => {}
+        }
         let handled = self.link.demo_state().is_some_and(|mut d| {
             match id.as_str() {
                 "dev.transfer_demo_busy" => d.transfer.fail_next = F::Busy,
                 "dev.transfer_demo_missing_files" => d.transfer.fail_next = F::MissingFiles,
                 "dev.transfer_demo_post" => d.transfer.posted_since_preview = true,
                 "dev.transfer_demo_payroll_draft" => d.transfer.payroll_drafts += 1,
+                "dev.transfer_demo_waiting_documents" => d.transfer.waiting_documents = 3,
                 _ => return false,
             }
             true
@@ -523,7 +617,8 @@ impl Screen for SendScreen {
             "backup_passphrase_needed": self.backup_needed,
             "passphrase_filled": !self.passphrase.is_empty(),
             "generated": self.generated,
-            "running": self.task.is_some(),
+            "shown": self.show_generated,
+            "running": self.task.is_some() || self.held.is_some(),
             "done": self.outcome.is_some(),
             "totals_differ": self.totals_differ(),
             "error": self.error_key(),

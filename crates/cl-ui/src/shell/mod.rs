@@ -1064,9 +1064,7 @@ impl Shell {
         }
         // Q-P32u: a transfer file being made blocks Close Company, Restore
         // and Delete (a shortcut or the palette).
-        if crate::screens::send_to_accountant::transfer_running()
-            && crate::screens::send_to_accountant::BLOCKED_WHILE_SENDING.contains(&id.as_str())
-        {
+        if crate::screens::send_to_accountant::blocked_now(id.as_str()) {
             if let Some(ctx) = ctx {
                 self.toast(ctx, "send.busy_tip");
             }
@@ -1251,6 +1249,13 @@ impl Shell {
     }
 
     fn request_quit(&mut self, ctx: Option<&Context>) {
+        // Q-P32u: the window's close button waits for a transfer too.
+        if crate::screens::send_to_accountant::blocked_now("file.quit") {
+            if let Some(ctx) = ctx {
+                self.toast(ctx, "send.busy_tip");
+            }
+            return;
+        }
         if self.windows.begin_quit() == QuitProgress::Ready {
             self.finish_quit(ctx);
         }

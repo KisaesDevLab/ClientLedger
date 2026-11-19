@@ -1,18 +1,47 @@
 //! Drawing Send to My Accountant (layout of `SendToAccountant.html`).
+//!
+//! Two columns from [`WIDE`] points of room, else one column in the
+//! mockup's order: what's included, check totals, the file card (with the
+//! result right under Save), then Sent before (P32 UI B1, S2).
 
 use cl_api::VerificationTotals;
 use cl_company::transfer::TransferError;
 use cl_core::report::display_amount;
 use cl_core::{Money, MoneyStyle};
-use eframe::egui::{self, RichText, Ui};
+use eframe::egui::{self, Align, RichText, Ui};
 
 use super::{Ask, SendScreen};
-use crate::i18n::{count_text, t, t_with};
+use crate::i18n::{count_text, t, t_count};
 use crate::screens::company::form;
 use crate::theme::Tokens;
 
+/// The room two columns need.
+pub(super) const WIDE: f32 = 1100.0;
+
 fn amount(m: Money) -> String {
     display_amount(m.as_decimal(), MoneyStyle::default())
+}
+
+/// Right-aligned amounts: monospace text padded to the widest (S5).
+fn right_aligned(values: &[String]) -> Vec<String> {
+    let w = values.iter().map(|v| v.chars().count()).max().unwrap_or(0);
+    values.iter().map(|v| format!("{v:>w$}")).collect()
+}
+
+/// `path` without `.` and `..` parts, as the owner reads it (M2).
+fn tidy(path: &std::path::Path) -> String {
+    use std::path::Component;
+    let mut out = std::path::PathBuf::new();
+    for c in path.components() {
+        match c {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                out.pop();
+            }
+            other => out.push(other),
+        }
+    }
+    out.display().to_string()
 }
 
 /// What a draw asked for, run after the frame's borrows end.
@@ -42,17 +71,27 @@ pub(super) fn screen(s: &mut SendScreen, ui: &mut Ui) {
             if !s.supported() {
                 form::inline_warning(ui, &tokens, &t("send.unsupported"));
             }
-            steps(ui, &tokens);
+            let wide = ui.available_width() >= WIDE;
+            steps(ui, &tokens, wide);
             ui.add_space(10.0);
-            ui.columns(2, |cols| {
-                included(s, &mut cols[0], &tokens);
-                cols[0].add_space(10.0);
-                history(s, &mut cols[0], &tokens);
-                totals(s, &mut cols[1], &tokens);
-                cols[1].add_space(10.0);
-                file_card(s, &mut cols[1], &tokens, &mut act);
-            });
-            result(s, ui, &tokens, &mut act);
+            if wide {
+                ui.columns(2, |cols| {
+                    included(s, &mut cols[0], &tokens);
+                    cols[0].add_space(10.0);
+                    history(s, &mut cols[0], &tokens);
+                    totals(s, &mut cols[1], &tokens, true);
+                    cols[1].add_space(10.0);
+                    file_card(s, &mut cols[1], &tokens, &mut act);
+                });
+            } else {
+                included(s, ui, &tokens);
+                ui.add_space(10.0);
+                totals(s, ui, &tokens, false);
+                ui.add_space(10.0);
+                file_card(s, ui, &tokens, &mut act);
+                ui.add_space(10.0);
+                history(s, ui, &tokens);
+            }
         });
     let ctx = ui.ctx().clone();
     match act {
@@ -71,7 +110,7 @@ pub(super) fn screen(s: &mut SendScreen, ui: &mut Ui) {
             {
                 ctx.open_url(egui::OpenUrl::new_tab(format!(
                     "file:///{}",
-                    dir.display().to_string().replace('\\', "/")
+                    tidy(&dir).replace('\\', "/")
                 )));
             }
         }
@@ -81,26 +120,52 @@ pub(super) fn screen(s: &mut SendScreen, ui: &mut Ui) {
     }
 }
 
-fn steps(ui: &mut Ui, tokens: &Tokens) {
-    ui.columns(3, |cols| {
-        for (i, (title, sub)) in [
-            ("send.step1", "send.step1.sub"),
-            ("send.step2", "send.step2.sub"),
-            ("send.step3", "send.step3.sub"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            form::card_tight(&mut cols[i], tokens, |ui| {
-                ui.label(
-                    RichText::new(format!("{}  {}", i + 1, t(title)))
-                        .strong()
-                        .color(tokens.text_primary),
-                );
-                ui.label(RichText::new(t(sub)).color(tokens.text_secondary));
+/// A numbered accent badge (the mockup's step marker, M1).
+fn badge(ui: &mut Ui, tokens: &Tokens, n: usize) {
+    let size = 22.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(size, size), egui::Sense::hover());
+    ui.painter()
+        .circle_filled(rect.center(), size / 2.0, tokens.accent);
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        n.to_string(),
+        egui::FontId::proportional(13.0),
+        tokens.on_accent,
+    );
+}
+
+fn step(ui: &mut Ui, tokens: &Tokens, i: usize, title: &str, sub: &str) {
+    form::card_tight(ui, tokens, |ui| {
+        ui.horizontal(|ui| {
+            badge(ui, tokens, i + 1);
+            ui.vertical(|ui| {
+                ui.label(RichText::new(t(title)).strong().color(tokens.text_primary));
+                ui.add(egui::Label::new(RichText::new(t(sub)).color(tokens.text_secondary)).wrap());
             });
-        }
+        });
     });
+}
+
+const STEPS: [(&str, &str); 3] = [
+    ("send.step1", "send.step1.sub"),
+    ("send.step2", "send.step2.sub"),
+    ("send.step3", "send.step3.sub"),
+];
+
+fn steps(ui: &mut Ui, tokens: &Tokens, wide: bool) {
+    if wide {
+        ui.columns(3, |cols| {
+            for (i, (title, sub)) in STEPS.into_iter().enumerate() {
+                step(&mut cols[i], tokens, i, title, sub);
+            }
+        });
+    } else {
+        for (i, (title, sub)) in STEPS.into_iter().enumerate() {
+            step(ui, tokens, i, title, sub);
+            ui.add_space(4.0);
+        }
+    }
 }
 
 fn included(s: &SendScreen, ui: &mut Ui, tokens: &Tokens) {
@@ -109,11 +174,19 @@ fn included(s: &SendScreen, ui: &mut Ui, tokens: &Tokens) {
         ui.spacing_mut().interact_size.y = 16.0;
         ui.label(RichText::new(t("send.included")).strong());
         let counts = s.preview.as_ref().map(|p| p.counts);
-        let n = |v: Option<u64>| v.map_or_else(|| "\u{2026}".to_string(), count_text);
+        let n = |key: &str, v: Option<u64>| match v {
+            Some(v) => t_count(
+                key,
+                usize::try_from(v).unwrap_or(usize::MAX),
+                &[("n", &count_text(v))],
+            ),
+            None => crate::i18n::t_with(key, &[("n", "\u{2026}")]),
+        };
         let yes = |ui: &mut Ui, text: String, tip: Option<String>| {
             ui.horizontal(|ui| {
                 crate::widgets::check_mark(ui, 14.0, tokens.accent, &t("send.included.yes"));
-                let r = ui.label(RichText::new(text).color(tokens.text_primary));
+                let r =
+                    ui.add(egui::Label::new(RichText::new(text).color(tokens.text_primary)).wrap());
                 if let Some(tip) = tip {
                     r.on_hover_text(tip);
                 }
@@ -121,18 +194,12 @@ fn included(s: &SendScreen, ui: &mut Ui, tokens: &Tokens) {
         };
         yes(
             ui,
-            t_with(
-                "send.inc.lists",
-                &[("n", &n(counts.map(|c| c.transactions)))],
-            ),
+            n("send.inc.lists", counts.map(|c| c.transactions)),
             None,
         );
         yes(
             ui,
-            t_with(
-                "send.inc.attachments",
-                &[("n", &n(counts.map(|c| c.attachments)))],
-            ),
+            n("send.inc.attachments", counts.map(|c| c.attachments)),
             None,
         );
         yes(ui, t("send.inc.audit"), None);
@@ -141,65 +208,68 @@ fn included(s: &SendScreen, ui: &mut Ui, tokens: &Tokens) {
         yes(ui, t("send.inc.names"), None);
         yes(ui, t("send.inc.hidden"), Some(t("send.inc.hidden.tip")));
         let no = |ui: &mut Ui, text: String| {
-            ui.label(RichText::new(format!("\u{d7}  {text}")).color(tokens.text_secondary));
+            ui.add(
+                egui::Label::new(
+                    RichText::new(format!("\u{d7}  {text}")).color(tokens.text_secondary),
+                )
+                .wrap(),
+            );
         };
         no(ui, t("send.exc.secrets"));
         if let Some(p) = &s.preflight
             && p.waiting_documents > 0
         {
-            no(
-                ui,
-                t_with(
-                    "send.exc.documents",
-                    &[("n", &count_text(p.waiting_documents))],
-                ),
-            );
+            no(ui, n("send.exc.documents", Some(p.waiting_documents)));
         }
     });
 }
 
-fn totals_grid(ui: &mut Ui, p: &VerificationTotals, id: &str) {
-    let rows = [
-        (t("send.total.assets"), amount(p.total_assets)),
-        (t("send.total.ar"), amount(p.accounts_receivable)),
-        (t("send.total.liabilities"), amount(p.total_liabilities)),
-        (t("send.total.ap"), amount(p.accounts_payable)),
-        (t("send.total.equity"), amount(p.total_equity)),
-        (
-            t("send.total.transactions"),
-            count_text(p.counts.transactions),
+fn totals_grid(ui: &mut Ui, p: &VerificationTotals, id: &str, pairs: bool) {
+    let labels = [
+        t("send.total.assets"),
+        t("send.total.ar"),
+        t("send.total.liabilities"),
+        t("send.total.ap"),
+        t("send.total.equity"),
+        t("send.total.transactions"),
+        crate::i18n::t_with(
+            "send.total.net_income",
+            &[
+                ("from", &crate::shell::us_date(p.net_income.from)),
+                ("to", &crate::shell::us_date(p.net_income.to)),
+            ],
         ),
-        (
-            t_with(
-                "send.total.net_income",
-                &[
-                    ("from", &crate::shell::us_date(p.net_income.from)),
-                    ("to", &crate::shell::us_date(p.net_income.to)),
-                ],
-            ),
-            amount(p.net_income.amount),
-        ),
-        (
-            t("send.total.attachments"),
-            count_text(p.counts.attachments),
-        ),
+        t("send.total.attachments"),
     ];
+    let values = right_aligned(&[
+        amount(p.total_assets),
+        amount(p.accounts_receivable),
+        amount(p.total_liabilities),
+        amount(p.accounts_payable),
+        amount(p.total_equity),
+        count_text(p.counts.transactions),
+        amount(p.net_income.amount),
+        count_text(p.counts.attachments),
+    ]);
+    let per_row = if pairs { 2 } else { 1 };
     egui::Grid::new(id)
-        .num_columns(4)
+        .num_columns(2 * per_row)
         .spacing([16.0, 6.0])
         .show(ui, |ui| {
-            for pair in rows.chunks(2) {
-                for (label, value) in pair {
-                    ui.label(label);
-                    ui.label(RichText::new(value).strong().monospace());
+            for (i, (label, value)) in labels.iter().zip(&values).enumerate() {
+                ui.label(label);
+                ui.label(RichText::new(value).strong().monospace());
+                if (i + 1) % per_row == 0 {
+                    ui.end_row();
                 }
-                ui.end_row();
             }
         });
 }
 
-fn totals(s: &SendScreen, ui: &mut Ui, tokens: &Tokens) {
+fn totals(s: &SendScreen, ui: &mut Ui, tokens: &Tokens, wide: bool) {
     form::card(ui, tokens, |ui| {
+        // Two pairs a row only when the card has room for them.
+        let pairs = wide || ui.available_width() >= 560.0;
         let in_file = s.outcome.as_ref().and_then(|o| o.totals.as_ref());
         match (in_file, s.preview.as_ref()) {
             (Some(f), _) => {
@@ -207,11 +277,11 @@ fn totals(s: &SendScreen, ui: &mut Ui, tokens: &Tokens) {
                 if s.totals_differ() {
                     form::inline_warning(ui, tokens, &t("send.totals.changed"));
                 }
-                totals_grid(ui, f, "send_totals_file");
+                totals_grid(ui, f, "send_totals_file", pairs);
             }
             (None, Some(p)) => {
-                ui.label(RichText::new(t("send.totals")).strong());
-                totals_grid(ui, p, "send_totals_preview");
+                ui.add(egui::Label::new(RichText::new(t("send.totals")).strong()).wrap());
+                totals_grid(ui, p, "send_totals_preview", pairs);
             }
             (None, None) => {
                 ui.label(RichText::new(t("send.totals")).strong());
@@ -227,8 +297,24 @@ fn totals(s: &SendScreen, ui: &mut Ui, tokens: &Tokens) {
     });
 }
 
+/// The generated passphrase, hidden until Show (Q-P32w). Shown, its label
+/// is marked secret for the control channel, whatever the text looks like.
+fn generated(s: &mut SendScreen, ui: &mut Ui) {
+    if !s.generated {
+        return;
+    }
+    ui.checkbox(&mut s.show_generated, t("send.show"))
+        .on_hover_text(t("send.show.tip"));
+    if s.show_generated {
+        let r = ui.label(RichText::new(s.passphrase.text()).monospace().strong());
+        ui.ctx().accesskit_node_builder(r.id, |node| {
+            node.set_description(cl_automation::inspect::SECRET_MARK);
+        });
+    }
+}
+
 fn file_card(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<Act>) {
-    let running = s.task.is_some();
+    let running = s.task.is_some() || s.held.is_some();
     form::card(ui, tokens, |ui| {
         ui.add_enabled_ui(!running, |ui| {
             form::field(ui, &t("send.file_name"), &mut s.file_name);
@@ -236,7 +322,7 @@ fn file_card(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<
             form::password_secret(ui, &t("send.passphrase"), &mut s.passphrase);
             form::password_secret(ui, &t("send.passphrase_again"), &mut s.again);
             form::hint(ui, tokens, &t("send.passphrase.hint"));
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if ui
                     .button(t("send.make_one"))
                     .on_hover_text(t("send.make_one.tip"))
@@ -251,9 +337,7 @@ fn file_card(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<
                 {
                     *act = Some(Act::Copy);
                 }
-                if s.generated {
-                    ui.label(RichText::new(s.passphrase.text()).monospace().strong());
-                }
+                generated(s, ui);
             });
             if let Some(k) = s.message {
                 form::inline_note(ui, tokens, &t(k));
@@ -279,7 +363,7 @@ fn file_card(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<
             let text = match s.progress.lock().ok().and_then(|p| p.clone()) {
                 Some(cl_company::Progress::Working {
                     percent: Some(p), ..
-                }) => t_with("send.working.percent", &[("p", &p.to_string())]),
+                }) => crate::i18n::t_with("send.working.percent", &[("p", &p.to_string())]),
                 Some(cl_company::Progress::Copying) => t("send.working.copy"),
                 Some(cl_company::Progress::Verifying) => t("send.working.verify"),
                 _ => t("send.working"),
@@ -287,17 +371,14 @@ fn file_card(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<
             form::progress_line(ui, tokens, &text);
         } else if s.ask != Ask::Payroll {
             ui.horizontal(|ui| {
-                if ui
-                    .add_enabled(
-                        s.supported(),
-                        egui::Button::new(RichText::new(t("send.save")).strong()),
-                    )
-                    .clicked()
-                {
-                    *act = Some(Act::Save);
-                }
+                ui.add_enabled_ui(s.supported(), |ui| {
+                    if crate::widgets::primary_button(ui, &t("send.save")).clicked() {
+                        *act = Some(Act::Save);
+                    }
+                });
             });
         }
+        result(s, ui, tokens, act);
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(t("send.backup_first")).color(tokens.text_secondary));
             ui.label(RichText::new(t("send.need_iif")).color(tokens.text_secondary));
@@ -312,7 +393,14 @@ fn payroll_prompt(s: &SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option
     let n = s.preflight.as_ref().map_or(0, |p| p.unposted_payroll);
     ui.add_space(6.0);
     form::card_tight(ui, tokens, |ui| {
-        ui.label(RichText::new(t_with("send.payroll.title", &[("n", &count_text(n))])).strong());
+        ui.label(
+            RichText::new(t_count(
+                "send.payroll.title",
+                usize::try_from(n).unwrap_or(usize::MAX),
+                &[("n", &count_text(n))],
+            ))
+            .strong(),
+        );
         form::hint(ui, tokens, &t("send.payroll.body"));
         // Discard is the default (Q-P30c): first, and Enter takes it.
         match form::actions(ui, &t("send.payroll.discard"), &[&t("send.payroll.cancel")]) {
@@ -323,10 +411,13 @@ fn payroll_prompt(s: &SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option
     });
 }
 
-fn result(s: &SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<Act>) {
+/// The result or the missing files, right under Save; scrolled into view
+/// the frame they arrive (S2).
+fn result(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<Act>) {
+    let mut shown: Option<egui::Response> = None;
     if let Some(TransferError::MissingFiles(files)) = &s.error {
         ui.add_space(8.0);
-        form::card(ui, tokens, |ui| {
+        let r = form::card_tight(ui, tokens, |ui| {
             ui.label(RichText::new(t("send.missing.title")).strong());
             form::hint(ui, tokens, &t("send.missing.body"));
             egui::Grid::new("send_missing")
@@ -352,32 +443,38 @@ fn result(s: &SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<Act>) {
                         ui.end_row();
                     }
                 });
+            ui.label("")
         });
+        shown = Some(r);
     }
     if let Some(o) = &s.outcome {
         ui.add_space(8.0);
-        form::card(ui, tokens, |ui| {
+        let r = form::card_tight(ui, tokens, |ui| {
             ui.label(RichText::new(t("send.done")).strong());
-            ui.label(t_with(
-                "send.done.path",
-                &[("path", &o.record.path.display().to_string())],
-            ));
+            ui.label(t("send.done.saved_as"));
+            ui.add(egui::Label::new(RichText::new(tidy(&o.record.path)).monospace()).wrap());
             if o.discarded_payroll > 0 {
                 form::hint(
                     ui,
                     tokens,
-                    &crate::i18n::t_count(
+                    &t_count(
                         "send.done.discarded",
                         usize::try_from(o.discarded_payroll).unwrap_or(usize::MAX),
-                        &[],
+                        &[("n", &count_text(o.discarded_payroll))],
                     ),
                 );
             }
-            form::hint(ui, tokens, &t("send.how.body"));
-            if ui.button(t("send.open_folder")).clicked() {
-                *act = Some(Act::OpenFolder);
-            }
+            ui.horizontal(|ui| ui.button(t("send.open_folder"))).inner
         });
+        if r.clicked() {
+            *act = Some(Act::OpenFolder);
+        }
+        shown = Some(r);
+    }
+    if std::mem::take(&mut s.scroll_result)
+        && let Some(r) = shown
+    {
+        r.scroll_to_me(Some(Align::Max));
     }
 }
 
@@ -388,6 +485,18 @@ fn history(s: &SendScreen, ui: &mut Ui, tokens: &Tokens) {
             form::hint(ui, tokens, &t("send.history.empty"));
             return;
         }
+        let rows: Vec<_> = s.history.iter().rev().collect();
+        let incomes = right_aligned(
+            &rows
+                .iter()
+                .map(|r| {
+                    r.totals
+                        .as_ref()
+                        .map(|x| amount(x.net_income))
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>(),
+        );
         egui::Grid::new("send_history")
             .num_columns(4)
             .striped(true)
@@ -402,9 +511,9 @@ fn history(s: &SendScreen, ui: &mut Ui, tokens: &Tokens) {
                     ui.label(RichText::new(t(h)).color(tokens.text_secondary));
                 }
                 ui.end_row();
-                for r in s.history.iter().rev() {
+                for (r, income) in rows.iter().zip(&incomes) {
                     let local = r.created_at.as_utc().with_timezone(&chrono::Local);
-                    ui.label(local.format("%m/%d/%Y").to_string());
+                    ui.label(RichText::new(local.format("%m/%d/%Y").to_string()).monospace());
                     ui.label(t("send.history.kind"));
                     ui.label(
                         r.path
@@ -412,17 +521,22 @@ fn history(s: &SendScreen, ui: &mut Ui, tokens: &Tokens) {
                             .map(|n| n.to_string_lossy().into_owned())
                             .unwrap_or_default(),
                     );
-                    ui.label(
-                        RichText::new(
-                            r.totals
-                                .as_ref()
-                                .map(|x| amount(x.net_income))
-                                .unwrap_or_default(),
-                        )
-                        .monospace(),
-                    );
+                    ui.label(RichText::new(income).monospace());
                     ui.end_row();
                 }
             });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn amounts_line_up_on_the_right_and_paths_read_plainly() {
+        let v = right_aligned(&["9,286.90".into(), "412,906.33".into()]);
+        assert_eq!(v, ["  9,286.90", "412,906.33"]);
+        let p = std::path::Path::new("C:/a/b/../c/./d.clxfer");
+        assert_eq!(tidy(p).replace('\\', "/"), "C:/a/c/d.clxfer");
+    }
 }

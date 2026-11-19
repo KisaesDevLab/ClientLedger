@@ -757,6 +757,22 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Add a Demo Payroll Draft (developer)",
     ),
     dev_action(
+        "dev.transfer_demo_hold",
+        "Hold the Next Demo Transfer (developer)",
+    ),
+    dev_action(
+        "dev.transfer_demo_release",
+        "Finish the Held Demo Transfer (developer)",
+    ),
+    dev_action(
+        "dev.transfer_demo_ask_backup_passphrase",
+        "Ask for the Demo Backup Passphrase (developer)",
+    ),
+    dev_action(
+        "dev.transfer_demo_waiting_documents",
+        "Demo Documents Waiting for Review (developer)",
+    ),
+    dev_action(
         "dev.iif_demo_unbalanced",
         "Demo IIF Unbalanced Entry Once (developer)",
     ),

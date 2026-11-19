@@ -1,12 +1,15 @@
 # Send to My Accountant (P32 D4) against `clientledger --demo`: the check
-# totals preview, a short passphrase refused inline, Make one for me, the
-# payroll-draft prompt (Cancel stops, Discard continues), Save through the
-# Save dialog to the result panel and a Sent before row, the totals in the
-# file differing after a post (Q-P32l), missing files listed in one run,
-# busy, and the IIF link. Synthetic data only; the demo writes placeholder
-# bytes, never an archive.
+# totals preview; one column at the minimum window and at 200% (UI B1);
+# the waiting-documents line; a short passphrase refused inline; Make one
+# for me, hidden until Show (Q-P32w); the inline backup passphrase; the
+# payroll-draft prompt (Cancel stops, Discard continues); Save through the
+# Save dialog to the result panel and a Sent before row; the totals in the
+# file differing after a post (Q-P32l); a held transfer blocking every way
+# out of the company (Q-P32u); missing files listed in one run; busy; and
+# the IIF link. Synthetic data only; the demo writes placeholder bytes,
+# never an archive.
 name: send_to_accountant
-description: Send to My Accountant preview, passphrase, payroll prompt, save, failures and the IIF link.
+description: Send to My Accountant layout, passphrase, payroll prompt, save, blocking, failures and the IIF link.
 steps:
   - resize: {width: 1440, height: 940}
   - set_zoom: {percent: 100}
@@ -17,12 +20,38 @@ steps:
   - assert_state: {key: screen.screen, equals: send_to_accountant}
   - assert_state: {key: screen.preview_loaded, equals: true}
   - assert_exists: {label: Total assets}
-  - assert_exists: {label: "412,906.33"}
+  - assert_exists: {label_contains: "412,906.33"}
   - assert_exists: {label_contains: "Hidden accounts"}
   - assert_exists: {label_contains: "Never passwords"}
   - assert_exists: {role: button, label: "Save transfer file…"}
   - assert_no_clipping: {}
   - screenshot: send-to-accountant
+  # One column at the minimum window and at 200% (B1).
+  - resize: {width: 960, height: 640}
+  - wait: {ms: 300}
+  # The tab strip and the scroll body's lower edge cut by design; nothing
+  # else (one column, nothing cut on the right).
+  - assert_no_clipping:
+      ignore:
+        - &top {x: -4000, y: 0, width: 8480, height: 120}
+        - {x: -4000, y: 560, width: 8480, height: 200}
+  - screenshot: narrow
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 200}
+  - wait: {ms: 300}
+  - assert_no_clipping:
+      ignore:
+        - *top
+        - {x: -4000, y: 390, width: 8480, height: 200}
+  - screenshot: zoom-200
+  - set_zoom: {percent: 100}
+  - wait: {ms: 300}
+  # Documents waiting in Review Documents are named, and left out.
+  - command: dev.transfer_demo_waiting_documents
+  - wait: {ms: 200}
+  - assert_state: {key: screen.waiting_documents, equals: 3}
+  - assert_exists: {label_contains: "Documents still waiting in Review Documents (3)"}
+  - screenshot: waiting-documents
   # A short passphrase is refused inline; nothing is sent.
   - click: {role: password_input, label: New passphrase}
   - type: {text: short}
@@ -33,24 +62,44 @@ steps:
   - assert_state: {key: screen.error, equals: error.transfer.passphrase_short}
   - assert_exists: {label_contains: "transfer passphrase needs"}
   - screenshot: passphrase-short
-  # Make one for me fills both boxes.
+  # Make one for me fills both boxes and stays hidden until Show.
   - click: {role: button, label: Make one for me}
   - wait: {ms: 200}
   - assert_state: {key: screen.generated, equals: true}
+  - assert_state: {key: screen.shown, equals: false}
   - assert_state: {key: screen.passphrase_filled, equals: true}
+  - click: {role: check_box, label: Show}
+  - wait: {ms: 100}
+  - assert_state: {key: screen.shown, equals: true}
+  - click: {role: check_box, label: Show}
+  - wait: {ms: 100}
+  - assert_state: {key: screen.shown, equals: false}
+  # No backup passphrase yet: it is asked here, before anything is sent.
+  - command: dev.transfer_demo_ask_backup_passphrase
+  - wait: {ms: 200}
+  - assert_state: {key: screen.backup_passphrase_needed, equals: true}
+  - assert_exists: {role: password_input, label: "Backup passphrase (12+ characters)"}
+  - screenshot: backup-passphrase
+  - click: {role: password_input, label: "Backup passphrase (12+ characters)"}
+  - type: {text: "demo backup words 2026"}
+  - click: {role: password_input, label: Passphrase again}
+  - type: {text: "demo backup words 2026"}
   # A payroll draft is waiting: the prompt; Cancel stops.
   - command: dev.transfer_demo_payroll_draft
   - wait: {ms: 200}
+  - scroll: {target: {label: Total assets}, to: end}
+  - wait: {ms: 200}
   - click: {role: button, label: "Save transfer file…"}
   - wait: {ms: 200}
+  - assert_state: {key: screen.backup_passphrase_needed, equals: false}
   - assert_state: {key: screen.payroll_prompt, equals: true}
-  - assert_exists: {label_contains: "unposted payroll imports first?"}
+  - assert_exists: {label: Discard 1 unposted payroll import first?}
   - screenshot: payroll-prompt
   - click: {role: button, label: Cancel}
   - wait: {ms: 200}
   - assert_state: {key: screen.payroll_prompt, equals: false}
   - assert_state: {key: screen.done, equals: false}
-  # Discard continues to the Save dialog and the result.
+  # Discard continues to the Save dialog and the result, in view.
   - command: dev.transfer_demo_post
   - click: {role: button, label: "Save transfer file…"}
   - wait: {ms: 200}
@@ -64,8 +113,36 @@ steps:
   - assert_exists: {role: button, label: Open folder}
   - assert_exists: {label: Transfer file, index: 0}
   - assert_state: {key: screen.passphrase_filled, equals: false}
+  - assert_no_clipping: {}
   - screenshot: saved
-  # Missing files are all listed with Open record.
+  # A transfer in flight blocks every way out of the company (Q-P32u).
+  - command: dev.transfer_demo_hold
+  - click: {role: button, label: Make one for me}
+  - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/send_to_accountant/held-{theme}.clxfer"]}
+  - click: {role: button, label: "Save transfer file…"}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.running, equals: true}
+  - assert_state: {key: screen.blocked, equals: true}
+  - click: {label: File, index: 0}
+  - wait: {ms: 300}
+  - assert_disabled: {label: Close Company}
+  - assert_disabled: {label: Sign Out}
+  - assert_disabled: {label_contains: Open or Switch Company}
+  - assert_disabled: {label: New Company}
+  - assert_disabled: {label: Open Practice Company}
+  - assert_disabled: {label: Restore a Backup}
+  - assert_disabled: {label: Delete Company}
+  - assert_disabled: {label_contains: Quit ClientLedger}
+  - assert_enabled: {label: Back Up Company}
+  - screenshot: blocked-menu
+  - key: Escape
+  - wait: {ms: 200}
+  - command: dev.transfer_demo_release
+  - wait: {ms: 300}
+  - assert_state: {key: screen.running, equals: false}
+  - assert_state: {key: screen.blocked, equals: false}
+  - assert_state: {key: screen.done, equals: true}
+  # Missing files are all listed with Open record, in view.
   - command: dev.transfer_demo_missing_files
   - click: {role: button, label: Make one for me}
   - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/send_to_accountant/missing-{theme}.clxfer"]}
@@ -75,6 +152,7 @@ steps:
   - assert_exists: {label: Receipt-Fuel-0412.pdf}
   - assert_exists: {label: Kept outside the company folder}
   - assert_count: {target: {role: button, label: Open record}, count: 3}
+  - assert_no_clipping: {}
   - screenshot: missing-files
   # Another backup or restore is running.
   - command: dev.transfer_demo_busy
@@ -84,6 +162,7 @@ steps:
   - wait: {ms: 400}
   - assert_state: {key: screen.error, equals: error.company.busy}
   - assert_exists: {label_contains: "already running"}
+  - screenshot: busy
   # The IIF link opens Export IIF File.
   - click: {role: link, label: Export an IIF file}
   - wait: {ms: 300}

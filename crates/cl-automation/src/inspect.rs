@@ -9,6 +9,11 @@ use crate::actions::Target;
 /// Shown instead of the value of a secret field.
 pub const REDACTED: &str = "[hidden]";
 
+/// The accessible description a widget sets to say "this shows a secret"
+/// (P32: a generated passphrase shown on request). Its label and value,
+/// and everything below it, are hidden whatever the text looks like.
+pub const SECRET_MARK: &str = "cl:secret";
+
 /// A rectangle in egui points, origin at the window's top-left.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Bounds {
@@ -191,6 +196,11 @@ impl Node {
     }
 
     fn redact_inner(&mut self, inside_secret: bool) {
+        let marked = self.description.as_deref() == Some(SECRET_MARK);
+        let inside_secret = inside_secret || marked;
+        if marked && self.label.is_some() {
+            self.label = Some(REDACTED.into());
+        }
         let secret_input =
             self.role.ends_with("input") && is_secret_field(&self.role, self.label.as_deref());
         if secret_input || inside_secret {
@@ -556,6 +566,24 @@ pub(crate) mod fixture {
 mod tests {
     use super::fixture::{node, snapshot};
     use super::*;
+
+    /// P32 B2: a label marked secret is hidden by its mark, not by how the
+    /// text looks (a plain word would pass the pattern check).
+    #[test]
+    fn a_label_marked_secret_is_hidden_whatever_it_says() {
+        let mut n = node("1", "label", Some("correct horse"), None);
+        n.description = Some(SECRET_MARK.into());
+        let mut child = node("2", "text_run", Some("correct horse"), None);
+        child.value = Some("correct horse".into());
+        n.children = vec![child];
+        n.redact();
+        assert_eq!(n.label.as_deref(), Some(REDACTED));
+        assert_eq!(n.children[0].label.as_deref(), Some(REDACTED));
+        assert_eq!(n.children[0].value.as_deref(), Some(REDACTED));
+        let mut plain = node("3", "label", Some("correct horse"), None);
+        plain.redact();
+        assert_eq!(plain.label.as_deref(), Some("correct horse"));
+    }
 
     fn t(label: Option<&str>, role: Option<&str>, index: Option<usize>) -> Target {
         Target {

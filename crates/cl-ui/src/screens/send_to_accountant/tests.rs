@@ -100,14 +100,43 @@ fn a_post_after_the_preview_shows_the_file_totals_differ() {
     assert_eq!(s.state()["totals_differ"], true);
 }
 
+/// S1: a held transfer blocks every way out of the company until it ends.
+#[test]
+fn a_held_transfer_blocks_leaving_the_company() {
+    let (_d, mut s) = screen();
+    assert!(s.command(CommandId::new("dev.transfer_demo_hold")));
+    fill(&mut s, "ABCD-EFGH-JKLM-NPQR-STUV");
+    s.save(None);
+    assert_eq!(s.state()["running"], true);
+    for id in BLOCKED_WHILE_SENDING {
+        assert!(blocked_now(id), "{id}");
+    }
+    assert!(!blocked_now("file.backup"));
+    assert!(s.command(CommandId::new("dev.transfer_demo_release")));
+    assert_eq!(s.state()["running"], false);
+    assert_eq!(s.state()["done"], true);
+}
+
+/// B2 / Q-P32w: a made passphrase is hidden until Show.
+#[test]
+fn a_made_passphrase_stays_hidden_until_show() {
+    let (_d, mut s) = screen();
+    s.make_one();
+    assert_eq!(s.state()["shown"], false);
+    s.show_generated = true;
+    assert_eq!(s.state()["shown"], true);
+    s.make_one();
+    assert_eq!(s.state()["shown"], false, "a new one starts hidden");
+}
+
 #[test]
 fn close_restore_and_delete_wait_for_a_running_transfer() {
-    assert!(!transfer_running());
+    // The counter is shared by every window (and test): only "running
+    // while held" is checked here, never "not running".
     {
         let _g = Sending::start();
         assert!(transfer_running());
     }
-    assert!(!transfer_running());
     for k in [
         "send.inc.hidden",
         "send.exc.secrets",
