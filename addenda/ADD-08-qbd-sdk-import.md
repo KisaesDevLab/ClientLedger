@@ -4,7 +4,7 @@
 
 Owner request, 2026-11-18; scheduling decided 2026-11-19 (first "at the end of the project", then "Change ADD-08 to P35.1") (Written first as "ADD-05"; ADD-05 is the community license addendum, so this is ADD-08.)
 
-ADD-08 adds Import from QuickBooks Desktop: a new ClientLedger company built from a QuickBooks Desktop company file, with full transaction history, accepted only after it ties to QuickBooks' own reports. QuickBooks itself opens the file and answers queries through its SDK. ClientLedger never parses the file's bytes.
+ADD-08 adds Import from QuickBooks Desktop: a QuickBooks Desktop company file's full transaction history brought into the open ClientLedger company as an import batch, accepted only after it ties to QuickBooks' own reports. QuickBooks itself opens the file and answers queries through its SDK. ClientLedger never parses the file's bytes.
 
 Models: opus for all work; architect plan required for I03, I04, I06 and I07 (Tier H); engine-implementer on opus at effort high for I04; combined reviewer per phase; process review at PR-I1 (opus, xhigh). Sonnet only for mechanical parts (fixtures, docs).
 
@@ -14,14 +14,15 @@ Models: opus for all work; architect plan required for I03, I04, I06 and I07 (Ti
 2. **I04 lands in the engine repo** (`KisaesDevLab/kisaes-gl-engine`) and needs owner review before I05 starts.
 3. **Checkpoint PR-I1** (opus, xhigh) runs right after I08 merges.
 4. Branches `phase/P35.1-qbd-sdk-import` (or `phase/I0x-short-name` per work package); PRs `I0x — <title>`; final commit `docs(state): complete P35.1, next PR-I1`. STATE.md carries one board row for P35.1; the I01–I08 and PR-I1 sub-table is under ADD-08 in Active addenda.
-5. Claude Code cannot run QuickBooks. I01–I03 are built against recorded qbXML fixtures, and each ends with a short manual check on a Windows PC that has QuickBooks installed.
+5. Claude Code cannot run QuickBooks. I01–I03 are built against recorded qbXML fixtures, and each ends with a short manual check on a Windows PC that has QuickBooks installed. The owner has all versions available (Pro, Premier and Enterprise, across years), so the I01–I03 and I08 manual checks can cover several editions and years.
 
 ## Relation to P31
 
 P31 (beta) already ships the report-based QuickBooks Desktop import with tie-out, built on the engine capabilities `imports-batch-v1`, `qbd-open-items-v1`, `qbd-mapping-v1`, `imports-tieout-v1` and `imports-transactions-v1`, with the BeforeImport backup and undo. ADD-08 adds the SDK route (full history straight from QuickBooks, no report exports).
 
 - When I04 and I05 start, the architect must check which of U-274–U-278 are already covered by those P31 capabilities and **reuse P31's tie-out and batch plumbing rather than duplicate it**; any U-row fully covered is closed as "covered by P31" instead of built.
-- Q-359 (QB-05: an SDK import always creates a new, empty company) differs from P31, which imports into the open company. Both routes may coexist. Open question Q-ADD8g; default: the SDK route creates a new company as written.
+- **Owner answer 2026-11-19 (Q-ADD8g):** the SDK route imports into the **open company**, like P31, and does not create a new company. This supersedes the original QB-05 (Q-359). The SDK import runs as a P31-style import batch: a verified BeforeImport backup is taken first, as in P31; Discard means undoing the batch with P31's undo-with-blockers, or restoring the before-import backup. It reuses P31's batch, tie-out, verify and overlap-refusal plumbing (`imports-batch-v1`, `imports-tieout-v1`, `imports-transactions-v1`).
+- P31's rules apply here too: history cannot overlap across source systems, and unmapped accounts block the commit.
 
 ## Scope
 
@@ -30,13 +31,13 @@ In scope:
 - A .QBW open in an installed QuickBooks Desktop for Windows (Pro, Premier or Enterprise).
 - .QBB and .QBM files, through a guided restore in QuickBooks first.
 - Lists, posting transactions, cleared status, open AR and AP, inventory on hand.
-- A tie-out report and an accept-or-discard step.
+- A tie-out report and an accept-or-undo step.
 
 Out of scope:
 
 - Reading a file with no QuickBooks installed (dead-file recovery).
 - QuickBooks Online and QuickBooks for Mac.
-- Merging into an existing ClientLedger company.
+- Merging two QuickBooks files into one company in a single run (overlapping history is refused, as in P31).
 - Paycheck detail, attachments, memorized transactions, budgets, users and passwords.
 - Multi-currency files.
 
@@ -50,7 +51,7 @@ Thirteen decisions fixed for the build (owner 2026-11-18/19). Q-365 (QB-11) is t
 | Q-356 | QB-02 | No direct file parsing and no OpenQBW in this addendum. | Incomplete coverage, and Intuit's license bars reverse engineering. |
 | Q-357 | QB-03 | Two pieces: a standalone Windows extractor and a cross-platform importer, joined by a package file. | QuickBooks is Windows-only; ClientLedger is not. The books may move to another computer. |
 | Q-358 | QB-04 | The extractor is read-only. It sends only query and report requests. | The source file must never change. A test fails the build if any Add, Mod, Delete or Void request exists. |
-| Q-359 | QB-05 | An import always creates a new, empty company. Discard deletes that company whole. | No merge logic and a clean rollback. |
+| Q-359 | QB-05 | **Reworded 2026-11-19:** the SDK import runs as a P31-style import batch in the **open company**, after a verified BeforeImport backup. Discard = undo the batch (P31 undo-with-blockers) or restore the before-import backup. P31's no-overlap-across-source-systems and unmapped-accounts-block-commit rules apply. (Originally: always a new, empty company.) | One import model across both routes; a clean rollback through the backup and batch undo. |
 | Q-360 | QB-06 | Full history is the default. An optional cutoff date brings in detail from that date on. | Owners expect their history; very large files need an exit. |
 | Q-361 | QB-07 | Amounts come from QuickBooks and are never recomputed. Each transaction posts the ledger lines QuickBooks recorded, including cost of goods sold and sales tax. | Recalculation would break the tie-out. |
 | Q-362 | QB-08 | Ledger-only fallback: a transaction with no ClientLedger type, or one the typed queries miss, imports as a journal entry tagged with its original type, number and name. | Covers paychecks and payroll liability payments, and guarantees the trial balance ties. |
@@ -127,7 +128,7 @@ Eight phases, I01 to I08, run in order inside P35.1; I04 lands in the Kisaes GL 
 
 ### I04: Engine requests (Kisaes GL Engine repo) (Tier H)
 
-- U-274 (was ER-QB1): import session on a new tenant, with discard that removes the tenant.
+- U-274 (was ER-QB1): import session as a batch in the existing tenant; discard = batch undo. The I04 architect confirms whether `imports-batch-v1` already covers it.
 - U-275 (was ER-QB2): external ID map (source system, source ID) on list entries and transactions.
 - U-276 (was ER-QB3): historical posting mode that accepts supplied ledger lines, original dates and document numbers, and skips recalculation, closed-period checks and auto-numbering.
 - U-277 (was ER-QB4): set cleared status on imported lines.
@@ -152,8 +153,8 @@ Eight phases, I01 to I08, run in order inside P35.1; I04 lands in the Kisaes GL 
 ### I07: Tie-out and accept (Tier H)
 
 - Run the checks in the Tie-out section and show differences by account, name or item, with drill-down to the transactions behind a difference.
-- "Accept this import" is enabled only when the required checks pass. Discard removes the company.
-- Save the tie-out report as a PDF in the new company's attachments.
+- "Accept this import" is enabled only when the required checks pass. Discard undoes the batch (or restores the before-import backup).
+- Save the tie-out report as a PDF in the company's attachments.
 - Accept: a fixture with a deliberately altered control total blocks acceptance and points to the right account.
 
 ### I08: Wizard, extractor packaging, help (Tier M)
@@ -221,9 +222,9 @@ An import can be accepted only when the first four checks pass to the cent; the 
 | Transaction counts by type | Counts in the package | Shown; any difference listed |
 | Ledger-only entries | None | Count and total by original type, so the owner sees what arrived without document detail |
 
-In cutoff mode the trial balance check runs from the cutoff date forward, and Opening Balance Equity must be zero after the opening entries.
+The tie-out compares the batch's effect: the full trial balance when the company had no prior activity; otherwise the engine's batch tie-out (`imports-tieout-v1`). In cutoff mode the trial balance check runs from the cutoff date forward, and Opening Balance Equity must be zero after the opening entries.
 
-A failed check names the account, customer, vendor or item and lists the transactions behind the difference. The report is saved with the company whether the import is accepted or discarded for another try. Reuse P31's tie-out plumbing (see Relation to P31).
+A failed check names the account, customer, vendor or item and lists the transactions behind the difference. The report is saved with the company whether the import is accepted or undone for another try. Reuse P31's tie-out plumbing (see Relation to P31).
 
 ## Risks
 
@@ -240,24 +241,24 @@ The largest risk is that no automated test can run QuickBooks, so three manual c
 | Enterprise advanced inventory (FIFO, multiple sites), units of measure | Preflight warns. History still ties because costs come from QuickBooks; going forward ClientLedger uses average cost. |
 | Multi-currency file | Preflight blocks the import with a plain message. |
 | Older file gets upgraded when a newer QuickBooks opens it | Help text and wizard both say to restore or copy first. The original backup is not altered. |
-| Fewer working QuickBooks installs over time | Per the earlier research, Enterprise is the only edition still sold new in the US and a 30-day trial exists. A lapsed subscription is view-only for a year, then locked. |
+| Fewer working QuickBooks installs over time | Reduced: the owner has all versions available (Pro, Premier and Enterprise, across years), so manual checks can cover several editions and years. Enterprise is still the only edition sold new in the US, with a 30-day trial. |
 | Intuit SDK terms | The extractor uses only the request processor that ships with QuickBooks. Have counsel read the current SDK and Desktop license terms before release. |
 
 Not available through the SDK, so not imported: reconciliation reports, attachments, memorized transactions, the audit trail, users and the closing-date password.
 
 ## Open questions
 
-Each has a default the plan already assumes. Rows are in QUESTIONS.md (Q-ADD8a–g).
+All answered by the owner on 2026-11-19. Rows are in QUESTIONS.md (Q-ADD8a–g).
 
 | ID | Question | Default / answer |
 | --- | --- | --- |
 | Q-ADD8a | Is ADD-08 the next free addendum number? | Answered: ADD-08 (the source's "ADD-05" was taken by the community license addendum). |
 | Q-ADD8b | Where does it run? | Answered, owner 2026-11-19: phase P35.1, after P35 and before P36, in the beta (Q-366). |
-| Q-ADD8c | Free for everyone, or part of the Pro tools? | Free (Q-365). |
-| Q-ADD8d | Which QuickBooks versions will you have for the manual checks? | Enterprise 24.0 trial plus one older Pro or Premier file. |
-| Q-ADD8e | Are U-274–U-278 acceptable as engine pull requests, given that only the owner merges engine changes? | Yes; per Q-301 engine PRs merge when green. |
-| Q-ADD8f | Should dead-file recovery (reading a .QBW with no QuickBooks) get its own later addendum after legal review? | Not planned. |
-| Q-ADD8g | The SDK route always creates a new company (Q-359) but P31 imports into the open company. Keep both? | Both coexist; the SDK route creates a new company as written. |
+| Q-ADD8c | Free for everyone, or part of the Pro tools? | Answered 2026-11-19: free under the Community License, not Pro-gated; confirms Q-365. |
+| Q-ADD8d | Which QuickBooks versions will you have for the manual checks? | Answered 2026-11-19: all versions are available (Pro, Premier and Enterprise, across years); I01–I03 and I08 manual checks can cover several editions and years. |
+| Q-ADD8e | Are U-274–U-278 acceptable as engine pull requests, given that only the owner merges engine changes? | Answered 2026-11-19: yes, the usual engine PRs that merge when green (Q-301). |
+| Q-ADD8f | Should dead-file recovery (reading a .QBW with no QuickBooks) get its own later addendum after legal review? | Answered 2026-11-19: not planned. |
+| Q-ADD8g | The SDK route as first written always created a new company (Q-359), but P31 imports into the open company. Which? | Answered 2026-11-19: the SDK route imports into the open company like P31 (batch, BeforeImport backup, batch undo); supersedes Q-359 as first worded. |
 
 ## Notes for later phases
 
