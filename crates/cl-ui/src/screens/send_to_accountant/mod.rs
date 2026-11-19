@@ -256,7 +256,7 @@ impl SendScreen {
                 &self.link,
                 self.group.as_ref(),
                 move |d| Ok(crate::company::demo::transfer::preview(d, today)),
-                move |s| async move { s.tenants().verification_totals(tenant, today).await },
+                move |s| async move { s.tenants().verification_totals(tenant, today, true).await },
             ));
         }
         self.preflight_job = Some(engine::read(

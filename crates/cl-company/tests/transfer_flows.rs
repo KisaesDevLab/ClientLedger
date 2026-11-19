@@ -135,11 +135,14 @@ fn stores(dir: &Path) -> (RecentStore, MemorySecrets) {
     (store, secrets)
 }
 
-const TOTALS: &str = r#"{"definition":"vt1","asOf":"2026-11-19","fiscalYearStart":"2026-01-01",
-  "totalAssets":"12500.1250","totalLiabilities":"2000.00","totalEquity":"10500.1250",
+const TOTALS: &str = r#"{"definition":"vt1","basis":"accrual","asOf":"2026-11-19",
+  "companies":[{"companyId":"c1","name":"Ozark Ridge","fiscalYearStart":"2026-01-01",
+  "totalAssets":"12500.1250","totalLiabilities":"2000.0000","totalEquity":"10500.1250",
   "netIncome":{"from":"2026-01-01","to":"2026-11-19","amount":"4321.0049"},
-  "accountsReceivable":"1250.00","accountsPayable":"400.00",
-  "trialBalance":{"debits":"20000.00","credits":"20000.00"},
+  "accountsReceivable":"1250.0000","accountsPayable":"400.0000",
+  "trialBalance":{"debits":"20000.0000","credits":"20000.0000"},
+  "counts":{"accounts":42,"clients":7,"vendors":5,"items":3,"transactions":1284,
+  "postedTransactions":1270,"attachments":63,"attachmentBytes":1048576,"auditEntries":4200}}],
   "counts":{"accounts":42,"clients":7,"vendors":5,"items":3,"transactions":1284,
   "postedTransactions":1270,"attachments":63,"attachmentBytes":1048576,"auditEntries":4200}}"#;
 

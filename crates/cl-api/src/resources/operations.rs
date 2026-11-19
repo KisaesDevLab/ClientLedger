@@ -598,9 +598,7 @@ pub(crate) const TENANT_ARCHIVE_EXPORT: Operation = workspace_write(
     "/api/v1/tenants/{id}/archives",
     TimeoutClass::Archive,
 );
-/// U-283 (P32): the totals a transfer file made now would carry. Joins
-/// `OPERATIONS`, operations.txt and the covered table at the engine pin
-/// bump past U-283 (the pinned spec doesn't have it yet).
+/// U-283 (P32): the totals a transfer file made now would carry.
 pub(crate) const TENANT_VERIFICATION_TOTALS: Operation =
     session_read("/api/v1/tenants/{id}/verification-totals");
 pub(crate) const TENANT_ARCHIVE_JOB: Operation =
@@ -2129,7 +2127,7 @@ const NEVER_RETRIED: [(&str, &str); 7] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 470] = [
+pub const OPERATIONS: [Operation; 471] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2188,6 +2186,7 @@ pub const OPERATIONS: [Operation; 470] = [
     TENANTS_CREATE,
     TENANT_RENAME,
     TENANT_ARCHIVE_EXPORT,
+    TENANT_VERIFICATION_TOTALS,
     TENANT_ARCHIVE_JOB,
     TENANT_ARCHIVE_DOWNLOAD,
     TENANT_ARCHIVE_IMPORT,

@@ -50,21 +50,28 @@ fn money(s: &str) -> Money {
 pub fn preview(d: &super::DemoState, as_of: CalendarDate) -> VerificationTotals {
     let posted = d.transfer.posted_since_preview;
     let from = as_of.start_of_year();
+    let counts = serde_json::json!({"accounts": 64, "clients": 64, "vendors": 38, "items": 22,
+        "transactions": if posted { 1513 } else { 1512 }, "postedTransactions": 1498,
+        "attachments": 214, "attachmentBytes": 48_000_000, "auditEntries": 9120});
     serde_json::from_value(serde_json::json!({
         "definition": "vt1",
+        "basis": "accrual",
         "asOf": as_of.to_wire(),
-        "fiscalYearStart": from.to_wire(),
-        "totalAssets": if posted { "413006.33" } else { "412906.33" },
-        "totalLiabilities": "98214.60",
-        "totalEquity": if posted { "314791.73" } else { "314691.73" },
-        "netIncome": {"from": from.to_wire(), "to": as_of.to_wire(),
-                      "amount": if posted { "126085.00" } else { "125985.00" }},
-        "accountsReceivable": "48912.40",
-        "accountsPayable": "9286.90",
-        "trialBalance": {"debits": "640210.55", "credits": "640210.55"},
-        "counts": {"accounts": 64, "clients": 64, "vendors": 38, "items": 22,
-                   "transactions": if posted { 1513 } else { 1512 }, "postedTransactions": 1498,
-                   "attachments": 214, "attachmentBytes": 48_000_000, "auditEntries": 9120}
+        "companies": [{
+            "companyId": "demo-company",
+            "name": "Ozark Ridge Landscaping LLC",
+            "fiscalYearStart": from.to_wire(),
+            "totalAssets": if posted { "413006.3300" } else { "412906.3300" },
+            "totalLiabilities": "98214.6000",
+            "totalEquity": if posted { "314791.7300" } else { "314691.7300" },
+            "netIncome": {"from": from.to_wire(), "to": as_of.to_wire(),
+                          "amount": if posted { "126085.0000" } else { "125985.0000" }},
+            "accountsReceivable": "48912.4000",
+            "accountsPayable": "9286.9000",
+            "trialBalance": {"debits": "640210.5500", "credits": "640210.5500"},
+            "counts": counts.clone(),
+        }],
+        "counts": counts,
     }))
     .unwrap_or_else(|_| fallback(as_of))
 }
@@ -72,6 +79,8 @@ pub fn preview(d: &super::DemoState, as_of: CalendarDate) -> VerificationTotals 
 fn fallback(as_of: CalendarDate) -> VerificationTotals {
     VerificationTotals {
         definition: "vt1".into(),
+        basis: None,
+        companies: Vec::new(),
         as_of,
         fiscal_year_start: None,
         total_assets: Money::ZERO,

@@ -362,7 +362,7 @@ async fn mount_tenants_list(server: &MockServer) {
 fn write_archive(dir: &Path, archive_id: &str) -> PathBuf {
     let p = abs(dir, "restore-me.clbackup");
     let env = format!(
-        r#"{{"format":"mybooks-tenant-archive","formatVersion":1,"archiveId":"{archive_id}","createdAt":"2026-11-04T08:12:00.000Z"}}"#
+        r#"{{"format":"mybooks-tenant-archive","formatVersion":2,"archiveId":"{archive_id}","createdAt":"2026-11-04T08:12:00.000Z"}}"#
     );
     let file = std::fs::File::create(&p).expect("create");
     let mut zip = zip::ZipWriter::new(file);

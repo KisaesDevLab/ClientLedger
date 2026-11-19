@@ -21,9 +21,9 @@ use crate::zipfile;
 /// The archive format the engine writes.
 pub const ARCHIVE_FORMAT: &str = "mybooks-tenant-archive";
 /// The newest format version this app reads. Format 2 (engine U-282,
-/// `tenant-archive-v2`) adds only optional parts; this moves to 2 in the
-/// same commit as the engine pin bump past U-282 (P32 R7), never before.
-pub const MAX_FORMAT_VERSION: u64 = 1;
+/// `tenant-archive-v2`, pinned at `dd11f2b4`) adds only optional parts;
+/// format 1 backups still restore (P32 R7).
+pub const MAX_FORMAT_VERSION: u64 = 2;
 
 /// The extension of a transfer file for the accountant's `MyBooks` (P32).
 pub const TRANSFER_EXTENSION: &str = "clxfer";
