@@ -600,6 +600,7 @@ fn main() -> std::process::ExitCode {
             "conflict::server_version_conflict_u17",
             contract_conflict::server_version_conflict_u17,
         ),
+        ("conflict::stale_all_u291", contract_conflict::stale_all_u291),
         (
             "closed_period::locked_dates_are_refused_both_ways",
             contract_closed_period::locked_dates_are_refused_both_ways,

@@ -1088,6 +1088,7 @@ dependencies = [
  "thiserror 2.0.21",
  "tiff",
  "tokio",
+ "tokio-rustls",
  "tracing",
  "tracing-subscriber",
  "uuid",

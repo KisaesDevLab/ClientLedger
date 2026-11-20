@@ -2665,8 +2665,15 @@ mod tests {
         s.edits_mut().user.theme = cl_settings::ThemeChoice::Dark;
         assert!(Screen::save(&mut s), "{:?}", s.block);
         assert_eq!(s.committed.ai, ai_before, "AI settings stay the host's");
-        assert_eq!(s.committed.email, mail_before, "mail settings stay the host's");
-        assert_eq!(s.edits().ai, ai_before, "the read-only pane shows the host's");
+        assert_eq!(
+            s.committed.email, mail_before,
+            "mail settings stay the host's"
+        );
+        assert_eq!(
+            s.edits().ai,
+            ai_before,
+            "the read-only pane shows the host's"
+        );
         // The pane is drawn with the plain words and no live widget edits.
         s.category = Category::Ai;
         let ctx = egui::Context::default();

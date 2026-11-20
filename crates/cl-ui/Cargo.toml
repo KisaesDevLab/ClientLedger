@@ -79,8 +79,15 @@ fax = "0.2.7"
 # cl-core). MIT OR Apache-2.0.
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 tempfile = "3.27.0"
-tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util"] }
 wiremock = "0.6.5"
+# P33 D5: the live office-network tests (tests/lan_live.rs) run a real
+# host's proxy on loopback, which only this test-only feature allows
+# (T15: release builds lack it; xtask layering refuses it on any normal
+# edge). tokio-rustls (MIT OR Apache-2.0, already in the tree through
+# cl-lan) sends the smuggling shapes over a paired TLS connection.
+cl-lan = { path = "../cl-lan", features = ["lan-test-listener"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring"] }
 
 [[bench]]
 name = "grid_scroll"
