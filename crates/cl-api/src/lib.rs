@@ -42,8 +42,8 @@ pub use client::{Budget, ClientConfig, LOOPBACK_HOST, Method, Timeouts};
 pub use endpoint::{EndpointSource, EndpointState, EngineEndpoint, FixedEndpoint, Purpose};
 pub use errors::{
     ApiError, AuthFailure, BANK_FEED_MATCH_LINK, ClosedPeriod, ConflictDetails, ConflictReason,
-    DEPOSIT_LINKS_DROPPED, ErrorCode, FieldPath, LocalValidation, SavedEntity, UserText,
-    ValidationError, ValidationIssue, delete_linked_to_bank_feed, delete_links,
+    DEPOSIT_LINKS_DROPPED, ErrorCode, FieldPath, LanRefusal, LocalValidation, SavedEntity,
+    UserText, ValidationError, ValidationIssue, delete_linked_to_bank_feed, delete_links,
     is_deposit_links_dropped, reconciled_statement_date,
 };
 // P29: sensitive accounts (U-33).

@@ -309,6 +309,7 @@ mod tests {
                     engine: 0,
                 },
                 generation: 3,
+                notices: Vec::new(),
                 engine_commit: Some("abc".into()),
                 schema_version: None,
             },

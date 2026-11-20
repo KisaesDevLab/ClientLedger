@@ -2748,6 +2748,43 @@ pub(crate) mod tests {
         );
     }
 
+    /// P33 review S4: a LAN refusal (maintenance, host engine down, not
+    /// sent) is final for a keyed save too: sent once, never retried, and
+    /// reported as "nothing was saved" rather than an unknown outcome.
+    #[tokio::test]
+    async fn lan_refusals_are_never_retried_even_for_keyed_saves() {
+        for (status, code, want) in [
+            (503, "MAINTENANCE", crate::LanRefusal::Maintenance),
+            (503, "HOST_ENGINE_DOWN", crate::LanRefusal::HostEngineDown),
+            (503, "LAN_NOT_SENT", crate::LanRefusal::NotSent),
+            (503, "LAN_UPDATE_NEEDED", crate::LanRefusal::UpdateNeeded),
+            (403, "HOST_ONLY", crate::LanRefusal::HostOnly),
+            (
+                409,
+                "MAINTENANCE_REQUIRED",
+                crate::LanRefusal::MaintenanceRequired,
+            ),
+            (428, "STALE_REQUIRED", crate::LanRefusal::StaleRequired),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(json(
+                    status,
+                    &format!(r#"{{"error":{{"message":"x","code":"{code}"}}}}"#),
+                ))
+                .mount(&server)
+                .await;
+            let ex = exec_at(server.address().port());
+            ex.set_idempotency_v1(true);
+            let e = ex
+                .run(&post_op(), post_call(), &none(), None)
+                .await
+                .expect_err("refused");
+            assert_eq!(e, ApiError::Lan(want), "{code}");
+            assert_eq!(count(&server).await, 1, "{code}: sent once");
+        }
+    }
+
     #[tokio::test]
     async fn down_permanent_fails_at_once() {
         let ex = exec_on(Arc::new(FixedEndpoint::with_state(EndpointState::Down {
