@@ -21,7 +21,9 @@
 //! exact strings, never floats.
 #![allow(
     clippy::too_many_lines,
-    reason = "each test is one linear scenario over one booted host"
+    clippy::many_single_char_names,
+    clippy::similar_names,
+    reason = "each test is one linear scenario over one booted host; the soak's client loop keeps its short names (i, n, s, t, k)"
 )]
 
 use std::net::SocketAddr;
@@ -305,6 +307,7 @@ impl Host {
     }
 
     /// A runtime for the host's own sessions.
+    #[allow(clippy::unused_self, reason = "read as the host's runtime at each call")]
     fn host_rt(&self) -> &'static tokio::runtime::Runtime {
         static RT: std::sync::LazyLock<tokio::runtime::Runtime> = std::sync::LazyLock::new(rt);
         &RT
