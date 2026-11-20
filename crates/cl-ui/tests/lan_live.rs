@@ -10,7 +10,8 @@
 //!   routes refused from a workstation; reconnect after an engine restart,
 //!   a proxy restart, and a host restart with a new sign-in, data intact;
 //!   a public interface refused; a pin mismatch refused; the
-//!   request-smuggling shapes refused by the live proxy.
+//!   request-smuggling shapes refused by the live proxy; a restore on the
+//!   host under maintenance (refused from a workstation).
 //! - `office_network_soak` (`cargo xtask lan-soak`): five workstations
 //!   saving for `CL_LAN_SOAK_SECS` seconds (unset: not run).
 //!
@@ -698,6 +699,139 @@ fn removal_ends_sign_ins(host: &Host, hs: &Session, scratch: &Path) {
     drop(e);
 }
 
+/// PR-7 note: a restore on a LAN host, as the host window runs it (the
+/// launch-token client, so the engine's host class; under maintenance, as
+/// `screens/company/open.rs` does). Workstations can't restore
+/// (`tenant-archives/import` is host-only), are signed out by the hold,
+/// and afterwards sign in again to the restored company, whose books equal
+/// the backed-up ones.
+fn host_restore(host: &Host, b: &Desk, scratch: &Path) {
+    use cl_settings::secrets::BACKUP_PASSPHRASE;
+    use cl_settings::{BackupKind, RecentStore, SecretStore as _};
+    let hs = host.sign_in_here();
+    let rt = host.host_rt();
+    let named = |s: &Session, rt: &tokio::runtime::Runtime| {
+        rt.block_on(s.companies())
+            .expect("companies")
+            .into_iter()
+            .find(|c| c.tenant_name == BOOKS)
+            .map(|c| c.tenant_id)
+            .expect("the books are listed")
+    };
+    let tenant = named(&hs, rt);
+    // The host app's own company list and keychain (the company was made
+    // by first-run setup, so the list learns it here as Open would).
+    let store = RecentStore::in_dir(&scratch.join("host-settings"));
+    store
+        .update(|l| {
+            l.upsert(tenant, BOOKS);
+        })
+        .expect("company list");
+    let secrets = MemorySecrets::new();
+    secrets
+        .set(
+            BACKUP_PASSPHRASE,
+            &Secret::new("lan-live-backup-passphrase-synthetic"),
+        )
+        .expect("keychain");
+    let before = rt
+        .block_on(hs.tenants().verification_totals(tenant, on(), false))
+        .expect("totals before");
+    let made = rt
+        .block_on(cl_company::backup(
+            &hs,
+            &store,
+            &secrets,
+            &cl_company::BackupRequest {
+                tenant_id: tenant,
+                kind: BackupKind::Backup,
+                dest_dir: scratch.join("host-backups"),
+                apply_retention: false,
+                protected: None,
+            },
+            &cl_company::backup::silent(),
+        ))
+        .expect("a backup on the LAN host");
+
+    // A workstation can't restore: host-only, refused before the engine.
+    let sb = b.sign_in(&host.password);
+    let refused = b.run(sb.tenants().import_archive(&cl_api::ImportRequest {
+        path: made.record.path.clone(),
+        passphrase: Secret::new("lan-live-backup-passphrase-synthetic"),
+        scratch: false,
+        reset_document_drafts: false,
+    }));
+    assert!(
+        matches!(refused, Err(ApiError::Lan(LanRefusal::HostOnly))),
+        "a restore from a workstation: {refused:?}"
+    );
+
+    // The host restores its own file (a path import, host class only).
+    rt.block_on(cl_company::close_company(&hs)).expect("close");
+    let restored = rt
+        .block_on(cl_ui::lan_status::with_maintenance(
+            &hs,
+            true,
+            cl_company::restore(
+                &hs,
+                &store,
+                &secrets,
+                &cl_company::RestoreRequest {
+                    path: made.record.path.clone(),
+                    passphrase: None,
+                },
+                &cl_company::backup::silent(),
+                &cl_company::Statistics::none(),
+            ),
+        ))
+        .expect("a restore on the LAN host");
+    assert_ne!(restored.new_tenant, tenant, "a restore makes a new company");
+    let held = rt.block_on(hs.maintenance()).expect("maintenance state");
+    assert!(!held.active, "the hold ended with the restore: {held:?}");
+    // The hold signed the workstation out.
+    let gone = b.run(sb.ledger_version());
+    assert!(gone.is_err(), "the workstation was signed out: {gone:?}");
+
+    // The restored company carries the books' name and the same books.
+    let after = rt
+        .block_on(
+            hs.tenants()
+                .verification_totals(restored.new_tenant, on(), false),
+        )
+        .expect("totals after");
+    // Money and counts, not `books_differ` (which also wants the same
+    // company ids; a restore makes new ones).
+    let books = |v: &cl_api::VerificationTotals| {
+        (
+            v.total_assets,
+            v.total_liabilities,
+            v.total_equity,
+            v.accounts_receivable,
+            v.accounts_payable,
+            v.trial_balance.clone(),
+            v.counts.accounts,
+            v.counts.transactions,
+            v.counts.posted_transactions,
+        )
+    };
+    assert!(before.counts.transactions > 0, "the books have entries");
+    assert_eq!(
+        books(&before),
+        books(&after),
+        "the restored books equal the backed-up ones"
+    );
+    assert_eq!(
+        named(&hs, rt),
+        restored.new_tenant,
+        "the restored company carries the books' name"
+    );
+    b.wait_connected("workstation B after the restore");
+    let sb = b.sign_in(&host.password);
+    b.run(sb.ledger_version())
+        .expect("the workstation reads the restored books");
+    drop(hs);
+}
+
 fn host_or_skip(scratch: &Path) -> Option<Host> {
     let Some(exe) = engine_exe() else {
         skip("the engine executable is missing (run `cargo xtask engine`)");
@@ -1008,6 +1142,9 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
         .run(sb2.transactions().get(id))
         .expect("read after the refusals");
     assert_eq!(debits(&ok.record), m("25.00"));
+
+    // --- A restore on the LAN host (last: its hold signs everyone out) ----
+    host_restore(host, &b, scratch);
     drop((a, b, c, d));
 }
 
