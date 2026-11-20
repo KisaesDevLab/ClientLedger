@@ -43,15 +43,14 @@ pub fn transfer_roundtrip(args: &[String]) -> Result<()> {
 
     // The engine `cargo xtask engine` built: the test binary can't find
     // it by itself when the build dir is outside the workspace target.
-    let engine_exe = match std::env::var_os("CL_ENGINE_EXE") {
-        Some(p) => std::path::PathBuf::from(p),
-        None => {
-            let t = crate::engine::host_target()?;
-            crate::meta::target_dir(&root)
-                .join("engine")
-                .join(t.dir)
-                .join(t.exe_name)
-        }
+    let engine_exe = if let Some(p) = std::env::var_os("CL_ENGINE_EXE") {
+        std::path::PathBuf::from(p)
+    } else {
+        let t = crate::engine::host_target()?;
+        crate::meta::target_dir(&root)
+            .join("engine")
+            .join(t.dir)
+            .join(t.exe_name)
     };
     println!("transfer-roundtrip: 1/2 make the transfer file on the desktop side");
     let status = Command::new(cargo())
