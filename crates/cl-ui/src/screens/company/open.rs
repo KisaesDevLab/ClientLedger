@@ -206,6 +206,23 @@ impl OpenCompanyScreen {
     }
 
     fn probe(&mut self) {
+        // An office-network workstation (P33) has no supervisor: the host's
+        // engine says whether its books are set up (`/desktop/info` is a
+        // workstation route).
+        if self.link.is_workstation() {
+            let (Some(group), Some(client)) = (self.group.as_ref(), self.link.client().cloned())
+            else {
+                return;
+            };
+            self.probe_task = spawn_lifecycle(&self.link, group, move || async move {
+                match client.desktop_info().await?.initialized {
+                    Some(set_up) => Ok(set_up),
+                    None => Err(CompanyError::Metadata),
+                }
+            })
+            .ok();
+            return;
+        }
         let (Some(group), Some(sup)) = (self.group.as_ref(), self.link.supervisor().cloned())
         else {
             return;
@@ -319,6 +336,7 @@ impl OpenCompanyScreen {
         };
         let store = self.link.store().clone();
         let secrets = self.link.secrets();
+        let workstation = self.link.is_workstation();
         self.busy = Some("open.opening");
         self.opening_role = Some(row.role.clone());
         self.open_task = spawn_lifecycle(&self.link, group, move || async move {
@@ -330,7 +348,12 @@ impl OpenCompanyScreen {
                 .ok()
                 .and_then(|l| l.get(row.tenant_id).map(|r| r.prefs.clone()))
                 .unwrap_or_default();
-            crate::screens::preferences::ai::push_at_open(&session, secrets.as_ref(), &prefs).await;
+            // Not on an office-network workstation: the host computer holds
+            // the AI and mail settings, and secrets never leave it (Q-P33l).
+            if !workstation {
+                crate::screens::preferences::ai::push_at_open(&session, secrets.as_ref(), &prefs)
+                    .await;
+            }
             let settings = session.company_settings().await.ok();
             // P29: the role is per company, so its rights are read again.
             let rights = crate::company::read_rights(&session, row.tenant_id, &row.role).await;
@@ -447,6 +470,13 @@ impl OpenCompanyScreen {
             self.probe_task = None;
             match r {
                 Ok(true) => self.stage = Stage::SignIn,
+                // First-run setup is the host's (`initialize` is host-only):
+                // a workstation waits for it.
+                Ok(false) if self.link.is_workstation() => {
+                    self.stage = Stage::EngineNotReady;
+                    self.notice = Some(crate::i18n::t("open.ws.host_not_set_up"));
+                    self.reprobe_at = Some(Instant::now() + REPROBE_EVERY);
+                }
                 Ok(false) => self.stage = Stage::FirstRun,
                 Err(_) => {
                     self.stage = Stage::EngineNotReady;
@@ -745,6 +775,11 @@ impl OpenCompanyScreen {
                 self.error = None;
                 self.notice = None;
             }
+            // Password recovery runs on the host computer (P33: the
+            // recovery route is host-only).
+            Some(SignInEvent::Forgot) if self.link.is_workstation() => {
+                self.notice = Some(t("open.ws.forgot"));
+            }
             Some(SignInEvent::Forgot) => {
                 self.recovery = Some(crate::screens::recovery::RecoveryPanel::new(
                     Arc::clone(&self.link),
@@ -968,10 +1003,15 @@ impl Screen for OpenCompanyScreen {
         // A window opened before the engine was up asks again once it runs;
         // otherwise it would say "still starting up" for good.
         if self.stage == Stage::EngineNotReady {
-            let running = self
-                .link
-                .supervisor()
-                .is_some_and(|s| matches!(s.status().state, HostState::Running));
+            // A workstation asks once the host answers (P33).
+            let running = if self.link.is_workstation() {
+                crate::lan_status::state_of(&self.link)
+                    .is_some_and(|s| s == crate::lan_status::LanState::Connected)
+            } else {
+                self.link
+                    .supervisor()
+                    .is_some_and(|s| matches!(s.status().state, HostState::Running))
+            };
             if reprobe_due(running, self.reprobe_at, Instant::now()) {
                 self.stage = Stage::Probing;
             } else {
@@ -1013,6 +1053,10 @@ impl Screen for OpenCompanyScreen {
 
     fn command(&mut self, id: CommandId) -> bool {
         match id.as_str() {
+            "file.restore" | "file.open_practice" if self.link.is_workstation() => {
+                self.notice = Some(t("lan.host_only"));
+                true
+            }
             "file.restore" => {
                 self.restore_open = true;
                 true
@@ -1038,6 +1082,10 @@ impl OpenCompanyScreen {
         // practice open asked for earlier is dropped.
         if self.stage == Stage::SignIn && self.signin.must_change() {
             self.practice_pending = false;
+            return;
+        }
+        // P33: the practice company is built on the host computer.
+        if self.link.is_workstation() {
             return;
         }
         ui.add_space(14.0);
@@ -1141,6 +1189,7 @@ impl OpenCompanyScreen {
         let mut action: Option<CommandId> = None;
         let mut selected_now: Option<usize> = None;
         let mut practice = false;
+        let workstation = self.link.is_workstation();
         let mut left = |this: &mut Self, ui: &mut Ui| {
             eyebrow(ui, &t("open.recent"));
             ui.add_space(6.0);
@@ -1167,14 +1216,18 @@ impl OpenCompanyScreen {
                 } else if primary_button(ui, &t("open.open")).clicked() {
                     open_clicked = true;
                 }
-                if ui
-                    .add(egui::Button::new(t("open.browse")).min_size(Vec2::new(0.0, 44.0)))
-                    .clicked()
+                if !workstation
+                    && ui
+                        .add(egui::Button::new(t("open.browse")).min_size(Vec2::new(0.0, 44.0)))
+                        .clicked()
                 {
                     this.restore_open = true;
                 }
             });
             ui.add_space(4.0);
+            if workstation {
+                return;
+            }
             ui.add(
                 egui::Label::new(
                     RichText::new(t_with(
@@ -1193,6 +1246,16 @@ impl OpenCompanyScreen {
                      restore: &mut bool| {
             eyebrow(ui, &t("open.start"));
             ui.add_space(6.0);
+            // P33: new, imported, restored and practice companies are made
+            // on the host computer (Q-P33y); a workstation uses its books.
+            if workstation {
+                form::hint(ui, tokens, &t("open.ws.start_on_host"));
+                ui.add_space(6.0);
+                if Self::side_button(ui, tokens, &t("open.lan"), &t("open.lan_sub")).clicked() {
+                    *action = Some(CommandId::new("company.lan_setup"));
+                }
+                return;
+            }
             if Self::side_button(ui, tokens, &t("open.new"), &t("open.new_sub")).clicked() {
                 *action = Some(CommandId::new("file.new_company"));
             }
@@ -1233,7 +1296,7 @@ impl OpenCompanyScreen {
                 });
             });
         }
-        self.restore_open = restore;
+        self.restore_open = restore && !workstation;
         if let Some(i) = selected_now {
             self.selected = i;
         }

@@ -94,6 +94,59 @@ fn start_lan_host(
     }
 }
 
+/// An office-network workstation (P33): only the loopback forwarder runs
+/// (in this process); cl-api talks to it, and it pins and forwards to the
+/// host. If the link can't start (not paired, certificate trouble), the
+/// status bar says so and the Office Network window can fix it; nothing
+/// local starts in its place.
+fn start_workstation(
+    paths: &AppPaths,
+    lan: &LanSettings,
+    guard: cl_host::InstanceGuard,
+    shell: &mut ShellOptions,
+    options: &mut LaunchOptions,
+) -> Result<()> {
+    use cl_ui::lan_link::{LanStartError, NoHost, WorkstationRun};
+    let store = KeyringSecrets::for_root(paths.root());
+    let started = match lan.workstation.as_ref() {
+        Some(ws) => WorkstationRun::start(ws, paths.root(), &store, guard),
+        None => Err((LanStartError::NotPaired, guard)),
+    };
+    let endpoint: Arc<dyn cl_api::EndpointSource> = match started {
+        Ok(run) => {
+            shell.host = Some(run.probe());
+            options.focus_request = Some(Arc::clone(&run.focus));
+            options.stop_request = Some(Arc::clone(&run.stop));
+            let endpoint = run.link.endpoint_source();
+            options.keep_alive = Some(Box::new(run));
+            endpoint
+        }
+        Err((e, guard)) => {
+            tracing::error!(error = %e, "the office network link could not start");
+            shell.host = Some(Arc::new(StaticProbe(HostView::Failed(cl_ui::i18n::t(
+                "lan.ws.start_failed",
+            )))));
+            // Still hold the single-instance lock for this run.
+            options.keep_alive = Some(Box::new(guard));
+            Arc::new(NoHost)
+        }
+    };
+    // A company link even when the host can't be reached: the Office
+    // Network window (to fix the address or forget the host) needs one.
+    let client = Client::new(endpoint, ClientConfig::default())
+        .context("the engine client could not start")?;
+    let queue = ApiQueue::start(Arc::new(|| {}), QueueConfig::default())
+        .context("the request queue could not start")?;
+    shell.company = Some(Arc::new(CompanyLink::workstation(
+        client,
+        queue,
+        RecentStore::in_dir(&paths.root().join("settings")),
+        Arc::new(store),
+        paths.root().join("backups"),
+    )));
+    Ok(())
+}
+
 /// `--lan-serve`: the headless background host (Q-P33f). Runs until
 /// `instance.ctl` asks it to stop (the app taking over, or the CLI).
 fn lan_serve(paths: &AppPaths, args: &args::Args, lan: &LanSettings) -> Result<()> {
@@ -184,7 +237,11 @@ fn main() -> Result<()> {
         paths
             .ensure_dirs()
             .context("could not create app folders")?;
-        if let Some(exe) = find_engine_exe(args.engine_exe.as_deref()) {
+        if lan.mode == Mode::Workstation {
+            // P33: the books are the host's. No local database or engine
+            // starts, even when the link can't (never an empty local book).
+            start_workstation(&paths, &lan, guard, &mut shell, &mut options)?;
+        } else if let Some(exe) = find_engine_exe(args.engine_exe.as_deref()) {
             let mut cfg = HostConfig::new(paths.clone(), exe);
             cfg.lan_host = lan.mode == Mode::Host && lan.host.is_some();
             let link = HostLink::start(cfg, guard);

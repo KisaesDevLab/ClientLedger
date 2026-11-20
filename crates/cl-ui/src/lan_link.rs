@@ -309,6 +309,127 @@ impl LanWorkstation {
     }
 }
 
+/// cl-api's endpoint when a workstation's link could not start: nothing
+/// is reachable, and nothing local stands in for the host.
+#[derive(Debug, Default)]
+pub struct NoHost;
+
+impl EndpointSource for NoHost {
+    fn current(&self) -> cl_api::EndpointState {
+        cl_api::EndpointState::Down { permanent: true }
+    }
+}
+
+/// The status bar's view of a workstation link: the host's books, as
+/// far as this computer can tell.
+pub struct WorkstationProbe(pub std::sync::Weak<LanWorkstation>);
+
+impl crate::shell::HostProbe for WorkstationProbe {
+    fn view(&self) -> crate::shell::HostView {
+        use crate::shell::HostView;
+        match self.0.upgrade().map(|w| w.state()) {
+            None => HostView::Stopped,
+            Some(LinkState::Connected { .. }) => HostView::Running,
+            Some(LinkState::Connecting) => HostView::Starting,
+            Some(LinkState::HostEngineDown | LinkState::HostMaintenance) => HostView::Restarting,
+            Some(s) => HostView::Failed(crate::i18n::t(&format!("lan.link.{}", s.key()))),
+        }
+    }
+}
+
+/// A workstation app run (P33): the loopback forwarder to the paired host
+/// (in this process: no database, no engine, no child process), and the
+/// single-instance relay a supervisor would otherwise run (a second
+/// launch brings this window forward; `host stop` closes it).
+pub struct WorkstationRun {
+    /// The link; the only strong reference (the status code holds weak
+    /// ones), so dropping this stops the forwarder.
+    pub link: Arc<LanWorkstation>,
+    /// A second launch asked for the window.
+    pub focus: Arc<AtomicBool>,
+    /// `host stop` asked the app to quit.
+    pub stop: Arc<AtomicBool>,
+    relay_stop: Arc<AtomicBool>,
+}
+
+impl std::fmt::Debug for WorkstationRun {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkstationRun")
+            .field("link", &self.link)
+            .finish_non_exhaustive()
+    }
+}
+
+impl WorkstationRun {
+    /// Starts the forwarder for `settings` and the relay over `guard`.
+    /// Registers the link with [`crate::lan_status::set_workstation`], so
+    /// the overlay, banners and refresh run.
+    ///
+    /// # Errors
+    /// See [`LanWorkstation::start`], with the guard handed back so the
+    /// app keeps the single-instance lock. The caller must not fall back
+    /// to a local engine: the owner would be keying into an empty book.
+    pub fn start(
+        settings: &WorkstationSettings,
+        root: &Path,
+        store: &dyn SecretStore,
+        guard: cl_host::InstanceGuard,
+    ) -> Result<WorkstationRun, (LanStartError, cl_host::InstanceGuard)> {
+        let link = match LanWorkstation::start(settings, root, store) {
+            Ok(l) => Arc::new(l),
+            Err(e) => return Err((e, guard)),
+        };
+        crate::lan_status::set_workstation(&link);
+        let focus = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let relay_stop = Arc::new(AtomicBool::new(false));
+        let (f, s, end) = (
+            Arc::clone(&focus),
+            Arc::clone(&stop),
+            Arc::clone(&relay_stop),
+        );
+        let weak = Arc::downgrade(&link);
+        let spawned = std::thread::Builder::new()
+            .name("cl-instance-relay".into())
+            .spawn(move || {
+                // Holds the lock for the whole run; ends with the app.
+                while !end.load(Ordering::SeqCst) {
+                    if guard.take_focus_request() {
+                        f.store(true, Ordering::SeqCst);
+                    }
+                    if guard.stop_requested() {
+                        s.store(true, Ordering::SeqCst);
+                    }
+                    let state = weak.upgrade().map_or("stopped", |w| w.state().key());
+                    guard.set_status(&format!("workstation {state}"));
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "could not start the second-launch relay");
+        }
+        tracing::info!("office network: workstation mode");
+        Ok(WorkstationRun {
+            link,
+            focus,
+            stop,
+            relay_stop,
+        })
+    }
+
+    /// The status bar's probe.
+    #[must_use]
+    pub fn probe(&self) -> Arc<dyn crate::shell::HostProbe> {
+        Arc::new(WorkstationProbe(Arc::downgrade(&self.link)))
+    }
+}
+
+impl Drop for WorkstationRun {
+    fn drop(&mut self) {
+        self.relay_stop.store(true, Ordering::SeqCst);
+    }
+}
+
 // ---- The live office network for the setup window (P33 D4) ----------------
 
 /// What the app hands the setup window: its data folder, the keychain and
@@ -463,7 +584,9 @@ impl crate::screens::lan_setup::LanControl for LiveLan {
                 .workstation
                 .as_ref()
                 .map(|w| w.host.to_string()),
-            link: "connecting",
+            // The running workstation link's state (it drives the status
+            // bar too); "connecting" before one runs.
+            link: crate::lan_status::workstation_link_key().unwrap_or("connecting"),
             restart_needed: self.restart,
         }
     }

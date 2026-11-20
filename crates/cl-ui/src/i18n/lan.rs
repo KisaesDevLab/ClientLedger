@@ -139,4 +139,12 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lan.field.amount", "Amount"),
     ("lan.field.adjusting", "Adjusting entry"),
     ("lan.field.reverseOn", "Reverse on"),
+    // ---- P33 workstation start-up and settings (lane A) ----
+    ("lan.down.settings", "Office Network\u{2026}"),
+    ("lan.down.settings.tip", "Change the host computer's address, or stop using the host's books on this computer"),
+    ("lan.ws.start_failed", "This computer can't reach the host's books. Open Company \u{203a} Office Network to check the host."),
+    ("open.ws.host_not_set_up", "The books on the host computer aren't set up yet. Finish setting up ClientLedger on the host computer first."),
+    ("open.ws.forgot", "To reset a forgotten password, use ClientLedger on the host computer."),
+    ("open.ws.start_on_host", "This computer uses the host computer's books. Create, restore, import and practice companies on the host computer."),
+    ("prefs.ws.host_sets", "The host computer sets these for everyone on the office network. Change them in ClientLedger on the host computer."),
 ];

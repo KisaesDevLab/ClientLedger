@@ -1616,8 +1616,19 @@ impl Shell {
         self.show_overlays(&ctx);
         // P33: while the host doesn't answer, the app is covered and every
         // window stays as it was; commands asked for meanwhile are dropped.
-        if self.lan.overlay(&ctx, dirty) {
-            self.pending.clear();
+        let setup_in_front = self.windows.active().is_some_and(|w| {
+            self.windows
+                .find_kind(CommandId::new(crate::screens::lan_setup::KIND))
+                == Some(w.id)
+        });
+        match self.lan.overlay(&ctx, dirty, setup_in_front) {
+            crate::lan_status::Overlay::None => {}
+            crate::lan_status::Overlay::Covered => self.pending.clear(),
+            crate::lan_status::Overlay::OpenSetup => {
+                self.pending.clear();
+                self.pending
+                    .push(CommandId::new(crate::screens::lan_setup::KIND));
+            }
         }
 
         for id in std::mem::take(&mut self.pending) {

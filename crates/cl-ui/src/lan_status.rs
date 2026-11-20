@@ -132,6 +132,12 @@ fn running_workstation() -> Option<Arc<LanWorkstation>> {
         .upgrade()
 }
 
+/// The running workstation link's state as its `lan.link.` key suffix.
+#[must_use]
+pub fn workstation_link_key() -> Option<&'static str> {
+    running_workstation().map(|w| w.state().key())
+}
+
 /// This computer's place on the office network now; `None` when it is
 /// just this computer.
 #[must_use]
@@ -183,6 +189,18 @@ pub fn host_only_now(id: &str) -> bool {
 #[must_use]
 pub fn host_only(workstation: bool, id: &str) -> bool {
     workstation && HOST_ONLY.contains(&id)
+}
+
+/// What the host-down overlay did this frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Overlay {
+    /// Not shown.
+    None,
+    /// Shown: nothing behind it takes input.
+    Covered,
+    /// The owner asked for the Office Network window (to fix the host's
+    /// address or forget the host).
+    OpenSetup,
 }
 
 /// The shell's office-network part: state, overlay, banners, refresh.
@@ -360,11 +378,17 @@ impl LanShell {
     }
 
     /// The host-down overlay: covers the app while the host doesn't
-    /// answer. True while it shows (nothing behind it takes input).
-    pub fn overlay(&mut self, ctx: &egui::Context, dirty: usize) -> bool {
+    /// answer. Not while the Office Network window is in front
+    /// (`setup_in_front`): a host that moved to another address is fixed
+    /// there, so a workstation is never locked out of its own settings.
+    pub fn overlay(&mut self, ctx: &egui::Context, dirty: usize, setup_in_front: bool) -> Overlay {
         let Some(state) = self.state.filter(|s| s.covered()) else {
-            return false;
+            return Overlay::None;
         };
+        if setup_in_front {
+            return Overlay::None;
+        }
+        let mut open_setup = false;
         let tokens = Tokens::of(ctx);
         egui::Modal::new(egui::Id::unique("lan_host_down")).show(ctx, |ui| {
             ui.set_max_width(520.0);
@@ -382,18 +406,31 @@ impl LanShell {
                 ui.spinner();
                 ui.label(t("lan.down.waiting"));
             });
-            if ui
-                .button(t("lan.down.check"))
-                .on_hover_text(t("lan.down.check.tip"))
-                .clicked()
-            {
-                // The link checks every 2 s on its own; this only redraws
-                // at once.
-                ui.ctx().request_repaint();
-            }
+            ui.horizontal(|ui| {
+                if ui
+                    .button(t("lan.down.check"))
+                    .on_hover_text(t("lan.down.check.tip"))
+                    .clicked()
+                {
+                    // The link checks every 2 s on its own; this only
+                    // redraws at once.
+                    ui.ctx().request_repaint();
+                }
+                if ui
+                    .button(t("lan.down.settings"))
+                    .on_hover_text(t("lan.down.settings.tip"))
+                    .clicked()
+                {
+                    open_setup = true;
+                }
+            });
         });
         ctx.request_repaint_after(Duration::from_millis(500));
-        true
+        if open_setup {
+            Overlay::OpenSetup
+        } else {
+            Overlay::Covered
+        }
     }
 
     /// For the control channel (no host address, no names).
