@@ -31,6 +31,7 @@ pub mod home;
 pub mod imports;
 pub mod inventory;
 pub mod keymap;
+pub mod lan;
 pub mod lists;
 pub mod lookup;
 pub mod numbering;
