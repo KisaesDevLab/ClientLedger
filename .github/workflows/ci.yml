@@ -498,6 +498,10 @@ jobs:
         env:
           CL_API_REQUIRE: "1"
         run: cargo test -p cl-company --test transfer_live -- --nocapture --test-threads=1
+      - name: Missing attachment files stop a backup with the list (P32 QA-1)
+        env:
+          CL_API_REQUIRE: "1"
+        run: cargo test -p cl-company --test backup_missing_live -- --nocapture --test-threads=1
       - name: Report Builder definitions read as the engine's schema reads them (zod and serde parity, R-T14)
         env:
           # Fails instead of printing PENDING when the shared fixtures are missing.

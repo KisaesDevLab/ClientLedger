@@ -83,20 +83,7 @@ pub struct Preflight {
     pub capability_ok: bool,
 }
 
-/// One attachment file the export could not read (Q-P32k).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MissingAttachment {
-    /// The attachment id.
-    pub attachment_id: String,
-    /// Its file name (owner data: shown, never logged).
-    pub file_name: Option<String>,
-    /// The kind of record it belongs to (`bill`, `transaction`, …).
-    pub record_type: Option<String>,
-    /// That record's id (for Open record).
-    pub record_id: Option<String>,
-    /// `FILE_MISSING`, `FILE_SIZE_MISMATCH` or `EXTERNAL_FILE`.
-    pub reason: String,
-}
+pub use crate::backup::MissingAttachment;
 
 /// Why a transfer didn't happen.
 #[derive(Debug, thiserror::Error)]
@@ -495,6 +482,9 @@ pub async fn make_transfer(
     .await
     .map_err(|e| match e {
         CompanyError::Api(a) => TransferError::from(a),
+        // QA-1: the backup taken first finds the missing files; the same
+        // list as the transfer's own check, with Open record.
+        CompanyError::MissingFiles(f) => TransferError::MissingFiles(f),
         other => TransferError::Company(other),
     })?;
 
@@ -574,7 +564,7 @@ async fn after_backup(
             && !err.missing_files().is_empty()
         {
             return Err(TransferError::MissingFiles(
-                resolve_missing(session, err.missing_files()).await,
+                crate::backup::resolve_missing(session, err.missing_files()).await,
             ));
         }
         return Err(CompanyError::JobFailed { code }.into());
@@ -632,26 +622,4 @@ async fn after_backup(
         bytes,
         discarded_payroll: *discarded,
     })
-}
-/// Each missing file with its name and record, as far as the engine can
-/// say (an attachment it can't find keeps only its id).
-async fn resolve_missing(
-    session: &Session,
-    files: Vec<cl_api::MissingFile>,
-) -> Vec<MissingAttachment> {
-    let mut out = Vec::with_capacity(files.len());
-    for f in files {
-        let found = match cl_api::AttachmentId::parse(&f.row_id) {
-            Ok(id) => session.attachments().get(id).await.ok(),
-            Err(_) => None,
-        };
-        out.push(MissingAttachment {
-            attachment_id: f.row_id,
-            file_name: found.as_ref().map(|a| a.file_name.clone()),
-            record_type: found.as_ref().map(|a| a.attachable_type.clone()),
-            record_id: found.map(|a| a.attachable_id),
-            reason: f.reason,
-        });
-    }
-    out
 }

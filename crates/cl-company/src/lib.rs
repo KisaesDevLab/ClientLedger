@@ -42,7 +42,8 @@ pub mod inbox {
 }
 
 pub use backup::{
-    BackupOutcome, BackupRequest, HostMetadata, Progress, ProgressSink, backup, wait_for_job,
+    BackupOutcome, BackupRequest, HostMetadata, MissingAttachment, Progress, ProgressSink, backup,
+    wait_for_job,
 };
 pub use delete::{DeleteOutcome, DeleteRequest, delete_company};
 pub use error::CompanyError;

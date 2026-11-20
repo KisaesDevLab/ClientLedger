@@ -482,6 +482,86 @@ async fn missing_files_are_all_listed() {
     assert!(!req.dest.exists());
 }
 
+/// QA-1: the backup taken first stops on `FILE_MISSING` (desktop mode
+/// checks files on every backup): the same list, nothing discarded, no
+/// transfer export started, no file.
+#[tokio::test]
+async fn missing_files_found_by_the_backup_first_are_listed() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let server = engine(&["tenant-archive-v1", "tenant-archive-transfer-v1"]).await;
+    let a1 = "8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01";
+    Mock::given(method("GET"))
+        .and(path(format!("/api/v1/attachments/{a1}")))
+        .respond_with(json_reply(
+            200,
+            json!({"attachment":{"id":a1,"fileName":"receipt-0412.pdf","attachableType":"bill",
+                   "attachableId":"9a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01"}}),
+        ))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/tenant-archives/jobs/job_b"))
+        .respond_with(json_reply(
+            200,
+            json!({"status":"failed","error":{"code":"FILE_MISSING","message":"x","details":{
+                "table":"attachments","rowId":a1,"files":[
+                {"table":"attachments","column":"storage_key","rowId":a1,"reason":"FILE_MISSING"},
+                {"table":"attachments","column":"storage_key","rowId":"8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02","reason":"FILE_MISSING"}]}}}),
+        ))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    mount_jobs(&server, dir.path(), honoured()).await;
+    let s = session(&server).await;
+    let (store, secrets) = stores(dir.path());
+    let req = request(dir.path(), true);
+    let e = make_transfer(&s, &store, &secrets, &req, &silent())
+        .await
+        .expect_err("missing files");
+    assert!(
+        e.discarded().is_none(),
+        "nothing discarded before the backup"
+    );
+    match e.kind() {
+        TransferError::MissingFiles(files) => {
+            assert_eq!(files.len(), 2);
+            assert_eq!(files[0].file_name.as_deref(), Some("receipt-0412.pdf"));
+            assert_eq!(
+                files[0].record_id.as_deref(),
+                Some("9a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01")
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(archive_posts(&server).await.len(), 1, "only the backup");
+    assert!(!req.dest.exists());
+
+    // File › Back Up Company: the same list.
+    let b = cl_company::backup(
+        &s,
+        &store,
+        &secrets,
+        &cl_company::BackupRequest {
+            tenant_id: t(T1),
+            kind: cl_settings::BackupKind::Backup,
+            dest_dir: dir.path().join("backups"),
+            apply_retention: true,
+            protected: None,
+        },
+        &silent(),
+    )
+    .await
+    .expect_err("missing files");
+    match &b {
+        cl_company::CompanyError::MissingFiles(f) => assert_eq!(f.len(), 2),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(
+        cl_core::OwnerFacing::owner_message(&b).key,
+        "error.backup.missing_files"
+    );
+}
+
 /// Q-P32u: 409 `TENANT_BUSY` is "busy", never queued.
 #[tokio::test]
 async fn a_busy_engine_is_busy() {

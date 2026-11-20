@@ -307,6 +307,60 @@ pub async fn poll_job(
     }
 }
 
+/// One attachment file an export could not read (Q-P32k, QA-1).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MissingAttachment {
+    /// The attachment id.
+    pub attachment_id: String,
+    /// Its file name (owner data: shown, never logged).
+    pub file_name: Option<String>,
+    /// The kind of record it belongs to (`bill`, `transaction`, …).
+    pub record_type: Option<String>,
+    /// That record's id (for Open record).
+    pub record_id: Option<String>,
+    /// `FILE_MISSING`, `FILE_SIZE_MISMATCH` or `EXTERNAL_FILE`.
+    pub reason: String,
+}
+
+/// Each missing file with its name and record, as far as the engine can
+/// say (an attachment it can't find keeps only its id).
+pub(crate) async fn resolve_missing(
+    session: &Session,
+    files: Vec<cl_api::MissingFile>,
+) -> Vec<MissingAttachment> {
+    let mut out = Vec::with_capacity(files.len());
+    for f in files {
+        let found = match cl_api::AttachmentId::parse(&f.row_id) {
+            Ok(id) => session.attachments().get(id).await.ok(),
+            Err(_) => None,
+        };
+        out.push(MissingAttachment {
+            attachment_id: f.row_id,
+            file_name: found.as_ref().map(|a| a.file_name.clone()),
+            record_type: found.as_ref().map(|a| a.attachable_type.clone()),
+            record_id: found.map(|a| a.attachable_id),
+            reason: f.reason,
+        });
+    }
+    out
+}
+
+/// The error for a failed backup job: the engine's list of missing or
+/// changed attachment files when it gave one (QA-1: desktop backups stop
+/// on `FILE_MISSING` / `FILE_SIZE_MISMATCH` and list every file), else
+/// `JobFailed` with its code.
+pub(crate) async fn job_failure(session: &Session, status: &ArchiveJobStatus) -> CompanyError {
+    let code = status.error_code();
+    tracing::warn!(code = %code, "backup: export failed");
+    if let Some(err) = status.error.as_ref() {
+        let files = err.missing_files();
+        if !files.is_empty() {
+            return CompanyError::MissingFiles(resolve_missing(session, files).await);
+        }
+    }
+    CompanyError::JobFailed { code }
+}
+
 /// Moves the finished archive to `dest` and checks its hash. The source is
 /// removed only after the copy verified.
 pub(crate) async fn place_archive(
@@ -406,12 +460,13 @@ pub async fn backup(
             },
         )
         .await?;
-    let result = wait_for_job(session, &job.job_id, progress)
-        .await?
-        .export_result()
-        .ok_or(CompanyError::JobFailed {
-            code: "NO_RESULT".into(),
-        })?;
+    let status = poll_job(session, &job.job_id, progress).await?;
+    if status.status == JobState::Failed {
+        return Err(job_failure(session, &status).await);
+    }
+    let result = status.export_result().ok_or(CompanyError::JobFailed {
+        code: "NO_RESULT".into(),
+    })?;
     let now = cl_settings::recent::now();
     let dest = req
         .dest_dir

@@ -48,6 +48,11 @@ pub enum CompanyError {
         /// `ARCHIVE_TOO_NEW`, ...), or `JOB_UNKNOWN` / `TIMEOUT`.
         code: String,
     },
+    /// A backup stopped because attachment files are missing or changed
+    /// on this computer (QA-1, engine `FILE_MISSING` /
+    /// `FILE_SIZE_MISMATCH`); every one is listed. Retrying never helps.
+    #[error("{} attachment files can't be read", .0.len())]
+    MissingFiles(Vec<crate::backup::MissingAttachment>),
     /// The file is not a `ClientLedger` backup.
     #[error("not a backup file")]
     NotABackup,
@@ -134,8 +139,15 @@ impl OwnerFacing for CompanyError {
                     "error.company.not_a_transfer",
                     "fix.company.not_a_transfer",
                 ),
+                // QA-1: without the list (an older engine); never "try again".
+                "FILE_MISSING" | "FILE_SIZE_MISMATCH" | "EXTERNAL_FILE" => {
+                    OwnerMessage::with_fix("error.backup.missing_files", "fix.backup.missing_files")
+                }
                 _ => OwnerMessage::with_fix("error.company.job_failed", "fix.api.try_again_soon"),
             },
+            CompanyError::MissingFiles(_) => {
+                OwnerMessage::with_fix("error.backup.missing_files", "fix.backup.missing_files")
+            }
             CompanyError::NotABackup => {
                 OwnerMessage::with_fix("error.company.not_a_backup", "fix.company.not_a_backup")
             }
@@ -174,6 +186,7 @@ impl OwnerFacing for CompanyError {
             },
             CompanyError::Setup(issues) => format!("setup issues: {issues:?}"),
             CompanyError::JobFailed { code } => format!("job {code}"),
+            CompanyError::MissingFiles(f) => format!("missing files: {}", f.len()),
             CompanyError::Unavailable(cap) => format!("capability {cap}"),
             other => format!("{other}"),
         }
@@ -215,5 +228,25 @@ mod tests {
             assert_eq!(m.key, key, "{code}");
             assert_ne!(m.suggestion_key, Some("fix.api.try_again_soon"), "{code}");
         }
+    }
+
+    /// QA-1: missing attachment files never read "try again", and the
+    /// detail carries a count only (file names are owner data).
+    #[test]
+    fn missing_files_read_in_plain_words() {
+        for code in ["FILE_MISSING", "FILE_SIZE_MISMATCH", "EXTERNAL_FILE"] {
+            let m = CompanyError::JobFailed { code: code.into() }.owner_message();
+            assert_eq!(m.key, "error.backup.missing_files", "{code}");
+            assert_eq!(m.suggestion_key, Some("fix.backup.missing_files"));
+        }
+        let e = CompanyError::MissingFiles(vec![crate::backup::MissingAttachment {
+            attachment_id: "a1".into(),
+            file_name: Some("Receipt Ozark.pdf".into()),
+            record_type: Some("bill".into()),
+            record_id: Some("t1".into()),
+            reason: "FILE_MISSING".into(),
+        }]);
+        assert_eq!(e.owner_message().key, "error.backup.missing_files");
+        assert_eq!(e.scrubbed_detail(), "missing files: 1");
     }
 }
