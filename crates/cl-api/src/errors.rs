@@ -1553,8 +1553,12 @@ fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: Ro
         428 if has("STALE_REQUIRED") => fin(ApiError::Lan(LanRefusal::StaleRequired)),
         403 if has("LAN_NOT_PAIRED") => fin(ApiError::Lan(LanRefusal::NotPaired)),
         // Sent, then the link dropped: a save becomes an unknown outcome in
-        // the executor (Q-P33al); a read backs off.
-        502 if has("LAN_LINK_LOST") => fin(ApiError::Lan(LanRefusal::LinkLost)),
+        // the executor (Q-P33al); a read backs off. The host proxy's own
+        // "sent to the engine, then it stopped answering" is the same
+        // unknown outcome one hop further on (review S9).
+        502 if has("LAN_LINK_LOST") || has("LAN_UPSTREAM_FAILED") => {
+            fin(ApiError::Lan(LanRefusal::LinkLost))
+        }
         400 => match &parsed {
             Some(b) if b.is("VALIDATION_ERROR") => fin(ApiError::Validation(validation(b))),
             Some(b) if b.is("INVALID_JSON") => fin(ApiError::Protocol { status, code }),

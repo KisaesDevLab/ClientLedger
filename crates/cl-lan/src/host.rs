@@ -509,7 +509,7 @@ async fn serve_conn(sh: Arc<Shared>, tcp: TcpStream, peer_ip: IpAddr) {
             return;
         }
     };
-    tracing::debug!(method = %info.method, path = %info.path, "LAN request");
+    tracing::debug!(method = %info.method, path = %redact_path(&info.path), "LAN request");
     let stream_slot = if info.wants_stream && paired {
         let Some(g) = take_slot(&sh.counters, Slot::DeviceStream(fp)) else {
             head::write_refusal(
@@ -634,6 +634,35 @@ async fn handle(
 pub fn forwardable(method: &Method, path: &str) -> bool {
     path.starts_with("/api/")
         || (method == Method::GET && matches!(path, "/health" | "/ping" | "/openapi.json"))
+}
+
+/// A request path fit for the log (review M8): the query is dropped and
+/// every segment that could name a record (a UUID, a number, a long hex
+/// or token-like run) becomes `:id`, so even debug logs hold no record
+/// ids. `/api/v1/transactions/3f2a…/void` → `/api/v1/transactions/:id/void`.
+#[must_use]
+pub fn redact_path(path: &str) -> String {
+    let path = path.split(['?', '#']).next().unwrap_or_default();
+    let looks_like_id = |seg: &str| {
+        let digits = seg.bytes().filter(u8::is_ascii_digit).count();
+        // Route words are lowercase letters and dashes (`bank-feeds`,
+        // `v1`); anything with several digits, or long, is data.
+        digits >= 2
+            || seg.len() > 24
+            || !seg
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+    };
+    path.split('/')
+        .map(|seg| {
+            if !seg.is_empty() && looks_like_id(seg) {
+                ":id"
+            } else {
+                seg
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn now_ms() -> i64 {
@@ -791,6 +820,26 @@ mod tests {
         assert!(!forwardable(&Method::POST, "/health"));
         assert!(!forwardable(&Method::GET, "/admin"));
         assert!(!forwardable(&Method::GET, "/"));
+    }
+
+    #[test]
+    fn logged_paths_hold_no_record_ids() {
+        for (raw, want) in [
+            (
+                "/api/v1/transactions/3f2a9c1e-55b0-4c1d-9a7e-0b1c2d3e4f50/void",
+                "/api/v1/transactions/:id/void",
+            ),
+            ("/api/v1/contacts/12345?q=Smith", "/api/v1/contacts/:id"),
+            ("/api/v1/bank-feeds/items", "/api/v1/bank-feeds/items"),
+            ("/api/v1/tags/AbCdEf/merge", "/api/v1/tags/:id/merge"),
+            ("/health", "/health"),
+            (
+                "/api/v1/desktop/sessions/0123456789abcdef0123456789abcdef",
+                "/api/v1/desktop/sessions/:id",
+            ),
+        ] {
+            assert_eq!(redact_path(raw), want, "{raw}");
+        }
     }
 
     #[test]

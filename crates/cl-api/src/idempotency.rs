@@ -2865,25 +2865,29 @@ pub(crate) mod tests {
     /// again on its own; a keyed save says so (the form may replay the key).
     #[tokio::test]
     async fn a_link_lost_after_sending_is_an_unknown_outcome_and_never_resent() {
-        let server = MockServer::start().await;
-        Mock::given(method("POST"))
-            .respond_with(json(
-                502,
-                r#"{"error":{"message":"x","code":"LAN_LINK_LOST"}}"#,
-            ))
-            .mount(&server)
-            .await;
-        let ex = exec_at(server.address().port());
-        ex.set_idempotency_v1(true);
-        let e = ex
-            .run(&post_op(), post_call(), &none(), None)
-            .await
-            .expect_err("unknown");
-        assert!(
-            matches!(e, ApiError::OutcomeUnknown { keyed: true, .. }),
-            "{e:?}"
-        );
-        assert_eq!(count(&server).await, 1, "sent once");
+        // LAN_LINK_LOST: the workstation's hop; LAN_UPSTREAM_FAILED: the
+        // host proxy's hop to the engine (review S9). Both the same.
+        for code in ["LAN_LINK_LOST", "LAN_UPSTREAM_FAILED"] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(json(
+                    502,
+                    &format!(r#"{{"error":{{"message":"x","code":"{code}"}}}}"#),
+                ))
+                .mount(&server)
+                .await;
+            let ex = exec_at(server.address().port());
+            ex.set_idempotency_v1(true);
+            let e = ex
+                .run(&post_op(), post_call(), &none(), None)
+                .await
+                .expect_err("unknown");
+            assert!(
+                matches!(e, ApiError::OutcomeUnknown { keyed: true, .. }),
+                "{code}: {e:?}"
+            );
+            assert_eq!(count(&server).await, 1, "{code}: sent once");
+        }
     }
     /// A read that meets a LAN refusal before any handler ran backs off and
     /// tries again (the heartbeat may not have noticed the host yet).

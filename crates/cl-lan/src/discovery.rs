@@ -197,22 +197,41 @@ impl Discovery for MdnsDiscovery {
                     .trim_end_matches(SERVICE_TYPE)
                     .trim_end_matches('.')
                     .to_string();
-                for ip in info.get_addresses_v4() {
-                    let ip = IpAddr::V4(ip);
-                    if crate::policy::check_private(ip).is_ok() {
-                        let f = Found {
-                            name: name.clone(),
-                            addr: SocketAddr::new(ip, info.get_port()),
-                        };
-                        if !out.contains(&f) {
-                            out.push(f);
-                        }
+                let ips: Vec<IpAddr> = info
+                    .get_addresses()
+                    .iter()
+                    .map(mdns_sd::ScopedIp::to_ip_addr)
+                    .collect();
+                for f in found_at(&name, info.get_port(), &ips) {
+                    if !out.contains(&f) {
+                        out.push(f);
                     }
                 }
             }
         }
         Ok(out)
     }
+}
+
+/// The addresses a host announced that the private-network rules allow,
+/// IPv4 and IPv6 alike (review M4): an IPv6 unique-local host is found as
+/// an IPv4 one is; public, link-local and other refused addresses are
+/// dropped. IPv4 first, so the manual-address habit (`192.168.…`) leads.
+#[must_use]
+pub fn found_at(name: &str, port: u16, ips: &[IpAddr]) -> Vec<Found> {
+    let mut ok: Vec<IpAddr> = ips
+        .iter()
+        .map(|ip| crate::policy::canonical(*ip))
+        .filter(|ip| crate::policy::check_private(*ip).is_ok())
+        .collect();
+    ok.sort_by_key(|ip| (ip.is_ipv6(), *ip));
+    ok.dedup();
+    ok.into_iter()
+        .map(|ip| Found {
+            name: name.to_string(),
+            addr: SocketAddr::new(ip, port),
+        })
+        .collect()
 }
 
 /// In-memory discovery for tests and the demo backend.
@@ -276,6 +295,33 @@ impl Discovery for FakeDiscovery {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browse_keeps_private_ipv4_and_ipv6_and_drops_the_rest() {
+        let ips: Vec<IpAddr> = [
+            "fd12:3456:789a::5",
+            "192.168.1.20",
+            "fe80::1",
+            "8.8.8.8",
+            "2001:db8::1",
+            "::ffff:10.0.0.7",
+            "192.168.1.20",
+        ]
+        .iter()
+        .map(|s| s.parse().expect("ip"))
+        .collect();
+        let found = found_at("ClientLedger host 1A2B", 47615, &ips);
+        let addrs: Vec<String> = found.iter().map(|f| f.addr.to_string()).collect();
+        assert_eq!(
+            addrs,
+            [
+                "10.0.0.7:47615",
+                "192.168.1.20:47615",
+                "[fd12:3456:789a::5]:47615"
+            ]
+        );
+        assert!(found.iter().all(|f| f.name == "ClientLedger host 1A2B"));
+    }
 
     #[test]
     fn instance_name_is_generic() {
