@@ -320,6 +320,9 @@ fn a_record_changed_elsewhere_is_not_overwritten() {
     // `a` still holds the old version: the stale check refuses its save.
     fill(&mut a, "32.00", &[("6250", "32.00")]);
     assert!(!a.start_save(SaveIntent::Save, None));
+    // P33: both changed the charge: the conflict dialog asks; Back keeps it.
+    let open = a.conflict.open.take().expect("dialog");
+    a.run_choice(open, crate::screens::conflict_dialog::ConflictChoice::Back);
     assert_eq!(a.state()["stale"], true);
     let (_, lines) = lines_of(&link, id);
     assert!(lines.contains(&("6250".into(), money("31.00"), Money::ZERO)));
@@ -952,4 +955,96 @@ fn tag_options_on_card_charges() {
     // None on edits: the saved (untagged) charge opens without the default.
     assert!(s.command(CommandId::new("form.prev_record")));
     assert_eq!(s.state()["header_tags"], 0, "an edit keeps its own tags");
+}
+
+// --- P33: someone else saved the charge first -------------------------------
+
+use crate::screens::conflict_dialog::ConflictChoice;
+
+/// A 30.00 charge on 6250, saved, then open in `a` and `b`.
+fn two_windows(link: &Arc<CompanyLink>) -> (CardChargeScreen, CardChargeScreen, TransactionId) {
+    let mut s = screen(link);
+    let id = save_charge(&mut s, "30.00");
+    let mut a = screen(link);
+    assert!(a.open_saved(id));
+    let mut b = screen(link);
+    assert!(b.open_saved(id));
+    (a, b, id)
+}
+
+fn stored_memo(link: &Arc<CompanyLink>, id: TransactionId) -> Option<String> {
+    let mut demo = link.demo_state().expect("demo");
+    let chart = demo
+        .chart
+        .get_or_insert_with(crate::company::demo::chart)
+        .clone();
+    let contacts = demo.contacts_mut().clone();
+    demo.ledger.get(&chart, &contacts, id).expect("txn").record.memo
+}
+
+#[test]
+fn p33_keep_mine_takes_their_lines_and_amount_and_keeps_my_memo() {
+    let (_d, link) = link();
+    let (mut a, mut b, id) = two_windows(&link);
+    fill(&mut b, "31.00", &[("6250", "20.00"), ("6400", "11.00")]);
+    assert!(b.start_save(SaveIntent::Save, None), "{}", b.state());
+    a.header.edit_step(|h| h.memo = "mine".into());
+    assert!(!a.start_save(SaveIntent::Save, None));
+    let open = a.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(!merge.lines_from_mine);
+    assert!(merge.undone.is_empty());
+    a.run_choice(open, ConflictChoice::KeepMine(merge));
+    assert_eq!(a.state()["error"], false, "{}", a.state());
+    let (_, lines) = lines_of(&link, id);
+    assert!(lines.contains(&("2050".into(), Money::ZERO, money("31.00"))));
+    assert!(lines.contains(&("6400".into(), money("11.00"), Money::ZERO)));
+    assert_eq!(stored_memo(&link, id).as_deref(), Some("mine"));
+}
+
+#[test]
+fn p33_my_lines_keep_my_amount_and_use_theirs_drops_mine() {
+    let (_d, link) = link();
+    let (mut a, mut b, id) = two_windows(&link);
+    fill(&mut b, "31.00", &[("6250", "31.00")]);
+    assert!(b.start_save(SaveIntent::Save, None));
+    // Mine: the same 30.00 split in two; Keep mine keeps my 30.00.
+    fill(&mut a, "30.00", &[("6250", "10.00"), ("6400", "20.00")]);
+    assert!(!a.start_save(SaveIntent::Save, None));
+    let open = a.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(merge.lines_from_mine);
+    a.run_choice(open, ConflictChoice::KeepMine(merge));
+    let (_, lines) = lines_of(&link, id);
+    assert!(lines.contains(&("2050".into(), Money::ZERO, money("30.00"))));
+    // Use theirs: b's next edit meets a's save; b takes a's charge.
+    b.header.edit_step(|h| h.memo = "b".into());
+    assert!(!b.start_save(SaveIntent::Save, None));
+    let open = b.conflict.open.take().expect("dialog");
+    b.run_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(b.header.current().amount, Some(money("30.00")));
+    assert!(!b.is_dirty());
+}
+
+#[test]
+fn p33_a_new_stamp_with_nothing_editable_changed_saves_without_asking() {
+    let (_d, link) = link();
+    let (mut a, _b, id) = two_windows(&link);
+    if let Some(e) = a.flow.editing.as_mut() {
+        e.version = cl_api::RecordVersion::Fingerprint([0; 32]);
+    }
+    a.header.edit_step(|h| h.memo = "mine".into());
+    let before = a.flow.count;
+    assert!(a.start_save(SaveIntent::Save, None), "{}", a.state());
+    assert!(!a.conflict.is_open());
+    assert_eq!(a.flow.count, before + 1);
+    assert_eq!(stored_memo(&link, id).as_deref(), Some("mine"));
+}
+
+#[test]
+fn p33_a_charge_deleted_elsewhere_is_never_saved_again() {
+    let (_d, link) = link();
+    let (mut a, _b, _id) = two_windows(&link);
+    a.conflict_read(Err(ApiError::NotFound { code: None }), SaveIntent::Save);
+    assert_eq!(a.state()["notice"], crate::forms::conflict::GONE);
 }

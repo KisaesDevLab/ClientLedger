@@ -109,7 +109,7 @@ fn demo_list(link: &CompanyLink, scope: RecordScope) -> Vec<TransactionId> {
 }
 
 /// One transaction from the demo engine.
-fn demo_get(link: &CompanyLink, id: TransactionId) -> Result<Versioned<Transaction>, ApiError> {
+pub(crate) fn demo_get(link: &CompanyLink, id: TransactionId) -> Result<Versioned<Transaction>, ApiError> {
     let mut demo = link
         .demo_state()
         .ok_or(ApiError::Local(cl_api::LocalValidation::InvalidValue))?;
