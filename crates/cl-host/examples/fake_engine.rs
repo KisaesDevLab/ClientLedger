@@ -70,6 +70,19 @@ fn respond(stream: &mut TcpStream, status: &str, body: &str) {
     );
 }
 
+/// `maintenance/reset`: records each call so a test can count them.
+fn maintenance_reset(stream: &mut TcpStream) {
+    if let Some(path) = env("FAKE_RESET_LOG") {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("reset log");
+        let _ = writeln!(f, "reset");
+    }
+    respond(stream, "200 OK", r#"{"cleared":false}"#);
+}
+
 fn handle(mut stream: TcpStream, token: &str, port: u16, initialized: &AtomicBool) {
     if flag("FAKE_HANG_HEALTH") {
         std::thread::sleep(Duration::from_hours(1));
@@ -144,19 +157,7 @@ fn handle(mut stream: TcpStream, token: &str, port: u16, initialized: &AtomicBoo
                 ),
             );
         }
-        ("POST", "/api/v1/desktop/maintenance/reset") => {
-            // Records each call (with the time it came) so a test can see
-            // it arrived before anything else was let in.
-            if let Some(path) = env("FAKE_RESET_LOG") {
-                let mut f = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(path)
-                    .expect("reset log");
-                let _ = writeln!(f, "reset");
-            }
-            respond(&mut stream, "200 OK", r#"{"cleared":false}"#);
-        }
+        ("POST", "/api/v1/desktop/maintenance/reset") => maintenance_reset(&mut stream),
         ("POST", "/api/v1/desktop/initialize") => {
             if initialized.swap(true, Ordering::SeqCst) {
                 respond(

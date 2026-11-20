@@ -590,25 +590,25 @@ mod tests {
     fn a_lost_host_certificate_is_an_error_not_a_new_identity() {
         let dir = tempfile::tempdir().expect("tmp");
         let store = MemStore::default();
-        let (a, _) = Identity::load_or_create(&store, dir.path(), Role::Host).expect("a");
+        let (first, _) = Identity::load_or_create(&store, dir.path(), Role::Host).expect("a");
         fs::remove_file(dir.path().join("lan-host.crt")).expect("rm");
         assert!(matches!(
             Identity::load_or_create(&store, dir.path(), Role::Host),
             Err(TlsSetupError::HostCertificateMissing)
         ));
         assert!(!dir.path().join("lan-host.crt").exists(), "nothing made");
-        let b = Identity::regenerate(&store, dir.path(), Role::Host).expect("regenerate");
-        assert_ne!(a.fingerprint(), b.fingerprint());
-        let (c, new) = Identity::load_or_create(&store, dir.path(), Role::Host).expect("c");
+        let remade = Identity::regenerate(&store, dir.path(), Role::Host).expect("regenerate");
+        assert_ne!(first.fingerprint(), remade.fingerprint());
+        let (loaded, new) = Identity::load_or_create(&store, dir.path(), Role::Host).expect("c");
         assert!(!new);
-        assert_eq!(c.fingerprint(), b.fingerprint());
+        assert_eq!(loaded.fingerprint(), remade.fingerprint());
         // Device: no pairing rests on a lost device file's old identity
         // (the host no longer knows it either way), so it is remade.
-        let (d, _) = Identity::load_or_create(&store, dir.path(), Role::Device).expect("d");
+        let (device, _) = Identity::load_or_create(&store, dir.path(), Role::Device).expect("d");
         fs::remove_file(dir.path().join(Role::Device.file_name())).expect("rm");
-        let (e, new) = Identity::load_or_create(&store, dir.path(), Role::Device).expect("e");
+        let (again, new) = Identity::load_or_create(&store, dir.path(), Role::Device).expect("e");
         assert!(new);
-        assert_ne!(d.fingerprint(), e.fingerprint());
+        assert_ne!(device.fingerprint(), again.fingerprint());
     }
 
     #[test]
