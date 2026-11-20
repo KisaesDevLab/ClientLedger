@@ -179,7 +179,7 @@ impl CenterScreen {
                 return;
             }
             let mine = f.form.current().clone();
-            self.adopt_contact(theirs.record, mine);
+            self.adopt_contact(&theirs.record, mine);
             self.save_inner(intent);
             return;
         }
@@ -212,10 +212,10 @@ impl CenterScreen {
 
     /// Their contact becomes the panel's "as opened" and `mine` its fields;
     /// the list shows their contact.
-    fn adopt_contact(&mut self, theirs: Contact, mine: ContactDraft) {
-        self.remember_contact(&theirs);
+    fn adopt_contact(&mut self, theirs: &Contact, mine: ContactDraft) {
+        self.remember_contact(theirs);
         if let Panel::Form(f) = &mut self.panel {
-            f.take_theirs_record(&theirs);
+            f.take_theirs_record(theirs);
             if *f.form.current() != mine {
                 f.form.edit_step(|d| *d = mine);
             }
@@ -270,7 +270,7 @@ impl CenterScreen {
                     &draft_of(&open.theirs.record),
                     &fields_from_theirs(open.dialog.conflict()),
                 );
-                self.adopt_contact(open.theirs.record, mine);
+                self.adopt_contact(&open.theirs.record, mine);
                 self.resave_left = true;
                 self.save_inner(open.intent);
             }

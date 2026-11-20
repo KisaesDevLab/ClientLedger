@@ -531,7 +531,7 @@ fn p33_keep_mine_takes_their_description_and_keeps_my_name() {
     r.s.save_panel(SaveIntent::Save);
     let open = r.s.tag_conflict.open.take().expect("dialog");
     let merge = open.dialog.conflict().keep_mine();
-    assert!(merge.undone.is_empty());
+    assert!(merge.undone.is_empty(), "{:?}", merge.undone);
     r.s.run_tag_choice(open, ConflictChoice::KeepMine(merge));
     let t = stored(&r, id);
     assert_eq!(t.fields.name, "Mine");

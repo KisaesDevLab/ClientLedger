@@ -997,7 +997,7 @@ fn p33_keep_mine_takes_their_lines_and_amount_and_keeps_my_memo() {
     let open = a.conflict.open.take().expect("dialog");
     let merge = open.dialog.conflict().keep_mine();
     assert!(!merge.lines_from_mine);
-    assert!(merge.undone.is_empty());
+    assert!(merge.undone.is_empty(), "{:?}", merge.undone);
     a.run_choice(open, ConflictChoice::KeepMine(merge));
     assert_eq!(a.state()["error"], false, "{}", a.state());
     let (_, lines) = lines_of(&link, id);

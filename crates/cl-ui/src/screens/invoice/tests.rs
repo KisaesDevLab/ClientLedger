@@ -1030,8 +1030,8 @@ fn two_windows() -> (
 }
 
 fn stored(s: &InvoiceScreen, id: TransactionId) -> cl_api::InvoiceRecord {
-    let mut d = s.link.demo_state().expect("demo");
-    crate::company::demo::invoices::get(&mut d, id)
+    let d = s.link.demo_state().expect("demo");
+    crate::company::demo::invoices::get(&d, id)
         .expect("invoice")
         .record
 }
@@ -1047,7 +1047,7 @@ fn p33_keep_mine_takes_their_lines_and_keeps_my_po_number() {
     let open = s.conflict.open.take().expect("dialog");
     let merge = open.dialog.conflict().keep_mine();
     assert!(!merge.lines_from_mine);
-    assert!(merge.undone.is_empty());
+    assert!(merge.undone.is_empty(), "{:?}", merge.undone);
     s.run_choice(open, ConflictChoice::KeepMine(merge));
     assert!(s.error.is_none(), "{:?}", s.error);
     let r = stored(&s, id);

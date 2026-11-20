@@ -906,7 +906,7 @@ fn p33_keep_mine_merges_header_fields_and_keeps_my_applications() {
     save_stay(&mut s);
     let open = s.conflict.open.take().expect("dialog");
     let merge = open.dialog.conflict().keep_mine();
-    assert!(merge.undone.is_empty());
+    assert!(merge.undone.is_empty(), "{:?}", merge.undone);
     let before = s.saved_count;
     s.run_choice(open, ConflictChoice::KeepMine(merge));
     settle(&mut s);

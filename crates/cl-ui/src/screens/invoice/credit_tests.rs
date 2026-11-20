@@ -704,7 +704,7 @@ fn p33_flow(kind: SalesDocKind) {
     s.poll();
     let open = s.conflict.open.take().expect("dialog");
     let merge = open.dialog.conflict().keep_mine();
-    assert!(merge.undone.is_empty());
+    assert!(merge.undone.is_empty(), "{:?}", merge.undone);
     s.run_choice(open, ConflictChoice::KeepMine(merge));
     settle(&mut s);
     s.poll();

@@ -155,7 +155,7 @@ struct Host {
     password: Secret,
     /// The host keychain's database and engine secrets (kept across
     /// restarts).
-    host_stores: Option<HostConfig>,
+    stores: Option<HostConfig>,
 }
 
 impl Host {
@@ -169,7 +169,7 @@ impl Host {
             lan: None,
             port: 0,
             password,
-            host_stores: None,
+            stores: None,
         };
         h.try_start_supervisor()?;
         h.sup()
@@ -203,7 +203,7 @@ impl Host {
         let mut cfg = HostConfig::new(paths.clone(), self.exe.clone());
         // The host's keychain outlives a restart (the database password and
         // the engine's master secret), as the OS keychain does.
-        let stores = self.host_stores.get_or_insert_with(|| {
+        let stores = self.stores.get_or_insert_with(|| {
             cl_host::in_memory_stores(HostConfig::new(paths.clone(), self.exe.clone()))
         });
         cfg.pg_password_store.clone_from(&stores.pg_password_store);
@@ -494,7 +494,7 @@ fn host_or_skip(scratch: &Path) -> Option<Host> {
         .map_err(|e| {
             skip(&format!(
                 "the host could not start ({e}); run `cargo xtask pg-fetch`"
-            ))
+            ));
         })
         .ok()
 }
@@ -514,6 +514,10 @@ fn office_network_live() {
     }
 }
 
+#[allow(
+    clippy::many_single_char_names,
+    reason = "two workstations a and b and their sessions, side by side"
+)]
 fn live_scenario(host: &mut Host, scratch: &Path) {
     // --- Two workstations: sign-in, list and open through the host -------
     let (a_root, b_root) = (scratch.join("ws-a"), scratch.join("ws-b"));
@@ -974,6 +978,7 @@ fn soak(host: &Host, scratch: &Path, run_for: Duration) {
 
 #[allow(
     clippy::too_many_arguments,
+    clippy::many_single_char_names,
     reason = "one client's whole loop; the scope owns the shared state"
 )]
 fn soak_client(
@@ -996,9 +1001,9 @@ fn soak_client(
         let amount = Money::from_cents(i64::try_from(cents).unwrap_or(100))
             .expect("cents")
             .to_wire();
-        if n % 10 == 0 {
+        if n.is_multiple_of(10) {
             // 10%: bump a shared record's counter (read, then save on it).
-            let k = (n as usize + i) % shared.len();
+            let k = (usize::try_from(n).unwrap_or(0) + i) % shared.len();
             loop {
                 let got = match desk.run(s.transactions().get(shared[k])) {
                     Ok(g) => g,
@@ -1069,7 +1074,7 @@ fn soak_client(
                 Err(e) => t.failures.push(format!("entry: {e}")),
             }
             // The UI's read pattern after a change: the entry list.
-            if n % 3 == 0 {
+            if n.is_multiple_of(3) {
                 match desk.run(s.ledger_version()) {
                     Ok(_) => t.reads += 1,
                     Err(e) => t.failures.push(format!("ledger version: {e}")),

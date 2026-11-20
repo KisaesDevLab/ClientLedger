@@ -250,9 +250,9 @@ impl ReceivePaymentScreen {
             ConflictChoice::UseTheirs => self.open_saved(open.theirs),
             ConflictChoice::KeepMine(_) => {
                 let c = open.dialog.conflict();
-                let changes = c.field_changes();
+                let diffs = c.field_changes();
                 let changed = |name: &str, theirs: bool| {
-                    changes.iter().any(|f| {
+                    diffs.iter().any(|f| {
                         f.field == name
                             && if theirs {
                                 f.theirs_changed()

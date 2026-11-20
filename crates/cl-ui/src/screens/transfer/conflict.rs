@@ -27,7 +27,7 @@ pub fn transfer_value(f: &TransferForm) -> Value {
         "from": f.from.map(|a| a.to_string()),
         "to": f.to.map(|a| a.to_string()),
         "txnDate": f.date.map(CalendarDate::to_wire),
-        "amount": f.amount.map(|m| m.to_wire()),
+        "amount": f.amount.map(cl_core::Money::to_wire),
         "memo": f.memo.trim(),
     })
 }
@@ -170,6 +170,7 @@ impl TransferScreen {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)] // the dialog hands over its choice
     pub(crate) fn run_choice(&mut self, open: OpenConflict, choice: ConflictChoice) {
         match choice {
             ConflictChoice::Back => self.stale = true,

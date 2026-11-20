@@ -35,7 +35,7 @@ const MONEY: &[&str] = &["payment", "deposit"];
 
 /// The row's editable header as the dialog compares it.
 #[must_use]
-pub fn row_value(d: &EntryDraft, lines: Vec<Value>) -> Value {
+pub fn row_value(d: &EntryDraft, lines: &[Value]) -> Value {
     json!({
         "txnDate": d.date.map(cl_core::CalendarDate::to_wire),
         "refNo": d.number.trim(),
@@ -194,9 +194,9 @@ impl RegisterScreen {
         };
         let their_lines: Vec<Value> = lines.iter().map(|l| expense_line(&row_of(l))).collect();
         let conflict = Conflict::new(
-            &row_value(self.entry.form.form().original(), self.opened_lines()),
-            &row_value(self.entry.draft(), self.my_lines()),
-            &row_value(&draft, their_lines),
+            &row_value(self.entry.form.form().original(), &self.opened_lines()),
+            &row_value(self.entry.draft(), &self.my_lines()),
+            &row_value(&draft, &their_lines),
             "lines",
         );
         if conflict.silent_resave() {
@@ -293,7 +293,7 @@ mod tests {
 
     #[test]
     fn every_field_has_plain_words() {
-        for k in row_value(&EntryDraft::default(), Vec::new())
+        for k in row_value(&EntryDraft::default(), &[])
             .as_object()
             .expect("object")
             .keys()
@@ -311,7 +311,7 @@ mod tests {
             payment: cl_core::Money::parse_wire("3.00").ok(),
             ..EntryDraft::default()
         };
-        let fields: Vec<String> = row_value(&theirs, Vec::new())
+        let fields: Vec<String> = row_value(&theirs, &[])
             .as_object()
             .expect("object")
             .keys()
@@ -319,6 +319,6 @@ mod tests {
             .collect();
         let mut mine = EntryDraft::default();
         take_theirs(&mut mine, &theirs, &fields);
-        assert_eq!(row_value(&mine, Vec::new()), row_value(&theirs, Vec::new()));
+        assert_eq!(row_value(&mine, &[]), row_value(&theirs, &[]));
     }
 }

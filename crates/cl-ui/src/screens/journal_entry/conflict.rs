@@ -33,7 +33,7 @@ pub fn je_value(form: &JournalForm, lines: &FormLines) -> Value {
         "reverseOn": form.reverse_on.map(cl_core::CalendarDate::to_wire),
         "lines": lines.used().map(|l| json!({
             "account": l.account.map(|a| a.to_string()),
-            "amount": l.amount.map(|m| m.to_wire()),
+            "amount": l.amount.map(cl_core::Money::to_wire),
             "memo": l.memo.trim(),
             "name": l.customer.map(|c| c.to_string()),
             "tag": l.tag.map(|t| t.to_string()),
@@ -143,7 +143,7 @@ impl JournalScreen {
             for l in side.used() {
                 let key = canonical(&json!({
                     "account": l.account.map(|a| a.to_string()),
-                    "amount": l.amount.map(|m| m.to_wire()),
+                    "amount": l.amount.map(cl_core::Money::to_wire),
                     "memo": l.memo.trim(),
                     "name": l.customer.map(|c| c.to_string()),
                     "tag": l.tag.map(|t| t.to_string()),
@@ -203,6 +203,7 @@ impl JournalScreen {
         self.run_choice(open, choice);
     }
 
+    #[allow(clippy::needless_pass_by_value)] // the dialog hands over its choice
     pub(crate) fn run_choice(&mut self, open: OpenConflict, choice: ConflictChoice) {
         match choice {
             ConflictChoice::Back => self.stale = true,

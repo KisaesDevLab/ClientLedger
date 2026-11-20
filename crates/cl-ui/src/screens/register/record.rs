@@ -444,7 +444,7 @@ impl RegisterScreen {
             // P33: the demo's version check: the transaction must still be
             // the one the edit read.
             if let Some(e) = &update
-                && self.demo_txn(e.id).map(|v| v.version) != Some(e.version.clone())
+                && self.demo_txn(e.id).map(|v| v.version) != Some(e.version)
             {
                 let gone = self.demo_txn(e.id).is_none();
                 self.record_failed(if gone {

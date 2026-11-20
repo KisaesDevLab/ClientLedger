@@ -878,6 +878,28 @@ impl Executor {
         }
     }
 
+    /// LAN (P33, Q-P33al): a save whose link dropped after it was sent is
+    /// never sent again: reconciled by reading (pre-handler-only routes) or
+    /// reported as an unknown outcome.
+    async fn on_link_lost(
+        &self,
+        ctx: &Ctx<'_>,
+        class: RetryClass,
+        generation: u64,
+        r: &mut Retries,
+    ) -> Step {
+        if class == RetryClass::PreHandlerOnly {
+            self.ambiguous(ctx, generation, AmbiguityCause::ServerError(502), r)
+                .await
+        } else {
+            Step::Done(Err(ApiError::OutcomeUnknown {
+                request_id: ctx.call.request_id,
+                idempotency_key: ctx.call.idempotency_key.clone(),
+                keyed: class == RetryClass::KeyedOnce,
+            }))
+        }
+    }
+
     async fn on_final(
         &self,
         ctx: &Ctx<'_>,
@@ -929,16 +951,7 @@ impl Executor {
             // same key" (the form replays that key when the owner says so);
             // an unkeyed one is reconciled by reading, like a 5xx.
             (class, ApiError::Lan(crate::LanRefusal::LinkLost)) => {
-                if class == RetryClass::PreHandlerOnly {
-                    self.ambiguous(ctx, generation, AmbiguityCause::ServerError(502), r)
-                        .await
-                } else {
-                    Step::Done(Err(ApiError::OutcomeUnknown {
-                        request_id: ctx.call.request_id,
-                        idempotency_key: ctx.call.idempotency_key.clone(),
-                        keyed: class == RetryClass::KeyedOnce,
-                    }))
-                }
+                self.on_link_lost(ctx, class, generation, r).await
             }
             (
                 RetryClass::Idempotent,

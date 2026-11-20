@@ -839,7 +839,7 @@ fn p33_keep_mine_takes_their_lines_whole_and_keeps_my_memo() {
     assert_eq!(st["save"]["conflict"]["lines_differ"], true, "{st}");
     let open = s.conflict.open.take().expect("dialog");
     let merge = open.dialog.conflict().keep_mine();
-    assert!(merge.undone.is_empty());
+    assert!(merge.undone.is_empty(), "{:?}", merge.undone);
     s.run_choice(open, ConflictChoice::KeepMine(merge));
     assert_eq!(s.state_json()["save"]["error"], false);
     let r = stored(&link, id);

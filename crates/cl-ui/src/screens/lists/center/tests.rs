@@ -776,7 +776,7 @@ fn p33_keep_mine_takes_their_notes_and_keeps_my_phone() {
         r.s.save_form(SaveIntent::Save);
         let open = r.s.contact_conflict.open.take().expect("dialog");
         let merge = open.dialog.conflict().keep_mine();
-        assert!(merge.undone.is_empty());
+        assert!(merge.undone.is_empty(), "{:?}", merge.undone);
         r.s.run_contact_choice(open, ConflictChoice::KeepMine(merge));
         let c = stored(&r, id);
         assert_eq!(c.fields.phone.as_deref(), Some("555-0100"), "{role:?}");
