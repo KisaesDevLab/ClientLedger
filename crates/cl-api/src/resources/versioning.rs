@@ -112,6 +112,34 @@ impl RecordVersion {
             RecordVersion::Server(v) => RecordVersion::Server(v),
         }
     }
+
+    /// The version a list row was read at: its editable fields'
+    /// `fingerprint`, with the row's `updatedAt` as the stamp when it is
+    /// one (so a save sends `expectedUpdatedAt` under `stale-all-v1`).
+    #[must_use]
+    pub fn read_at(fingerprint: [u8; 32], updated_at: Option<cl_core::Timestamp>) -> RecordVersion {
+        match updated_at.and_then(RecordStamp::of_timestamp) {
+            Some(stamp) => RecordVersion::Stamped { fingerprint, stamp },
+            None => RecordVersion::Fingerprint(fingerprint),
+        }
+    }
+
+    /// Takes the record's new stamp from a write on something it owns (an
+    /// attachment or tag write's `parentUpdatedAt`, U-291 S2), so the
+    /// form's next save is not a conflict with itself. Only a newer stamp
+    /// is taken: an answer that lands after a later save never rolls the
+    /// version back. The fingerprint is kept (the editable fields did not
+    /// change); an engine version (`Server`) is left as it is.
+    pub fn adopt_stamp(&mut self, stamp: Option<RecordStamp>) {
+        let Some(stamp) = stamp else { return };
+        if self.stamp().is_some_and(|held| held >= stamp) {
+            return;
+        }
+        *self = match *self {
+            RecordVersion::Stamp(_) => RecordVersion::Stamp(stamp),
+            v => v.with_stamp(stamp, [0; 32]),
+        };
+    }
 }
 
 /// An engine record stamp (`updatedAt`, U-291): a millisecond UTC
@@ -120,7 +148,9 @@ impl RecordVersion {
 /// `Copy`; text in any other shape is not taken as a stamp (the version
 /// then falls back to the fingerprint check), so what is sent back is
 /// always byte for byte what was read.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+///
+/// Ordered by time (the digits run from the year down to the millisecond).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RecordStamp(u64);
 
 impl RecordStamp {
@@ -164,6 +194,21 @@ impl RecordStamp {
                 }
             })
             .collect()
+    }
+
+    /// A parsed `updatedAt` as a stamp (the engine's millisecond shape;
+    /// `None` for a value with sub-millisecond digits, which the engine
+    /// never writes).
+    #[must_use]
+    pub fn of_timestamp(t: cl_core::Timestamp) -> Option<RecordStamp> {
+        RecordStamp::parse(&t.to_wire())
+    }
+
+    /// The stamp as a timestamp, for records that keep their `updatedAt`
+    /// parsed (payments, invoices).
+    #[must_use]
+    pub fn timestamp(self) -> Option<cl_core::Timestamp> {
+        cl_core::Timestamp::parse_wire(&self.text()).ok()
     }
 
     /// `updatedAt` of a record object, when it is a stamp.

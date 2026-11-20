@@ -215,6 +215,23 @@ impl SavedDoc {
             SavedDoc::SalesReceipt(r) => r.date,
         }
     }
+
+    /// Takes the document's new stamp after a write on something it owns
+    /// (a file, U-291 S2); only a newer one.
+    pub(crate) fn adopt_stamp(&mut self, stamp: Option<cl_api::RecordStamp>) {
+        let Some(t) = stamp.and_then(cl_api::RecordStamp::timestamp) else {
+            return;
+        };
+        match self {
+            SavedDoc::Invoice(r) => {
+                if r.txn.updated_at.is_none_or(|held| held < t) {
+                    r.txn.updated_at = Some(t);
+                }
+            }
+            SavedDoc::CreditMemo(r) => r.updated_at = r.updated_at.max(t),
+            SavedDoc::SalesReceipt(r) => r.updated_at = r.updated_at.max(t),
+        }
+    }
 }
 
 /// A saved invoice, credit memo or sales receipt open in the form.

@@ -1023,6 +1023,7 @@ pub fn upload(
     let n = state.checks.files.len() + state.checks.deleted + 1;
     let id = cl_api::AttachmentId::parse(&format!("d0000000-0000-4000-8000-a{n:011}"))
         .map_err(|_| invalid())?;
+    let parent_stamp = parent_stamp(state, to, n);
     let (kind, to) = (to.attachable_type(), to.attachable_id());
     let f = DemoFile {
         id,
@@ -1033,7 +1034,28 @@ pub fn upload(
     };
     let a = attachment(&f).ok_or_else(invalid)?;
     state.checks.files.push(f);
-    Ok(a)
+    Ok(cl_api::Attachment { parent_stamp, ..a })
+}
+
+/// The record's new stamp after a file went onto it (`parentUpdatedAt`,
+/// U-291); `None` for a draft. A payment's stamp is its version (its next
+/// save is refused without it); other demo records are guarded by their
+/// fingerprint, so a later stamp stands in.
+fn parent_stamp(
+    state: &mut DemoState,
+    to: cl_api::AttachTo,
+    n: usize,
+) -> Option<cl_api::RecordStamp> {
+    let at = match to {
+        cl_api::AttachTo::Draft(_) => return None,
+        cl_api::AttachTo::Txn(cl_api::TxnType::CustomerPayment, id) => {
+            super::receivables::touch_payment(state, id)?
+        }
+        _ => super::receivables::version_of(
+            1_000_000 + i64::try_from(n).unwrap_or(i64::MAX - 1_000_000),
+        ),
+    };
+    cl_api::RecordStamp::of_timestamp(at)
 }
 
 /// `GET /attachments` for a check or a draft.

@@ -513,6 +513,20 @@ pub(crate) type Answers = (
     Option<Result<(), ApiError>>,
 );
 
+impl SaveFlow {
+    /// Takes record `id`'s new stamp after a write on something it owns (a
+    /// file, U-291 S2), so the next save or void is not a conflict with
+    /// itself. `id` is the attachable id as text.
+    pub(crate) fn adopt_parent_stamp(&mut self, id: &str, stamp: Option<cl_api::RecordStamp>) {
+        if let Some(e) = self.editing.as_mut().filter(|e| e.id.to_string() == id) {
+            e.version.adopt_stamp(stamp);
+        }
+        if let Some(s) = self.last.as_mut().filter(|s| s.id.to_string() == id) {
+            s.version.adopt_stamp(stamp);
+        }
+    }
+}
+
 /// The save and void of one helper form.
 #[derive(Default)]
 pub(crate) struct SaveFlow {

@@ -33,8 +33,7 @@ use std::sync::Arc;
 
 use cl_api::{
     Account, AccountFields, AccountFilter, AccountReport, AccountUpdate, ApiError, CardLast4,
-    ConflictReason, EditableFields, IdempotencyKey, OrphanLabel, RecordVersion, RequestGroup,
-    Versioned,
+    ConflictReason, EditableFields, IdempotencyKey, OrphanLabel, RequestGroup, Versioned,
 };
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, TenantId};
@@ -634,7 +633,7 @@ impl ChartScreen {
                 *a = changed.clone();
             }
             Task::ready(Versioned {
-                version: RecordVersion::Fingerprint(changed.fingerprint()),
+                version: changed.version(),
                 record: changed,
                 stock_warnings: Vec::new(),
             })
@@ -652,7 +651,7 @@ impl ChartScreen {
                     s.accounts().deactivate(id, key).await
                 })
             } else {
-                let version = RecordVersion::Fingerprint(account.fingerprint());
+                let version = account.version();
                 let update = AccountUpdate {
                     fields: account.fields.clone(),
                     is_active: true,
@@ -841,7 +840,7 @@ impl ChartScreen {
             // guarded by the version the form was opened on.
             (Some(_), Some(a)) if card_on && a.card_last4 != digits => {
                 let current = Versioned {
-                    version: RecordVersion::Fingerprint(a.fingerprint()),
+                    version: a.version(),
                     record: Account { fields, ..a },
                     stock_warnings: Vec::new(),
                 };
@@ -850,7 +849,7 @@ impl ChartScreen {
                 })
             }
             (Some(id), Some(a)) => {
-                let version = RecordVersion::Fingerprint(a.fingerprint());
+                let version = a.version();
                 let update = AccountUpdate {
                     fields,
                     is_active: a.is_active,
@@ -1699,7 +1698,7 @@ pub(crate) fn demo_save(
         }
     }
     Versioned {
-        version: RecordVersion::Fingerprint(account.fingerprint()),
+        version: account.version(),
         record: account,
         stock_warnings: Vec::new(),
     }
@@ -1740,7 +1739,7 @@ fn demo_set_card(link: &CompanyLink, saved: &mut Versioned<Account>, digits: Opt
         return;
     }
     saved.record.card_last4 = digits;
-    saved.version = RecordVersion::Fingerprint(saved.record.fingerprint());
+    saved.version = saved.record.version();
     if let Some(mut d) = link.demo_state()
         && let Some(chart) = d.chart.as_mut()
         && let Some(a) = chart.iter_mut().find(|a| a.id == saved.record.id)

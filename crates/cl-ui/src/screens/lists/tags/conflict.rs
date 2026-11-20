@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use cl_api::{ApiError, EditableFields, Tag, Versioned};
+use cl_api::{ApiError, Tag, Versioned};
 use cl_core::ids::TagId;
 use cl_model::forms::SaveIntent;
 use cl_model::lan::Conflict;
@@ -45,7 +45,7 @@ impl TagsScreen {
                 .and_then(|mut d| d.tags_mut().iter().find(|x| x.id == id).cloned());
             let got = found
                 .map(|t| Versioned {
-                    version: cl_api::RecordVersion::Fingerprint(t.fingerprint()),
+                    version: t.version(),
                     record: t,
                     stock_warnings: Vec::new(),
                 })

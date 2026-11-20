@@ -2186,7 +2186,7 @@ impl CaseWorld<'_> {
                     AttachTo::Txn(t.txn_type, id),
                     key(),
                 )) {
-                    Ok(()) => Answer::ok(200, Value::Null),
+                    Ok(_) => Answer::ok(200, Value::Null),
                     Err(e) => Answer::err(&e),
                 }
             }

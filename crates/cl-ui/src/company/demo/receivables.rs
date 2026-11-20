@@ -1587,6 +1587,15 @@ fn use_credit(
     Ok(())
 }
 
+/// A write on something the payment owns (a file attached to it) moves its
+/// stamp, as the engine's `parentUpdatedAt` does (U-291): the new stamp,
+/// or `None` for no such payment.
+pub(super) fn touch_payment(state: &mut DemoState, id: TransactionId) -> Option<Timestamp> {
+    let p = state.receivables.pays.get_mut(&id)?;
+    p.version += 1;
+    Some(version_of(p.version))
+}
+
 fn check_version(p: &Pay, expected: Option<Timestamp>) -> Result<(), ApiError> {
     match expected {
         Some(t) if t != version_of(p.version) => Err(stale()),

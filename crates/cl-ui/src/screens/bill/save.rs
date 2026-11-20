@@ -575,7 +575,7 @@ impl EnterBillScreen {
         };
         let written = group.write(&session, label, move |s| async move {
             let opts = options(password);
-            let record = match (&draft, edit) {
+            let mut record = match (&draft, edit) {
                 (Draft::Bill(d), None) => s.bills().create(d, &opts, key).await?,
                 (Draft::Bill(d), Some((id, expected))) => {
                     s.bills().update(id, &expected, d, &opts, key).await?
@@ -594,6 +594,10 @@ impl EnterBillScreen {
             let mut attach_failed = None;
             if let (Some(draft_key), false) = (retry_draft, lines_cap) {
                 let moved = move_files(&s, id, credit, draft_key, &files).await;
+                // The moves changed the record's stamp (U-291 S2).
+                if let Ok(stamp) = &moved {
+                    record.version.adopt_stamp(*stamp);
+                }
                 if moved.is_err() {
                     attach_failed = Some(AttachRetry {
                         id,
@@ -1455,7 +1459,10 @@ impl EnterBillScreen {
             key: None,
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
-            move_files(&s, r.id, r.kind == BillKind::Credit, r.draft, &r.files).await
+            // Before `bill-lines-v1` only (no record stamps there).
+            move_files(&s, r.id, r.kind == BillKind::Credit, r.draft, &r.files)
+                .await
+                .map(drop)
         }) {
             self.save.attach_retry = Some(Task::Pending(p));
         }
@@ -1513,19 +1520,22 @@ async fn move_files(
     credit: bool,
     draft: DraftKey,
     files: &[AttachmentId],
-) -> Result<(), ApiError> {
+) -> Result<Option<cl_api::RecordStamp>, ApiError> {
+    let mut stamp = None;
     if credit {
         for f in files {
-            s.attachments()
+            let got = s
+                .attachments()
                 .link(*f, AttachTo::VendorCredit(id), IdempotencyKey::new())
                 .await?;
+            stamp = got.max(stamp);
         }
     } else {
         s.bills()
             .attach_draft(id, draft, IdempotencyKey::new())
             .await?;
     }
-    Ok(())
+    Ok(stamp)
 }
 
 fn action_key(a: &AuditAction) -> &'static str {

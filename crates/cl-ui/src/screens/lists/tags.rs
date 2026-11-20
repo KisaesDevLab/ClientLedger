@@ -30,8 +30,8 @@ use std::sync::Arc;
 
 use cl_api::{
     ApiError, Capabilities, ConflictReason, EditableFields, IdempotencyKey, OrphanLabel,
-    RecordVersion, RequestGroup, Tag, TagFields, TagFilter as ApiTagFilter, TagGroup,
-    TagGroupFields, TagUpdate, TagUsage, Versioned,
+    RequestGroup, Tag, TagFields, TagFilter as ApiTagFilter, TagGroup, TagGroupFields, TagUpdate,
+    TagUsage, Versioned,
 };
 use cl_core::ids::{TagGroupId, TagId, TenantId};
 use cl_grid::{CellPos, Grid, GridEvent, GridHeight, GridSnapshot, ModelRef, NoLookups, RowKey};
@@ -786,7 +786,7 @@ impl TagsScreen {
                 *x = changed.clone();
             }
             Task::ready(Versioned {
-                version: RecordVersion::Fingerprint(changed.fingerprint()),
+                version: changed.version(),
                 record: changed,
                 stock_warnings: Vec::new(),
             })
@@ -799,7 +799,7 @@ impl TagsScreen {
                 what: "orphan.tag_save",
                 key: Some(key.clone()),
             };
-            let version = RecordVersion::Fingerprint(tag.fingerprint());
+            let version = tag.version();
             match group.write(&session, label, move |s| async move {
                 s.tags().update(id, &version, &update, key).await
             }) {
@@ -939,7 +939,7 @@ impl TagsScreen {
         let pending = match existing {
             Some(x) => {
                 let id = x.id;
-                let version = RecordVersion::Fingerprint(x.fingerprint());
+                let version = x.version();
                 let update = TagUpdate {
                     fields,
                     is_active: x.is_active,
@@ -2081,7 +2081,7 @@ fn demo_save_tag(
         }
     }
     Versioned {
-        version: RecordVersion::Fingerprint(tag.fingerprint()),
+        version: tag.version(),
         record: tag,
         stock_warnings: Vec::new(),
     }

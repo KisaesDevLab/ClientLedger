@@ -143,6 +143,17 @@ pub struct Tag {
     pub updated_at: Option<Timestamp>,
 }
 
+impl Tag {
+    /// The version this row was read at: its fingerprint, stamped with its
+    /// `updatedAt` when it has one, so an edit of a listed tag is checked by
+    /// the engine under `stale-all-v1` (and carries the stamp LAN mode
+    /// requires).
+    #[must_use]
+    pub fn version(&self) -> RecordVersion {
+        RecordVersion::read_at(self.fingerprint(), self.updated_at)
+    }
+}
+
 impl EditableFields for Tag {
     /// `tagNumber` reads as `null` from an engine without numbers (an absent
     /// key and a `None` both pick as `null`), so old records keep their

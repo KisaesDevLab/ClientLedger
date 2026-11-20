@@ -6,7 +6,7 @@
 //! sensitive mark is this computer's or the Admin's own setting, saved on
 //! its own path, so it is never compared.
 
-use cl_api::{Account, ApiError, EditableFields, Versioned};
+use cl_api::{Account, ApiError, Versioned};
 use cl_core::ids::AccountId;
 use cl_model::forms::SaveIntent;
 use cl_model::lan::Conflict;
@@ -71,7 +71,7 @@ impl ChartScreen {
             });
             let got = found
                 .map(|a| Versioned {
-                    version: cl_api::RecordVersion::Fingerprint(a.fingerprint()),
+                    version: a.version(),
                     record: a,
                     stock_warnings: Vec::new(),
                 })

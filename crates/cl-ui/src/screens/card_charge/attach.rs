@@ -100,7 +100,7 @@ pub(crate) struct CardAttach {
     browsing: Option<std::sync::mpsc::Receiver<Vec<PathBuf>>>,
     /// Draft files moving onto the record just saved (kept across a new
     /// form: Save & New starts one at once).
-    moving: Option<(PendingMove, Task<()>)>,
+    moving: Option<(PendingMove, Task<Option<cl_api::RecordStamp>>)>,
     /// The last move failed: the record is saved without them.
     move_failed: Option<PendingMove>,
     /// The draft handed to the last move: a file that reaches it after the
@@ -191,8 +191,13 @@ impl CardAttach {
 }
 
 /// Moves every file the engine lists in the draft onto `m.to` (a moved
-/// file leaves the draft, so each page starts again from the top).
-pub(crate) async fn move_files(s: &cl_api::Session, m: PendingMove) -> Result<(), ApiError> {
+/// file leaves the draft, so each page starts again from the top). Returns
+/// the record's stamp after the last move (`parentUpdatedAt`), if any.
+pub(crate) async fn move_files(
+    s: &cl_api::Session,
+    m: PendingMove,
+) -> Result<Option<cl_api::RecordStamp>, ApiError> {
+    let mut stamp = None;
     for _ in 0..MOVE_PAGES {
         let page = cl_api::PageRequest::new(50, 0)?;
         let files = s
@@ -202,15 +207,17 @@ pub(crate) async fn move_files(s: &cl_api::Session, m: PendingMove) -> Result<()
             .data;
         let full = files.len() >= 50;
         for f in files {
-            s.attachments()
+            let got = s
+                .attachments()
                 .link(f.id, m.to, IdempotencyKey::new())
                 .await?;
+            stamp = got.max(stamp);
         }
         if !full {
-            return Ok(());
+            return Ok(stamp);
         }
     }
-    Ok(())
+    Ok(stamp)
 }
 
 /// Starts moving `m` on the write lane, so it finishes even if the window
@@ -219,10 +226,10 @@ fn start_move(
     link: &Arc<CompanyLink>,
     group: Option<&RequestGroup>,
     m: PendingMove,
-) -> Option<Task<()>> {
+) -> Option<Task<Option<cl_api::RecordStamp>>> {
     if let Some(mut demo) = link.demo_state() {
         crate::company::demo::checks::link_draft(&mut demo, m.draft, m.to);
-        return Some(Task::ready(()));
+        return Some(Task::ready(None));
     }
     let (session, group) = (link.session()?, group?);
     let label = OrphanLabel {
@@ -462,6 +469,8 @@ impl CardChargeScreen {
             match r {
                 Ok(a) => {
                     self.attach.path.clear();
+                    self.flow
+                        .adopt_parent_stamp(&a.attachable_id, a.parent_stamp);
                     if let Some(src) = source {
                         self.attach.pane_task = None;
                         self.attach.show(a.id, src);
@@ -502,9 +511,12 @@ impl CardChargeScreen {
             && let Some((m, _)) = self.attach.moving.take()
         {
             let again = std::mem::take(&mut self.attach.move_again);
+            if let Ok(stamp) = &r {
+                self.flow.adopt_parent_stamp(&m.to.attachable_id(), *stamp);
+            }
             match r {
-                Ok(()) if again => self.run_move(m),
-                Ok(()) => {
+                Ok(_) if again => self.run_move(m),
+                Ok(_) => {
                     // Every file moved: the draft is done with.
                     if self.attach.draft == Some(m.draft) {
                         self.attach.draft = None;

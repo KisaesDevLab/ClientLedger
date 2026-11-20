@@ -7,8 +7,8 @@
 
 use cl_api::{
     Account, AccountType, ApiError, Contact, ContactFields, ContactUpdate, EditableFields,
-    IdempotencyKey, NewContact, OrphanLabel, RecordVersion, TinType, Vendor1099Profile,
-    Vendor1099Update, Versioned,
+    IdempotencyKey, NewContact, OrphanLabel, TinType, Vendor1099Profile, Vendor1099Update,
+    Versioned,
 };
 use cl_core::Money;
 use cl_core::ids::{AccountId, ContactId};
@@ -404,7 +404,7 @@ impl CenterScreen {
         };
         let pending = group.write(&session, label, move |s| async move {
             let contact = if let Some(c) = existing {
-                let version = RecordVersion::Fingerprint(c.fingerprint());
+                let version = c.version();
                 let body = ContactUpdate {
                     fields,
                     is_active: c.is_active,
@@ -1039,7 +1039,7 @@ fn demo_save(
     }
     Saved {
         contact: Versioned {
-            version: RecordVersion::Fingerprint(contact.fingerprint()),
+            version: contact.version(),
             record: contact,
             stock_warnings: Vec::new(),
         },

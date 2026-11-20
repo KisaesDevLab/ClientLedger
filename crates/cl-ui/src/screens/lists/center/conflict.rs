@@ -7,7 +7,7 @@
 //! Never compared: the tax ID (never shown, an empty field keeps the one on
 //! file) and the 1099 profile (its own record, saved after the contact).
 
-use cl_api::{ApiError, Contact, EditableFields, Versioned};
+use cl_api::{ApiError, Contact, Versioned};
 use cl_core::ids::ContactId;
 use cl_model::forms::SaveIntent;
 use cl_model::lan::Conflict;
@@ -111,7 +111,7 @@ impl CenterScreen {
                 .and_then(|mut d| d.contacts_mut().iter().find(|x| x.id == id).cloned());
             let got = found
                 .map(|c| Versioned {
-                    version: cl_api::RecordVersion::Fingerprint(c.fingerprint()),
+                    version: c.version(),
                     record: c,
                     stock_warnings: Vec::new(),
                 })

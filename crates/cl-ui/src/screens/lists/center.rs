@@ -30,8 +30,8 @@ use std::sync::Arc;
 
 use cl_api::{
     Account, AccountFilter, ApiError, Contact, ContactFilter as ApiContactFilter, ContactUpdate,
-    EditableFields, IdempotencyKey, OrphanLabel, Page, PageRequest, RecordVersion, RequestGroup,
-    TransactionSummary, Vendor1099Profile, Versioned,
+    IdempotencyKey, OrphanLabel, Page, PageRequest, RequestGroup, TransactionSummary,
+    Vendor1099Profile, Versioned,
 };
 use cl_core::CalendarDate;
 use cl_core::ids::{ContactId, TenantId};
@@ -683,7 +683,7 @@ impl CenterScreen {
                 *c = changed.clone();
             }
             Task::ready(Versioned {
-                version: RecordVersion::Fingerprint(changed.fingerprint()),
+                version: changed.version(),
                 record: changed,
                 stock_warnings: Vec::new(),
             })
@@ -701,7 +701,7 @@ impl CenterScreen {
                     s.contacts().deactivate(id, key).await
                 })
             } else {
-                let version = RecordVersion::Fingerprint(contact.fingerprint());
+                let version = contact.version();
                 let update = ContactUpdate {
                     fields: contact.fields.clone(),
                     is_active: true,
@@ -849,7 +849,7 @@ impl CenterScreen {
             });
             if let Some(kept) = kept {
                 m.task = Some(Task::ready(Versioned {
-                    version: RecordVersion::Fingerprint(kept.fingerprint()),
+                    version: kept.version(),
                     record: kept,
                     stock_warnings: Vec::new(),
                 }));

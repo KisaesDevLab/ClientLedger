@@ -260,6 +260,17 @@ pub struct Contact {
     pub updated_at: Option<Timestamp>,
 }
 
+impl Contact {
+    /// The version this row was read at: its fingerprint, stamped with its
+    /// `updatedAt` when it has one, so an edit of a listed contact is
+    /// checked by the engine under `stale-all-v1` (and carries the stamp
+    /// LAN mode requires).
+    #[must_use]
+    pub fn version(&self) -> RecordVersion {
+        RecordVersion::read_at(self.fingerprint(), self.updated_at)
+    }
+}
+
 impl EditableFields for Contact {
     const EDITABLE: &'static [&'static str] = &[
         "contactType",

@@ -21,9 +21,10 @@ use std::str::FromStr;
 use cl_core::ids::{ContactId, IdError, TransactionId, parse_uuid};
 use cl_core::{CalendarDate, Timestamp};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::Value;
 use uuid::Uuid;
 
-use crate::client::{Call, Method};
+use crate::client::{Call, EngineReply, Method};
 use crate::errors::{ApiError, LocalValidation};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::operations::{
@@ -32,7 +33,7 @@ use crate::resources::operations::{
 };
 use crate::resources::reconcile::{OutcomeMatcher, Probe};
 use crate::resources::transactions::TxnType;
-use crate::resources::versioning::saved_unreadable;
+use crate::resources::versioning::{RecordStamp, saved_unreadable};
 use crate::session::{Session, decode, json_body};
 use crate::wire::{Page, PageRequest};
 
@@ -297,6 +298,31 @@ pub struct Attachment {
     /// Uploaded.
     #[serde(default)]
     pub created_at: Option<Timestamp>,
+    /// The record's new stamp after an upload to it (`parentUpdatedAt`,
+    /// U-291): an open form takes it ([`Attachment::stamp_for`]) so its next
+    /// save is not a conflict with itself. `None` in lists, for drafts and
+    /// on engines without it.
+    #[serde(skip)]
+    pub parent_stamp: Option<RecordStamp>,
+}
+
+impl Attachment {
+    /// The parent's new stamp when this file went onto record `id` (as a
+    /// string, the attachable id); `None` for any other record.
+    #[must_use]
+    pub fn stamp_for(&self, id: &str) -> Option<RecordStamp> {
+        self.parent_stamp.filter(|_| self.attachable_id == id)
+    }
+}
+
+/// `parentUpdatedAt` of an attachment write's answer (U-291), when it is a
+/// stamp.
+fn parent_stamp_of(reply: &EngineReply) -> Option<RecordStamp> {
+    serde_json::from_slice::<Value>(&reply.body)
+        .ok()?
+        .get("parentUpdatedAt")
+        .and_then(Value::as_str)
+        .and_then(RecordStamp::parse)
 }
 
 /// Never prints the file name (owner data).
@@ -395,8 +421,12 @@ impl Attachments<'_> {
             Call::at(Method::Post, ATTACHMENTS_UPLOAD.route()).multipart_body(&boundary, body);
         call.idempotency_key = Some(key);
         let reply = self.0.send(&ATTACHMENTS_UPLOAD, call, None).await?;
+        let parent_stamp = parent_stamp_of(&reply);
         decode::<W>(&reply, "attachment")
-            .map(|w| w.attachment)
+            .map(|w| Attachment {
+                parent_stamp,
+                ..w.attachment
+            })
             .map_err(saved_unreadable)
     }
 
@@ -478,11 +508,16 @@ impl Attachments<'_> {
     }
 
     /// Deletes a file. A lost reply is reconciled by reading the file back
-    /// (gone = deleted).
+    /// (gone = deleted). Returns the record's new stamp (`parentUpdatedAt`)
+    /// when the file was on one and the engine sent it.
     ///
     /// # Errors
     /// `NotFound`; `OutcomeUnknown`; any [`ApiError`].
-    pub async fn delete(&self, id: AttachmentId, key: IdempotencyKey) -> Result<(), ApiError> {
+    pub async fn delete(
+        &self,
+        id: AttachmentId,
+        key: IdempotencyKey,
+    ) -> Result<Option<RecordStamp>, ApiError> {
         let s = &self.0.pinned();
         let path = format!("{BASE}/{id}");
         let matcher = OutcomeMatcher::Deleted {
@@ -492,14 +527,15 @@ impl Attachments<'_> {
         let probe = Probe::new(s, matcher, false).await;
         let mut call = Call::new(Method::Delete, ATTACHMENT_DELETE.route(), path);
         call.idempotency_key = Some(key);
-        s.send(&ATTACHMENT_DELETE, call, Some(&probe)).await?;
-        Ok(())
+        let reply = s.send(&ATTACHMENT_DELETE, call, Some(&probe)).await?;
+        Ok(parent_stamp_of(&reply))
     }
 
     /// Moves a file onto a record or into a draft (`POST
     /// /attachments/{id}/link`; adopting an unlinked file into a draft, or
     /// attaching a vendor credit's files before `bill-lines-v1`). Linking
-    /// again to the same place changes nothing.
+    /// again to the same place changes nothing. Returns the record's new
+    /// stamp (`parentUpdatedAt`) when the engine sent one.
     ///
     /// # Errors
     /// `NotFound`; any [`ApiError`].
@@ -508,7 +544,7 @@ impl Attachments<'_> {
         id: AttachmentId,
         to: AttachTo,
         key: IdempotencyKey,
-    ) -> Result<(), ApiError> {
+    ) -> Result<Option<RecordStamp>, ApiError> {
         let body = json_body(&serde_json::json!({
             "attachableType": to.kind(),
             "attachableId": to.id(),
@@ -520,8 +556,8 @@ impl Attachments<'_> {
         )
         .json_body(body);
         call.idempotency_key = Some(key);
-        self.0.send(&ATTACHMENT_LINK, call, None).await?;
-        Ok(())
+        let reply = self.0.send(&ATTACHMENT_LINK, call, None).await?;
+        Ok(parent_stamp_of(&reply))
     }
 
     /// Files not linked to any record yet (drafts and receipts; the
@@ -751,6 +787,93 @@ mod tests {
             .await
             .expect("download");
         assert_eq!(bytes, PDF);
+    }
+
+    /// U-291 S2: upload, link and delete answer with the record's new
+    /// stamp; a form takes it only for its own record, and only when newer.
+    #[tokio::test]
+    async fn writes_return_the_parents_new_stamp() {
+        const NEW: &str = "2026-11-20T10:00:00.456Z";
+        let server = MockServer::start().await;
+        let body = reply("expense", CHECK);
+        let with_stamp = format!(
+            "{},\"parentUpdatedAt\":\"{NEW}\"}}",
+            body.trim_end().strip_suffix('}').expect("object")
+        );
+        Mock::given(method("POST"))
+            .and(path("/api/v1/attachments"))
+            .respond_with(json(201, &with_stamp))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v1/attachments/{ATT}/link")))
+            .respond_with(json(
+                200,
+                &format!(r#"{{"linked":true,"parentUpdatedAt":"{NEW}"}}"#),
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path(format!("/api/v1/attachments/{ATT}")))
+            .respond_with(json(
+                200,
+                r#"{"message":"Attachment deleted","parentUpdatedAt":null}"#,
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path(format!("/api/v1/attachments/{ATT}")))
+            .respond_with(json(404, r#"{"error":{"message":"gone"}}"#))
+            .mount(&server)
+            .await;
+        let s = company_session(&server);
+        let check = TransactionId::parse(CHECK).expect("id");
+        let new = RecordStamp::parse(NEW);
+        let a = s
+            .attachments()
+            .attach(check, "r.pdf", PDF, IdempotencyKey::new())
+            .await
+            .expect("upload");
+        assert_eq!(a.parent_stamp, new);
+        assert_eq!(a.stamp_for(CHECK), new);
+        assert_eq!(a.stamp_for(ATT), None, "another record's form ignores it");
+        let id = AttachmentId::parse(ATT).expect("id");
+        let linked = s
+            .attachments()
+            .link(id, AttachTo::Expense(check), IdempotencyKey::new())
+            .await
+            .expect("link");
+        assert_eq!(linked, new);
+        let deleted = s
+            .attachments()
+            .delete(id, IdempotencyKey::new())
+            .await
+            .expect("delete");
+        assert_eq!(deleted, None, "an unlinked file has no parent stamp");
+
+        // The form's version takes the newer stamp only.
+        let old = RecordStamp::parse("2026-11-20T09:00:00.000Z").expect("old");
+        let mut v = crate::RecordVersion::Stamped {
+            fingerprint: [7; 32],
+            stamp: old,
+        };
+        v.adopt_stamp(new);
+        assert_eq!(v.stamp(), new);
+        assert_eq!(
+            v,
+            crate::RecordVersion::Fingerprint([7; 32]),
+            "content unchanged"
+        );
+        v.adopt_stamp(Some(old));
+        assert_eq!(v.stamp(), new, "an older answer never rolls it back");
+        let mut fp = crate::RecordVersion::Fingerprint([1; 32]);
+        fp.adopt_stamp(None);
+        assert_eq!(fp.stamp(), None);
+        fp.adopt_stamp(new);
+        assert_eq!(fp.stamp(), new);
+        let mut server_v = crate::RecordVersion::Server(3);
+        server_v.adopt_stamp(new);
+        assert_eq!(server_v.stamp(), None, "an engine version is left alone");
     }
 
     #[tokio::test]
