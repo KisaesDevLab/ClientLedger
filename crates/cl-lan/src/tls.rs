@@ -127,6 +127,24 @@ impl Identity {
         })
     }
 
+    /// An identity from a DER certificate and a PKCS#8 key. Not checked
+    /// here: rustls refuses a key that does not match when a config is
+    /// built from it.
+    #[must_use]
+    pub fn from_der(cert: Vec<u8>, key_pkcs8: Vec<u8>) -> Identity {
+        Identity {
+            cert: CertificateDer::from(cert),
+            key_pkcs8: Arc::new(Zeroizing::new(key_pkcs8)),
+        }
+    }
+
+    /// The PKCS#8 private key (tests that build a deliberately wrong
+    /// identity; never logged).
+    #[must_use]
+    pub fn key_pkcs8(&self) -> &[u8] {
+        &self.key_pkcs8
+    }
+
     /// The certificate's fingerprint.
     #[must_use]
     pub fn fingerprint(&self) -> Fingerprint {

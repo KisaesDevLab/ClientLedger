@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 mod api_spec;
+mod bind_check;
 mod ci;
 mod docread_accuracy;
 mod docread_check;
@@ -114,11 +115,11 @@ pub(crate) fn run_licenses() -> Result<()> {
 }
 
 pub(crate) fn run_layering() -> Result<()> {
-    report(
-        "layering",
-        "crate dependency edges are allowed",
-        &layering::check(&meta::load()?),
-    )
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut v = layering::check(&meta::load()?);
+    // Only cl-lan binds a non-loopback address (Q-P33x).
+    v.extend(bind_check::check(&root)?);
+    report("layering", "crate dependency edges are allowed", &v)
 }
 
 /// A normal build of the apps must not switch on a test-only feature,
