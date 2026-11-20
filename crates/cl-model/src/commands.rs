@@ -788,6 +788,14 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Demo Office Network: A Computer Asks to Join (developer)",
     ),
     dev_action(
+        "dev.lan_demo_code_burned",
+        "Demo Office Network: Pairing Code Used Up by Wrong Tries (developer)",
+    ),
+    dev_action(
+        "dev.lan_demo_cert_missing",
+        "Demo Office Network: Host Certificate File Missing (developer)",
+    ),
+    dev_action(
         "dev.lan_simulate_edit",
         "Demo Office Network: Someone Else Saves This Entry (developer)",
     ),

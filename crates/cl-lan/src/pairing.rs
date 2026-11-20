@@ -90,8 +90,15 @@ pub enum CodeView {
         /// Wrong tries left.
         tries_left: u8,
     },
-    /// Burned after too many wrong tries.
-    Burned,
+    /// Burned after too many wrong tries (the reason the host screen
+    /// gives): how many computers spent them, and the address of the one
+    /// that spent the last.
+    Burned {
+        /// Computers (addresses; one IPv6 /64 counts once) that tried.
+        computers: usize,
+        /// The address of the last wrong try.
+        last_peer: Option<IpAddr>,
+    },
 }
 
 /// A device waiting for the owner's click.
@@ -114,6 +121,8 @@ struct Code {
     burned: bool,
     /// Wrong tries per address ([`crate::policy::net_key`]) on this code.
     by_peer: std::collections::HashMap<IpAddr, u8>,
+    /// The real address of the last wrong try (shown when the code burns).
+    last_wrong: Option<IpAddr>,
 }
 
 struct Pending {
@@ -148,6 +157,7 @@ impl Pairing {
             tries_left: CODE_TRIES,
             burned: false,
             by_peer: std::collections::HashMap::new(),
+            last_wrong: None,
         });
         Ok(code)
     }
@@ -163,7 +173,10 @@ impl Pairing {
         let g = self.code.lock().unwrap_or_else(PoisonError::into_inner);
         match g.as_ref() {
             None => CodeView::None,
-            Some(c) if c.burned => CodeView::Burned,
+            Some(c) if c.burned => CodeView::Burned {
+                computers: c.by_peer.len(),
+                last_peer: c.last_wrong,
+            },
             Some(c) => {
                 let left = c.expires.saturating_duration_since(Instant::now());
                 if left.is_zero() {
@@ -209,6 +222,7 @@ impl Pairing {
             *g = None;
             return Ok(());
         }
+        c.last_wrong = Some(peer);
         if c.tries_left == 0 {
             c.burned = true;
             return Err(PairRefusal::Burned);
@@ -322,7 +336,14 @@ mod tests {
             assert_eq!(p.try_secret(peer(n), &bad), Err(PairRefusal::WrongCode));
         }
         assert_eq!(p.try_secret(peer(3), &bad), Err(PairRefusal::Burned));
-        assert_eq!(p.view(), CodeView::Burned);
+        // The host screen says why: three computers, the last at .3.
+        assert_eq!(
+            p.view(),
+            CodeView::Burned {
+                computers: 3,
+                last_peer: Some(peer(3)),
+            }
+        );
         // Even the right secret no longer works.
         assert_eq!(
             p.try_secret(peer(4), &code.secret_text()),

@@ -3,7 +3,10 @@
 # keychain, lan.json or multicast. Host: only private connections can be
 # picked (the VPN's 100.64 address and the public one are listed but off),
 # sharing starts, a pairing code shows, "Back office" asks to join and is
-# allowed, then removed; sharing stops. Workstation: the found host, a wrong
+# allowed, then removed; a code used up by wrong tries says how many
+# computers tried and the last one's address; sharing stops. A missing host
+# certificate file shows the reason and "Make a new certificate", which
+# removes every paired computer (one pairs again). Workstation: the found host, a wrong
 # code refused in plain words, the right code pairs, then Stop using this
 # host.
 #
@@ -47,6 +50,35 @@ steps:
   - assert_state: {key: screen.devices, equals: 2}
   - screenshot: host-paired
   - click: {role: button, label: Remove, index: 1}
+  - assert_state: {key: screen.devices, equals: 1}
+  # A code used up by wrong tries says how many computers tried and the
+  # last one's address (the address is on screen, never in state).
+  - command: dev.lan_demo_code_burned
+  - assert_state: {key: screen.code_burned, equals: true}
+  - assert_exists: {role: label, label_contains: "192.168.1.77"}
+  - assert_no_clipping: {}
+  - screenshot: host-code-burned
+  - click: {role: button, label: Show a pairing code}
+  - assert_state: {key: screen.code_burned, equals: false}
+  - assert_state: {key: screen.code_on, equals: true}
+  - click: {role: button, label: Stop pairing}
+  - click: {role: button, label: Stop sharing}
+  - assert_state: {key: screen.mode, equals: "off"}
+
+  # --- 1b. Host certificate file missing (review M2) ---------------------------
+  - command: dev.lan_demo_cert_missing
+  - assert_state: {key: screen.host_problem, equals: lan.host.cert_missing}
+  - assert_exists: {role: button, label: Make a new certificate}
+  - assert_no_clipping: {}
+  - screenshot: host-cert-missing
+  - click: {role: button, label: Make a new certificate}
+  - assert_state: {key: screen.host_problem, equals: null}
+  - assert_state: {key: screen.devices, equals: 0}
+  - assert_not_exists: {role: button, label: Make a new certificate}
+  # Every computer pairs again (one here, so the dark pass starts as this one did).
+  - click: {role: button, label: Show a pairing code}
+  - command: dev.lan_demo_pair_request
+  - click: {role: button, label: Allow}
   - assert_state: {key: screen.devices, equals: 1}
   - click: {role: button, label: Stop sharing}
   - assert_state: {key: screen.mode, equals: "off"}

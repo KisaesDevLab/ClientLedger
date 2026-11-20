@@ -14,6 +14,10 @@ pub const FINGERPRINT: &str = "3f9a1c0e7b2d4a6f8e1c3b5d7f9a0c2e4b6d8f0a1c3e5b7d9
 /// A synthetic pairing code, shown while the code is on (frozen).
 pub const CODE: &str = "K7QX2-M9VD4-HT3NW-B8RLC";
 
+/// The synthetic address of the last wrong try when the demo code burns
+/// (a documentation-style private address, no real computer).
+pub const BURN_PEER: &str = "192.168.1.77";
+
 /// The demo link as a workstation sees it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum DemoLink {
@@ -59,6 +63,12 @@ pub struct DemoLan {
     pub chosen: Option<usize>,
     /// The pairing code is showing.
     pub code_on: bool,
+    /// The code burned after too many wrong tries (two computers, the last
+    /// at a synthetic address).
+    pub code_burned: bool,
+    /// The host certificate file is missing (review M2): sharing can't
+    /// start until the owner makes a new certificate.
+    pub cert_missing: bool,
     /// Someone waits for Allow.
     pub request: Option<DemoRequest>,
     /// Paired workstations.
@@ -102,6 +112,8 @@ impl Default for DemoLan {
             ],
             chosen: Some(0),
             code_on: false,
+            code_burned: false,
+            cert_missing: false,
             request: None,
             devices: vec![DemoDevice {
                 label: "Front desk".into(),
@@ -134,8 +146,20 @@ impl DemoLan {
             }
             self.mode = Mode::Off;
             self.code_on = false;
+            self.code_burned = false;
             self.request = None;
         }
+    }
+
+    /// Makes a new host certificate: every paired computer is removed and
+    /// pairs again (review M2, S7).
+    pub fn regenerate(&mut self) {
+        for _ in 0..self.devices.len() {
+            self.audit.push("lan_device_removed");
+        }
+        self.devices.clear();
+        self.cert_missing = false;
+        self.audit.push("lan_host_key_regenerated");
     }
 
     /// Allow or Don't allow the waiting computer. Allow pairs it; either

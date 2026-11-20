@@ -641,7 +641,13 @@ impl crate::screens::lan_setup::LanControl for LiveLan {
                         minutes: seconds_left.div_ceil(60),
                         tries: tries_left,
                     },
-                    CodeView::Burned => CodeShown::Burned,
+                    CodeView::Burned {
+                        computers,
+                        last_peer,
+                    } => CodeShown::Burned {
+                        computers,
+                        last_peer: last_peer.map(|ip| ip.to_string()),
+                    },
                 },
                 h.pairing().pending().map(|p| (p.label, p.peer.to_string())),
                 h.registry()

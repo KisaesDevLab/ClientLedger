@@ -66,8 +66,14 @@ pub enum CodeShown {
         /// Wrong tries left.
         tries: u8,
     },
-    /// Too many wrong tries.
-    Burned,
+    /// Too many wrong tries: from how many computers, and the address of
+    /// the last one (shown so the owner can tell a typo from a stranger).
+    Burned {
+        /// Computers that tried.
+        computers: usize,
+        /// The last wrong try's address.
+        last_peer: Option<String>,
+    },
 }
 
 /// One paired computer as the window lists it.
@@ -176,9 +182,14 @@ impl LanControl for DemoControl {
             mode: l.mode,
             interfaces: l.interfaces.clone(),
             chosen: l.chosen,
-            fingerprint: (l.mode == Mode::Host)
+            fingerprint: (l.mode == Mode::Host && !l.cert_missing)
                 .then(|| crate::company::demo::lan::FINGERPRINT.to_string()),
-            code: if l.code_on {
+            code: if l.code_burned {
+                CodeShown::Burned {
+                    computers: 2,
+                    last_peer: Some(crate::company::demo::lan::BURN_PEER.to_string()),
+                }
+            } else if l.code_on {
                 CodeShown::Active {
                     display: crate::company::demo::lan::CODE.to_string(),
                     minutes: 10,
@@ -211,7 +222,7 @@ impl LanControl for DemoControl {
                 DemoLink::Maintenance => "host-maintenance",
             },
             restart_needed: false,
-            host_problem: None,
+            host_problem: l.cert_missing.then_some("lan.host.cert_missing"),
         })
         .unwrap_or_else(|| LanView {
             mode: Mode::Off,
@@ -249,12 +260,16 @@ impl LanControl for DemoControl {
     }
 
     fn new_code(&mut self) {
-        self.with(|l| l.code_on = true);
+        self.with(|l| {
+            l.code_on = true;
+            l.code_burned = false;
+        });
     }
 
     fn cancel_code(&mut self) {
         self.with(|l| {
             l.code_on = false;
+            l.code_burned = false;
             l.request = None;
         });
     }
@@ -268,7 +283,7 @@ impl LanControl for DemoControl {
     }
 
     fn regenerate(&mut self) {
-        self.with(|l| l.devices.clear());
+        self.with(crate::company::demo::lan::DemoLan::regenerate);
     }
 
     fn set_announce(&mut self, on: bool) {
@@ -507,8 +522,18 @@ impl LanSetupScreen {
                         self.control.cancel_code();
                     }
                 }
-                CodeShown::Burned => {
+                CodeShown::Burned {
+                    computers,
+                    last_peer,
+                } => {
                     form::inline_warning(ui, tokens, &t("lan.host.code.burned"));
+                    let from = match last_peer {
+                        Some(peer) => {
+                            t_count("lan.host.code.burned_from", *computers, &[("peer", peer)])
+                        }
+                        None => t_count("lan.host.code.burned_by", *computers, &[]),
+                    };
+                    form::hint(ui, tokens, &from);
                     if ui.button(t("lan.host.code.new")).clicked() {
                         self.control.new_code();
                     }
@@ -729,6 +754,17 @@ impl Screen for LanSetupScreen {
                 self.choice = Mode::Host;
             }
             "dev.lan_demo_workstation" => self.choice = Mode::Workstation,
+            "dev.lan_demo_code_burned" => {
+                l.code_on = false;
+                l.request = None;
+                l.code_burned = true;
+            }
+            "dev.lan_demo_cert_missing" => {
+                l.chosen = Some(0);
+                l.set_host(true);
+                l.cert_missing = true;
+                self.choice = Mode::Host;
+            }
             "dev.lan_demo_pair_request" => {
                 l.code_on = true;
                 l.request = Some(crate::company::demo::lan::DemoRequest {
@@ -750,6 +786,7 @@ impl Screen for LanSetupScreen {
             "interfaces": v.interfaces.len(),
             "allowed": v.interfaces.iter().filter(|c| c.refusal.is_none()).count(),
             "code_on": matches!(v.code, CodeShown::Active { .. }),
+            "code_burned": matches!(v.code, CodeShown::Burned { .. }),
             "request": v.request.is_some(),
             "devices": v.devices.len(),
             "paired": v.paired_host.is_some(),
@@ -794,6 +831,144 @@ mod tests {
         assert_eq!(s.state()["devices"], 1);
         s.control.set_host(false, None).expect("off");
         assert_eq!(s.state()["mode"], "off");
+    }
+
+    /// One frame at 1440 x 940 with `events`; the AccessKit nodes.
+    fn frame(
+        s: &mut LanSetupScreen,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+    ) -> Vec<egui::accesskit::Node> {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 940.0),
+            )),
+            events,
+            ..egui::RawInput::default()
+        };
+        let mut out = ctx.run_ui(input, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
+        out.platform_output
+            .accesskit_update
+            .map(|u| u.nodes.into_iter().map(|(_, n)| n).collect())
+            .unwrap_or_default()
+    }
+
+    fn named<'a>(
+        nodes: &'a [egui::accesskit::Node],
+        role: egui::accesskit::Role,
+        name: &str,
+    ) -> Option<&'a egui::accesskit::Node> {
+        nodes
+            .iter()
+            .find(|n| n.role() == role && (n.label() == Some(name) || n.value() == Some(name)))
+    }
+
+    fn texts(nodes: &[egui::accesskit::Node]) -> String {
+        nodes
+            .iter()
+            .filter_map(|n| n.label().or_else(|| n.value()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// Review M2: with the host certificate file missing the window says
+    /// so and offers "Make a new certificate"; clicking it removes every
+    /// paired computer and clears the problem.
+    #[test]
+    fn make_a_new_certificate_clears_the_problem_and_every_paired_computer() {
+        use egui::accesskit::Role;
+        let (_d, mut s) = screen();
+        assert!(s.command(CommandId::new("dev.lan_demo_cert_missing")));
+        assert_eq!(s.state()["host_problem"], "lan.host.cert_missing");
+        assert_eq!(s.state()["devices"], 1);
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        ctx.enable_accesskit();
+        let mut nodes = Vec::new();
+        for _ in 0..3 {
+            nodes = frame(&mut s, &ctx, Vec::new());
+        }
+        assert!(texts(&nodes).contains(&t("lan.host.cert_missing")));
+        let button = named(&nodes, Role::Button, &t("lan.host.regenerate"))
+            .expect("Make a new certificate")
+            .clone();
+        let b = button.bounds().expect("bounds");
+        #[allow(clippy::cast_possible_truncation, reason = "pixel positions")]
+        let at = egui::pos2(
+            f64::midpoint(b.x0, b.x1) as f32,
+            f64::midpoint(b.y0, b.y1) as f32,
+        );
+        let press = |pressed| egui::Event::PointerButton {
+            pos: at,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::default(),
+        };
+        frame(
+            &mut s,
+            &ctx,
+            vec![egui::Event::PointerMoved(at), press(true)],
+        );
+        frame(&mut s, &ctx, vec![press(false)]);
+        let after = frame(&mut s, &ctx, Vec::new());
+        assert_eq!(s.state()["host_problem"], Value::Null);
+        assert_eq!(s.state()["devices"], 0);
+        assert!(named(&after, Role::Button, &t("lan.host.regenerate")).is_none());
+        let audit = s
+            .link
+            .demo_state()
+            .map(|d| d.lan.audit.clone())
+            .expect("demo");
+        assert_eq!(audit.last(), Some(&"lan_host_key_regenerated"));
+        assert!(audit.contains(&"lan_device_removed"));
+    }
+
+    /// The burned code says why on the host: how many computers tried and
+    /// the last one's address (never in `state()`).
+    #[test]
+    fn a_burned_code_shows_who_spent_the_tries() {
+        let (_d, mut s) = screen();
+        assert!(s.command(CommandId::new("dev.lan_demo_host")));
+        assert!(s.command(CommandId::new("dev.lan_demo_code_burned")));
+        assert_eq!(s.state()["code_burned"], true);
+        assert_eq!(s.state()["code_on"], false);
+        assert!(
+            !s.state()
+                .to_string()
+                .contains(crate::company::demo::lan::BURN_PEER)
+        );
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        ctx.enable_accesskit();
+        let mut nodes = Vec::new();
+        for _ in 0..3 {
+            nodes = frame(&mut s, &ctx, Vec::new());
+        }
+        let all = texts(&nodes);
+        assert!(all.contains(&t("lan.host.code.burned")), "{all}");
+        assert!(
+            all.contains(&t_count(
+                "lan.host.code.burned_from",
+                2,
+                &[("peer", crate::company::demo::lan::BURN_PEER)]
+            )),
+            "{all}"
+        );
+        assert!(all.contains(crate::company::demo::lan::BURN_PEER));
+        // A new code clears it.
+        s.control.new_code();
+        assert_eq!(s.state()["code_burned"], false);
+        assert_eq!(s.state()["code_on"], true);
+        assert_eq!(
+            t_count("lan.host.code.burned_by", 1, &[]),
+            "The wrong tries came from one computer."
+        );
     }
 
     #[test]
