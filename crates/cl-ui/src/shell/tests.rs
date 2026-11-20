@@ -1895,6 +1895,10 @@ fn p33_office_network_opens_with_no_company_and_no_sign_in() {
     let ctx = context();
     settle(&ctx, &mut shell, WIDE);
     assert!(shell.company.is_none());
+    // A new computer: nobody signed in.
+    if let Some(mut d) = link.demo_state() {
+        d.auth.signed_in = None;
+    }
     assert!(!link.signed_in());
     let kind = CommandId::new(crate::screens::lan_setup::KIND);
     shell.dispatch_now(kind);

@@ -658,6 +658,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.company.too_new", "This backup was made by a newer ClientLedger."),
     ("fix.company.too_new", "Update ClientLedger, then restore it."),
     ("error.company.job_failed", "The backup or restore could not be finished."),
+    ("error.company.verify_failed", "The restored copy didn't match the backup file, so nothing was changed. Your books are as they were."),
+    ("fix.company.verify_failed", "Try an older backup, or click Copy details and report it so the backup can be checked."),
     ("error.company.transfer_not_backup", "This is a transfer file for your accountant's MyBooks."),
     ("fix.company.transfer_not_backup", "To move your company to another computer, use a backup."),
     ("error.company.totals_mismatch", "The file's check totals don't match the books it holds, so the company wasn't restored."),

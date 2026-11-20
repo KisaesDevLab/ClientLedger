@@ -1007,11 +1007,53 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
     });
     let not_sent = a.run(sa.transactions().get(id));
     assert!(not_sent.is_err(), "no host, no answer");
+    // QA-6: a save asked for while the host is down is refused at once and
+    // never held: after the host is back nothing arrives until the owner
+    // saves again, with the same key.
+    let held_memo = unique("held-save");
+    let held_key = key();
+    let started = std::time::Instant::now();
+    let e = a
+        .run(sa.transactions().update_journal_entry(
+            id,
+            &same.version,
+            &je2(on(), &held_memo, supplies, cash, "25.00"),
+            &PostingOptions::default(),
+            held_key.clone(),
+        ))
+        .expect_err("no host: not sent");
+    assert!(
+        matches!(e, ApiError::Lan(LanRefusal::NotSent)),
+        "refused as not sent: {e:?}"
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "refused at once, not held: {:?}",
+        started.elapsed()
+    );
     host.start_proxy();
     a.wait_connected("workstation A after the proxy restart");
+    std::thread::sleep(Duration::from_secs(5));
     let after = a
         .run(sa.transactions().get(id))
         .expect("read after a proxy restart");
+    assert_eq!(debits(&after.record), m("25.00"));
+    assert_ne!(
+        after.record.memo.as_deref(),
+        Some(held_memo.as_str()),
+        "nothing was sent on its own"
+    );
+    // The owner saves again: the same key goes, once.
+    a.run(sa.transactions().update_journal_entry(
+        id,
+        &after.version,
+        &je2(on(), &held_memo, supplies, cash, "25.00"),
+        &PostingOptions::default(),
+        held_key,
+    ))
+    .expect("saved when the owner saves again");
+    let after = a.run(sa.transactions().get(id)).expect("read");
+    assert_eq!(after.record.memo.as_deref(), Some(held_memo.as_str()));
     assert_eq!(debits(&after.record), m("25.00"));
 
     // --- Remove ends the computer's sign-ins (review S7) ------------------
