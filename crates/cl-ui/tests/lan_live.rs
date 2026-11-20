@@ -450,6 +450,30 @@ fn on() -> CalendarDate {
     CalendarDate::from_ymd(2026, 8, 14).expect("date")
 }
 
+/// 409 `RETRY`: a deadlock rolled the save back (U-146); nothing saved.
+fn is_retry(e: &ApiError) -> bool {
+    e.to_string().contains("RETRY")
+}
+
+/// Replays a keyed save after a deadlock refusal, at most 3 times.
+fn keyed<T>(
+    t: &mut Tally,
+    mut save: impl FnMut(IdempotencyKey) -> Result<T, ApiError>,
+) -> Result<T, ApiError> {
+    let k = key();
+    let mut tries = 0;
+    loop {
+        match save(k.clone()) {
+            Err(e) if is_retry(&e) && tries < 3 => {
+                tries += 1;
+                t.deadlock_replays += 1;
+                std::thread::sleep(Duration::from_millis(200 * tries));
+            }
+            other => return other,
+        }
+    }
+}
+
 fn is_stale(e: &ApiError) -> bool {
     matches!(
         e,
@@ -800,6 +824,10 @@ struct Tally {
     conflicts: u64,
     /// A shared counter update that went missing (must stay 0).
     lost: u64,
+    /// Saves the engine rolled back twice on a deadlock (409 `RETRY`
+    /// after cl-api's own resend; nothing saved), replayed with the same
+    /// idempotency key as the owner's next save would be.
+    deadlock_replays: u64,
     /// 5xx answers or other failures (must stay 0).
     failures: Vec<String>,
 }
@@ -831,6 +859,9 @@ fn office_network_soak() {
     }
 }
 
+static SEEN_READS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::LazyLock::new(Default::default);
+
 const CLIENTS: usize = 5;
 const SHARED: usize = 3;
 
@@ -838,9 +869,10 @@ fn counter_memo(base: &str, n: u64) -> String {
     format!("{base} #{n}")
 }
 
+/// The counter in `shared k #n` or `shared k #n by c`.
 fn counter_of(memo: Option<&str>) -> u64 {
     memo.and_then(|m| m.rsplit_once(" #"))
-        .and_then(|(_, n)| n.parse().ok())
+        .and_then(|(_, n)| n.split(' ').next()?.parse().ok())
         .unwrap_or(0)
 }
 
@@ -899,9 +931,10 @@ fn soak(host: &Host, scratch: &Path, run_for: Duration) {
     let reads: u64 = tallies.iter().map(|t| t.reads).sum();
     let conflicts: u64 = tallies.iter().map(|t| t.conflicts).sum();
     let lost: u64 = tallies.iter().map(|t| t.lost).sum();
+    let replays: u64 = tallies.iter().map(|t| t.deadlock_replays).sum();
     let failures: Vec<&String> = tallies.iter().flat_map(|t| &t.failures).collect();
     eprintln!(
-        "soak: {CLIENTS} clients, {:?}: {saves} saves, {reads} reads, {conflicts} resolved conflicts, {lost} lost, {} failures",
+        "soak: {CLIENTS} clients, {:?}: {saves} saves, {reads} reads, {conflicts} resolved conflicts, {replays} deadlock replays, {lost} lost, {} failures",
         started.elapsed(),
         failures.len()
     );
@@ -976,16 +1009,38 @@ fn soak_client(
                 };
                 t.reads += 1;
                 let now = counter_of(got.record.memo.as_deref());
-                let memo = counter_memo(&format!("shared {k}"), now + 1);
-                match desk.run(s.transactions().update_journal_entry(
-                    shared[k],
-                    &got.version,
-                    &je2(on(), &memo, supplies, cash, "1.00"),
-                    &PostingOptions::default(),
-                    key(),
-                )) {
+                // Each client's content is its own: two clients never ask
+                // for the same record, so a refused save can never be
+                // reconciled as "already saved" from the other's write.
+                let memo = format!("{} by {i}", counter_memo(&format!("shared {k}"), now + 1));
+                let entry = je2(on(), &memo, supplies, cash, "1.00");
+                let saved = keyed(&mut t, |k2| {
+                    desk.run(s.transactions().update_journal_entry(
+                        shared[k],
+                        &got.version,
+                        &entry,
+                        &PostingOptions::default(),
+                        k2,
+                    ))
+                });
+                match saved {
                     Ok(saved) => {
                         t.saves += 1;
+                        // Two saves accepted from the same read of the same
+                        // record: one overwrote the other (a lost update).
+                        let read = got.version.stamp().map(|s| format!("{k}@{s:?}"));
+                        if let Some(r) = read
+                            && !SEEN_READS
+                                .lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .insert(r.clone())
+                        {
+                            t.lost += 1;
+                            t.failures.push(format!(
+                                "lost update: two saves accepted from read {r} (deadlock replays so far: {})",
+                                t.deadlock_replays
+                            ));
+                        }
                         let prev = bumps[k].fetch_add(1, Ordering::SeqCst);
                         if counter_of(saved.record.memo.as_deref()) != now + 1 || prev + 1 < now + 1
                         {
@@ -1001,11 +1056,15 @@ fn soak_client(
                 }
             }
         } else {
-            match desk.run(s.transactions().create_journal_entry(
-                &je2(on(), &unique(&format!("soak {i}")), supplies, cash, &amount),
-                &PostingOptions::default(),
-                key(),
-            )) {
+            let entry = je2(on(), &unique(&format!("soak {i}")), supplies, cash, &amount);
+            let made = keyed(&mut t, |k2| {
+                desk.run(s.transactions().create_journal_entry(
+                    &entry,
+                    &PostingOptions::default(),
+                    k2,
+                ))
+            });
+            match made {
                 Ok(_) => t.saves += 1,
                 Err(e) => t.failures.push(format!("entry: {e}")),
             }
