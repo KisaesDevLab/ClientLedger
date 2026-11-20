@@ -548,6 +548,9 @@ pub(crate) struct SaveFlow {
     /// A save whose outcome is unknown: [`Self::send`] sends nothing until
     /// the recheck or the owner answers (B2), for every helper form.
     pub lost: crate::forms::lost_save::LostSave,
+    /// P33: the intent of a save refused as stale (a form with the
+    /// conflict dialog takes it; the others show Reload).
+    pub stale_intent: Option<SaveIntent>,
 }
 
 /// The engine takes the closing-date password.
@@ -811,6 +814,10 @@ impl SaveFlow {
             }
             None => Pending::Save(SaveIntent::Save),
         };
+        let intent = match &pending {
+            Pending::Save(i) => Some(*i),
+            Pending::Void(_) => None,
+        };
         let supported = closing_supported(link);
         if self.closing_prompt.failed(&e, pending, supported, closing) {
             return;
@@ -819,7 +826,10 @@ impl SaveFlow {
             ApiError::Conflict {
                 reason: ConflictReason::Stale,
                 ..
-            } => self.stale = true,
+            } => {
+                self.stale = true;
+                self.stale_intent = intent;
+            }
             e => self.error = Some(e),
         }
     }

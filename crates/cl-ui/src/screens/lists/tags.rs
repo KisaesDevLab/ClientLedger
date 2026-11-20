@@ -140,6 +140,10 @@ struct TagForm {
     error: Option<ApiError>,
     focus: Option<TagField>,
     task: Option<Task<Versioned<Tag>>>,
+    /// P33: the tag as the panel opened it (an edit is guarded by it).
+    opened: Option<Tag>,
+    /// P33: what the save in flight is for.
+    intent: SaveIntent,
 }
 
 impl TagForm {
@@ -279,6 +283,8 @@ pub struct TagsScreen {
     panel: Panel,
     note: Option<&'static str>,
     warn: Option<&'static str>,
+    /// P33: their tag being read after a stale save, then the dialog.
+    tag_conflict: crate::forms::conflict::ConflictFlow<Versioned<Tag>>,
     parts: EnvParts,
     /// The fixed bars' sizes last frame (Q-265).
     layout: crate::layout::FrameReport,
@@ -334,6 +340,7 @@ impl TagsScreen {
             panel: Panel::None,
             note: None,
             warn: None,
+            tag_conflict: crate::forms::conflict::ConflictFlow::default(),
             parts: EnvParts::default(),
             layout: crate::layout::FrameReport::default(),
             snap: GridSnapshot::default(),
@@ -657,7 +664,10 @@ impl TagsScreen {
             error: None,
             focus: Some(TagField::Name),
             task: None,
+            opened: None,
+            intent: SaveIntent::Save,
         }));
+        self.tag_conflict.clear();
     }
 
     /// Enter or Ctrl+E.
@@ -671,6 +681,7 @@ impl TagsScreen {
         }
         let Some(e) = self.list.tag(id) else { return };
         self.warn = None;
+        let opened = self.tags.iter().find(|x| x.id == id).cloned();
         self.panel = Panel::Tag(Box::new(TagForm {
             editing: Some(id),
             form: FormState::new(TagDraft::from_entry(e)),
@@ -678,7 +689,10 @@ impl TagsScreen {
             error: None,
             focus: Some(TagField::Name),
             task: None,
+            opened,
+            intent: SaveIntent::Save,
         }));
+        self.tag_conflict.clear();
     }
 
     /// New group (toolbar) or edit a group (its button under the list).
@@ -875,6 +889,7 @@ impl TagsScreen {
         };
         f.problems.clear();
         f.error = None;
+        f.intent = intent;
         match f.form.begin_save(intent) {
             SaveStart::Send(_) => {}
             SaveStart::Skip(after) => {
@@ -893,10 +908,20 @@ impl TagsScreen {
             // it); without, nothing (an older engine keeps no number).
             tag_number: self.caps.numbers.then_some(checked.number),
         };
-        let existing = f
-            .editing
-            .and_then(|id| self.tags.iter().find(|x| x.id == id).cloned());
+        // P33: an edit is guarded by the tag as the panel opened it, never
+        // by the list as it is now (a refresh would hide their change).
+        let existing = f.editing.and_then(|id| {
+            f.opened
+                .clone()
+                .or_else(|| self.tags.iter().find(|x| x.id == id).cloned())
+        });
         if self.link.is_demo() {
+            if let Some(x) = &existing
+                && let Err(e) = demo_guard_tag(&self.link, x)
+            {
+                self.tag_save_failed(e);
+                return false;
+            }
             let saved = demo_save_tag(&self.link, existing, fields);
             if let Panel::Tag(f) = &mut self.panel {
                 f.task = Some(Task::ready(saved));
@@ -957,9 +982,39 @@ impl TagsScreen {
                 true
             }
             Err(e) => {
-                f.save_failed(e);
+                self.tag_save_failed(e);
                 false
             }
+        }
+    }
+
+    /// A refused tag save.
+    fn tag_save_failed(&mut self, e: ApiError) {
+        let Panel::Tag(f) = &mut self.panel else {
+            return;
+        };
+        // P33: someone else saved it first: their tag, then the conflict
+        // dialog (or a silent re-save); deleted elsewhere: never re-created.
+        let stale = matches!(
+            e,
+            ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                ..
+            }
+        );
+        let gone = matches!(e, ApiError::NotFound { .. });
+        let (editing, intent) = (f.editing, f.intent);
+        f.save_failed(e);
+        match editing {
+            Some(id) if stale => {
+                f.error = None;
+                self.tag_conflict_start(id, intent);
+            }
+            Some(_) if gone => {
+                f.error = None;
+                self.warn = Some(crate::forms::conflict::GONE);
+            }
+            _ => {}
         }
     }
 
@@ -1964,6 +2019,29 @@ fn save_buttons(ui: &mut Ui, save: &mut Option<SaveIntent>, cancel: &mut bool, n
 }
 
 /// Saves into the demo tags at once (no engine).
+/// P33: the demo's version check (xpectedUpdatedAt): the stored tag
+/// must still be the one the panel opened.
+fn demo_guard_tag(link: &CompanyLink, opened: &Tag) -> Result<(), ApiError> {
+    let mut d = link.demo_state().ok_or(ApiError::NoCompanyOpen)?;
+    let now = d
+        .tags_mut()
+        .iter()
+        .find(|x| x.id == opened.id)
+        .cloned()
+        .ok_or(ApiError::NotFound { code: None })?;
+    if now.fingerprint() == opened.fingerprint() {
+        Ok(())
+    } else {
+        Err(ApiError::Conflict {
+            reason: ConflictReason::Stale,
+            current_version: None,
+            code: None,
+            message: cl_api::UserText::default(),
+            details: cl_api::ConflictDetails::default(),
+        })
+    }
+}
+
 fn demo_save_tag(
     link: &CompanyLink,
     existing: Option<Tag>,
@@ -2017,6 +2095,7 @@ impl Screen for TagsScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.parts = EnvParts::capture(ui.ctx());
         self.poll();
+        self.poll_tag_conflict();
         self.hear_changes();
         self.sync_compact();
         self.follow_selection();
@@ -2055,6 +2134,8 @@ impl Screen for TagsScreen {
             }
         });
         self.layout = frame.end();
+        let ctx = ui.ctx().clone();
+        self.tag_conflict_ui(&ctx);
     }
 
     fn fixed_layout(&self) -> bool {
@@ -2112,6 +2193,12 @@ impl Screen for TagsScreen {
                         f.form.redo();
                     }
                     _ => return false,
+                }
+            }
+            // P33: Esc in the conflict dialog is Back.
+            "form.revert" if self.tag_conflict.is_open() => {
+                if let Some((open, choice)) = self.tag_conflict.take_back() {
+                    self.run_tag_choice(open, choice);
                 }
             }
             "form.revert" => match &mut self.panel {
@@ -2234,3 +2321,5 @@ impl Screen for TagsScreen {
 
 #[cfg(test)]
 mod tests;
+
+mod conflict;

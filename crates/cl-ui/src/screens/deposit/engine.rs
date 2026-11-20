@@ -272,6 +272,24 @@ impl LocalDeposits for DemoDeposits {
         if let Some((id, _)) = edit {
             dates.extend(state.ledger.date_of(id));
         }
+        // P33: an edit is guarded by the version it read (expectedUpdatedAt).
+        if let Some((id, expected)) = &edit {
+            let contacts = state.contacts_mut().clone();
+            let now = state
+                .ledger
+                .get(&chart, &contacts, *id)
+                .ok_or(ApiError::NotFound { code: None })?
+                .version;
+            if &now != expected {
+                return Err(ApiError::Conflict {
+                    reason: cl_api::ConflictReason::Stale,
+                    current_version: Some(now),
+                    code: None,
+                    message: cl_api::UserText::default(),
+                    details: cl_api::ConflictDetails::default(),
+                });
+            }
+        }
         let id = if edit.is_none() {
             // A new deposit goes through the twin (links, 409, cash back).
             twins::create(&mut state, draft, password)?

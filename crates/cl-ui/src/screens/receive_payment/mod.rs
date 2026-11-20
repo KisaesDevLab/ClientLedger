@@ -26,6 +26,7 @@
 //! them (the scenario's assertions); no names or memos.
 
 mod attach;
+mod conflict;
 mod draw;
 pub(crate) mod engine;
 pub(crate) mod find;
@@ -195,6 +196,14 @@ pub struct ReceivePaymentScreen {
     /// Client Center's "Record bounced check": the bounce flow opens once
     /// this payment has loaded.
     pub(crate) bounce_on_open: Option<TransactionId>,
+    /// P33: their version being read after a stale save.
+    pub(crate) conflict_job: Option<(Job<PaymentRecord>, After)>,
+    /// P33: the conflict dialog.
+    pub(crate) conflict: crate::forms::conflict::ConflictFlow<PaymentRecord>,
+    /// P33: a silent re-save was tried for this save (a second stale asks).
+    pub(crate) silent_tried: bool,
+    /// P33: Keep mine saves once the merged form's preview is back.
+    pub(crate) resave: Option<After>,
 }
 
 impl std::fmt::Debug for ReceivePaymentScreen {
@@ -286,6 +295,10 @@ impl ReceivePaymentScreen {
             history_open: false,
             find: find::FindPayment::default(),
             bounce_on_open: None,
+            conflict_job: None,
+            conflict: crate::forms::conflict::ConflictFlow::default(),
+            silent_tried: false,
+            resave: None,
         };
         if let Some(mut d) = s.link.demo_state() {
             crate::company::demo::receivables::seed(&mut d);
@@ -511,6 +524,8 @@ impl ReceivePaymentScreen {
             ));
         }
         self.poll_save();
+        self.poll_conflict();
+        self.poll_resave();
         self.poll_credit_apply();
         self.poll_nav();
         self.poll_misc();
@@ -574,6 +589,10 @@ impl ReceivePaymentScreen {
         self.amount_text.clear();
         self.cells.clear();
         self.editing = None;
+        self.conflict.clear();
+        self.conflict_job = None;
+        self.resave = None;
+        self.silent_tried = false;
         self.save_key = None;
         self.credit_keys = None;
         self.problems.clear();
@@ -704,6 +723,7 @@ impl ReceivePaymentScreen {
 
     fn saved(&mut self, rec: PaymentRecord, after: After) {
         self.closing_prompt.saved();
+        self.silent_tried = false;
         self.save_key = None;
         self.saved_count += 1;
         let accounts = [rec.deposit_to, self.clearing()]
@@ -748,6 +768,19 @@ impl ReceivePaymentScreen {
             .closing_prompt
             .failed(&e, Pending::Save(after), true, self.books.closing)
         {
+            return;
+        }
+        // P33: someone else saved it first: their version, then the
+        // conflict dialog (or a silent re-save).
+        if cl_api::payment_refusal(&e) == Some(cl_api::PaymentRefusal::Stale)
+            && self.editing.is_some()
+        {
+            self.conflict_start(after);
+            return;
+        }
+        // P33: deleted elsewhere: never saved again.
+        if matches!(e, ApiError::NotFound { .. }) && self.editing.is_some() {
+            self.notice = Some(crate::forms::conflict::GONE);
             return;
         }
         self.show_refusal(e);
@@ -1034,8 +1067,26 @@ impl ReceivePaymentScreen {
         self.poll_nav();
     }
 
-    fn open_saved(&mut self, rec: PaymentRecord) {
-        let loaded = LoadedPayment {
+    pub(crate) fn open_saved(&mut self, rec: PaymentRecord) {
+        let loaded = self.loaded_of(&rec);
+        self.conflict.clear();
+        self.conflict_job = None;
+        self.resave = None;
+        self.silent_tried = false;
+        self.form.load_saved(
+            Editing {
+                id: rec.id,
+                updated_at: rec.updated_at,
+            },
+            loaded,
+        );
+        self.open_saved_rest(rec);
+    }
+
+    /// The form's copy of a saved payment (its own rows, the credits it
+    /// used, its accounts).
+    pub(crate) fn loaded_of(&self, rec: &PaymentRecord) -> LoadedPayment {
+        LoadedPayment {
             client: rec.customer_id,
             date: rec.date,
             amount: rec.amount,
@@ -1068,14 +1119,10 @@ impl ReceivePaymentScreen {
             write_off_account: rec.write_off_account_id,
             discount_account: rec.discount_account_id,
             hold: rec.holds_deposit,
-        };
-        self.form.load_saved(
-            Editing {
-                id: rec.id,
-                updated_at: rec.updated_at,
-            },
-            loaded,
-        );
+        }
+    }
+
+    fn open_saved_rest(&mut self, rec: PaymentRecord) {
         self.client_input = NameInput::default();
         self.client_input.text = self.books.contact_name(rec.customer_id).unwrap_or_default();
         self.date = DateInput::new(rec.date);
@@ -1262,6 +1309,8 @@ impl Screen for ReceivePaymentScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
         self.draw(ui);
+        let ctx = ui.ctx().clone();
+        self.conflict_ui(&ctx);
         if self.preview.is_some()
             || self.form.in_flight()
             || self.save.is_some()
@@ -1314,6 +1363,12 @@ impl Screen for ReceivePaymentScreen {
             "edit.void_transaction" => {
                 if self.editing.is_some() {
                     self.dialog = Some(Dialog::Void);
+                }
+            }
+            // P33: Esc in the conflict dialog is Back.
+            "form.revert" if self.conflict.is_open() => {
+                if let Some((open, choice)) = self.conflict.take_back() {
+                    self.run_choice(open, choice);
                 }
             }
             "form.revert" => {
@@ -1401,6 +1456,7 @@ impl ReceivePaymentScreen {
             "attachments": self.attach.state_json(),
             "find_results": self.find.results.as_ref().map(Vec::len),
             "notice": self.notice,
+            "conflict": self.conflict.state(),
             "problems": self.problems.iter().map(|p| format!("{p:?}")).collect::<Vec<_>>(),
             "read_only": self.is_read_only(),
             "bounced": self.editing.as_ref().is_some_and(PaymentRecord::is_bounced),

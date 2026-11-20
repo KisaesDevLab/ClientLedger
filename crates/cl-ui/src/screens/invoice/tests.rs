@@ -983,3 +983,119 @@ fn tag_options_on_invoices() {
     s.start_save(SaveIntent::Save, None);
     assert_eq!(s.saved_count, 1, "{}", s.state_json());
 }
+
+// --- P33: someone else saved the invoice first ------------------------------
+
+use crate::screens::conflict_dialog::ConflictChoice;
+
+/// One plain line (4000, `qty` x `rate`) for the story client.
+fn plain_lines(s: &mut InvoiceScreen, lines: &[(&str, &str)]) {
+    let income = crate::company::demo::account_id(4000);
+    let mut v = Vec::new();
+    for (qty, rate) in lines {
+        let key = s.grid.keys().next_key();
+        v.push(InvoiceLine {
+            account: Some(income),
+            description: "Boarding".into(),
+            quantity: Some(q(qty)),
+            rate: Some(m(rate)),
+            taxable: Some(false),
+            ..InvoiceLine::blank(key)
+        });
+    }
+    s.grid.edit(|f, keys| {
+        f.lines = v;
+        f.ensure_entry_line(keys);
+    });
+    settle(s);
+}
+
+/// A plain invoice, saved, then open here and in `other`.
+fn two_windows() -> (
+    tempfile::TempDir,
+    InvoiceScreen,
+    InvoiceScreen,
+    TransactionId,
+) {
+    let (d, mut s) = screen();
+    let c = story_client(&s);
+    s.pick_client(c);
+    plain_lines(&mut s, &[("1", "100.00")]);
+    s.start_save(SaveIntent::Save, None);
+    let id = s.editing.as_ref().map(|e| e.id).expect("saved");
+    let mut other = InvoiceScreen::new(Arc::clone(&s.link), None, today());
+    other.load(id);
+    assert_eq!(other.editing.as_ref().map(|e| e.id), Some(id));
+    (d, s, other, id)
+}
+
+fn stored(s: &InvoiceScreen, id: TransactionId) -> cl_api::InvoiceRecord {
+    let mut d = s.link.demo_state().expect("demo");
+    crate::company::demo::invoices::get(&mut d, id)
+        .expect("invoice")
+        .record
+}
+
+#[test]
+fn p33_keep_mine_takes_their_lines_and_keeps_my_po_number() {
+    let (_d, mut s, mut other, id) = two_windows();
+    plain_lines(&mut other, &[("2", "100.00"), ("1", "25.00")]);
+    other.start_save(SaveIntent::Save, None);
+    assert_eq!(other.saved_count, 1, "{:?}", other.error);
+    s.header.edit(field::PO, |h| h.po_number = "PO-9".into());
+    s.start_save(SaveIntent::Save, None);
+    let open = s.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(!merge.lines_from_mine);
+    assert!(merge.undone.is_empty());
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    assert!(s.error.is_none(), "{:?}", s.error);
+    let r = stored(&s, id);
+    assert_eq!(r.po_number.as_deref(), Some("PO-9"));
+    assert_eq!(r.lines.len(), 2);
+    assert_eq!(r.txn.total, Some(m("225.00")), "the engine's total");
+}
+
+#[test]
+fn p33_use_theirs_shows_their_invoice_and_esc_is_back() {
+    let (_d, mut s, mut other, _id) = two_windows();
+    other.header.edit_step(|h| h.memo = "theirs".into());
+    other.start_save(SaveIntent::Save, None);
+    s.header.edit_step(|h| h.memo = "mine".into());
+    s.start_save(SaveIntent::Save, None);
+    assert!(s.conflict.is_open());
+    assert!(s.form_command(CommandId::new("form.revert")));
+    assert!(s.stale);
+    assert_eq!(s.header.current().memo, "mine");
+    s.start_save(SaveIntent::Save, None);
+    let open = s.conflict.open.take().expect("dialog again");
+    s.run_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(s.header.current().memo, "theirs");
+    assert!(!s.is_dirty());
+}
+
+#[test]
+fn p33_a_new_stamp_with_nothing_editable_changed_saves_without_asking() {
+    let (_d, mut s, _other, id) = two_windows();
+    if let Some(Editing {
+        doc: SavedDoc::Invoice(r),
+        ..
+    }) = s.editing.as_mut()
+    {
+        r.txn.updated_at = cl_core::Timestamp::parse_wire("2000-01-01T00:00:00Z").ok();
+    }
+    s.header.edit_step(|h| h.memo = "mine".into());
+    let before = s.saved_count;
+    s.start_save(SaveIntent::Save, None);
+    assert!(!s.conflict.is_open());
+    assert_eq!(s.saved_count, before + 1, "{:?}", s.error);
+    assert_eq!(stored(&s, id).txn.memo.as_deref(), Some("mine"));
+}
+
+#[test]
+fn p33_an_invoice_deleted_elsewhere_is_never_saved_again() {
+    let (_d, mut s, _other, _id) = two_windows();
+    s.conflict_read(Err(ApiError::NotFound { code: None }), SaveIntent::Save);
+    assert_eq!(s.notice, Some(crate::forms::conflict::GONE));
+    assert!(!s.conflict.is_open());
+}

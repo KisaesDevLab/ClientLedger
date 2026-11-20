@@ -802,6 +802,9 @@ fn a_bill_changed_elsewhere_is_stale_and_reloads() {
     }
     s.header.edit_step(|h| h.memo = "mine".into());
     assert!(!s.start_save(SaveIntent::Save, None));
+    // P33: both changed the memo: the conflict dialog asks; Back keeps mine.
+    let open = s.conflict.open.take().expect("dialog");
+    s.run_choice(open, crate::screens::conflict_dialog::ConflictChoice::Back);
     assert_eq!(s.state()["save"]["stale"], true);
     s.reload();
     assert_eq!(s.compose().memo, "changed elsewhere");
@@ -1131,4 +1134,176 @@ fn tag_options_on_bills_and_vendor_credits() {
         let s = screen(&link);
         assert_eq!(s.state()["header_tags"], 1, "{kind:?}: on a new form");
     }
+}
+
+// --- P33: someone else saved the bill or credit first -----------------------
+
+use crate::screens::conflict_dialog::ConflictChoice;
+
+/// An 18.25 bill (or credit) on 6210, saved, then open here and in `other`.
+fn two_windows(
+    link: &Arc<CompanyLink>,
+    kind: BillKind,
+) -> (EnterBillScreen, EnterBillScreen, TransactionId) {
+    let mut s = screen(link);
+    s.set_kind(kind);
+    fill(
+        &mut s,
+        demo_bills::STORY_VENDOR,
+        "18.25",
+        &[("6210", "18.25")],
+    );
+    assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
+    let id = s.save.last.as_ref().expect("last").id;
+    assert_eq!(s.state()["mode"], "edit");
+    let mut other = screen(link);
+    assert!(other.open_record(id));
+    assert_eq!(other.state()["read_only"], false);
+    (s, other, id)
+}
+
+fn stored(link: &Arc<CompanyLink>, id: TransactionId) -> cl_api::BillRecord {
+    let mut demo = link.demo_state().expect("demo");
+    demo_bills::get(&mut demo, id).expect("bill").record
+}
+
+fn amounts(r: &cl_api::BillRecord) -> Vec<Money> {
+    r.lines.iter().map(|l| l.amount).collect()
+}
+
+#[test]
+fn p33_keep_mine_takes_their_lines_and_amount_and_keeps_my_ref() {
+    let (_d, link) = link();
+    let (mut s, mut other, id) = two_windows(&link, BillKind::Bill);
+    fill(
+        &mut other,
+        demo_bills::STORY_VENDOR,
+        "20.00",
+        &[("6210", "15.00"), ("6210", "5.00")],
+    );
+    assert!(
+        other.start_save(SaveIntent::Save, None),
+        "{}",
+        other.state()
+    );
+    s.header.edit_step(|h| h.reference = "INV-9".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(!merge.lines_from_mine);
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    assert_eq!(s.state()["save"]["error"], false, "{}", s.state());
+    let r = stored(&link, id);
+    assert_eq!(r.vendor_invoice_number.as_deref(), Some("INV-9"));
+    assert_eq!(amounts(&r), vec![money("15.00"), money("5.00")]);
+    assert_eq!(r.txn.total, Some(money("20.00")));
+}
+
+#[test]
+fn p33_my_re_split_lines_keep_my_amount_due() {
+    let (_d, link) = link();
+    let (mut s, mut other, id) = two_windows(&link, BillKind::Bill);
+    fill(
+        &mut other,
+        demo_bills::STORY_VENDOR,
+        "20.00",
+        &[("6210", "20.00")],
+    );
+    assert!(other.start_save(SaveIntent::Save, None));
+    fill(
+        &mut s,
+        demo_bills::STORY_VENDOR,
+        "18.25",
+        &[("6210", "10.00"), ("6210", "8.25")],
+    );
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(merge.lines_from_mine);
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    assert_eq!(s.state()["save"]["problems"], 0);
+    let r = stored(&link, id);
+    assert_eq!(amounts(&r), vec![money("10.00"), money("8.25")]);
+    assert_eq!(r.txn.total, Some(money("18.25")));
+}
+
+#[test]
+fn p33_use_theirs_shows_their_bill_and_esc_is_back() {
+    let (_d, link) = link();
+    let (mut s, mut other, _id) = two_windows(&link, BillKind::Bill);
+    other.header.edit_step(|h| h.memo = "theirs".into());
+    assert!(other.start_save(SaveIntent::Save, None));
+    s.header.edit_step(|h| h.memo = "mine".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert!(s.form_command(CommandId::new("form.revert")));
+    assert_eq!(s.header.current().memo, "mine");
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.open.take().expect("dialog again");
+    s.run_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(s.header.current().memo, "theirs");
+    assert!(!s.is_dirty());
+}
+
+#[test]
+fn p33_a_new_stamp_with_nothing_editable_changed_saves_without_asking() {
+    let (_d, link) = link();
+    let (mut s, _other, id) = two_windows(&link, BillKind::Bill);
+    if let Some(e) = s.editing.as_mut() {
+        e.record.version = cl_api::RecordVersion::Fingerprint([0; 32]);
+    }
+    s.header.edit_step(|h| h.memo = "mine".into());
+    let before = s.save.count;
+    s.start_save(SaveIntent::Save, None);
+    assert!(!s.conflict.is_open());
+    assert_eq!(s.save.count, before + 1);
+    assert_eq!(stored(&link, id).txn.memo.as_deref(), Some("mine"));
+}
+
+#[test]
+fn p33_a_bill_deleted_elsewhere_is_never_saved_again() {
+    let (_d, link) = link();
+    let (mut s, _other, _id) = two_windows(&link, BillKind::Bill);
+    s.conflict_read(Err(ApiError::NotFound { code: None }), SaveIntent::Save);
+    assert_eq!(s.save.notice, Some(crate::forms::conflict::GONE));
+    assert!(!s.conflict.is_open());
+}
+
+// Vendor credits share the form: the same flow, on `PUT /vendor-credits`.
+
+#[test]
+fn p33_vendor_credit_keep_mine_use_theirs_and_silent_resave() {
+    let (_d, link) = link();
+    let (mut s, mut other, id) = two_windows(&link, BillKind::Credit);
+    assert_eq!(s.state()["kind"], "credit");
+    // Keep mine: their memo, my ref.
+    other.header.edit_step(|h| h.memo = "theirs".into());
+    assert!(
+        other.start_save(SaveIntent::Save, None),
+        "{}",
+        other.state()
+    );
+    s.header.edit_step(|h| h.reference = "VC-2".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    let r = stored(&link, id);
+    assert_eq!(r.kind(), cl_api::ApKind::VendorCredit);
+    assert_eq!(r.txn.memo.as_deref(), Some("theirs"));
+    assert_eq!(r.vendor_invoice_number.as_deref(), Some("VC-2"));
+    // Use theirs: `other` still holds the version before that save.
+    other.header.edit_step(|h| h.memo = "other again".into());
+    assert!(!other.start_save(SaveIntent::Save, None));
+    let open = other.conflict.open.take().expect("dialog");
+    other.run_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(other.header.current().reference, "VC-2");
+    assert!(!other.is_dirty());
+    // Silent: a new stamp, nothing editable changed.
+    if let Some(e) = s.editing.as_mut() {
+        e.record.version = cl_api::RecordVersion::Fingerprint([0; 32]);
+    }
+    s.header.edit_step(|h| h.memo = "mine".into());
+    s.start_save(SaveIntent::Save, None);
+    assert!(!s.conflict.is_open());
+    assert_eq!(stored(&link, id).txn.memo.as_deref(), Some("mine"));
 }

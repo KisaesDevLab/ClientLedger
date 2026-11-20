@@ -650,3 +650,103 @@ fn a_cash_sale_and_its_linked_return_round_trip() {
     );
     assert_eq!(stock(), returned, "a re-save moves nothing");
 }
+
+// --- P33: someone else saved the memo or receipt first ----------------------
+
+use crate::screens::conflict_dialog::ConflictChoice;
+
+/// A saved document of `kind` (golden lines, kept as credit), then open
+/// here and in `other`.
+fn two_windows(
+    kind: SalesDocKind,
+) -> (
+    tempfile::TempDir,
+    InvoiceScreen,
+    InvoiceScreen,
+    cl_core::ids::TransactionId,
+) {
+    let (d, mut s) = screen(kind);
+    let c = bluestem(&s);
+    golden_lines(&mut s, c);
+    s.start_save(SaveIntent::Save, None);
+    if kind == SalesDocKind::CreditMemo {
+        s.submit_apply_panel(true);
+    }
+    let id = s.editing.as_ref().map(|e| e.id).expect("saved");
+    let mut other = InvoiceScreen::new_kind(Arc::clone(&s.link), None, today(), kind);
+    other.load(id);
+    assert_eq!(other.editing.as_ref().map(|e| e.id), Some(id));
+    (d, s, other, id)
+}
+
+fn old_stamp(s: &mut InvoiceScreen) {
+    let old = cl_core::Timestamp::parse_wire("2000-01-01T00:00:00Z").expect("ts");
+    match s.editing.as_mut().map(|e| &mut e.doc) {
+        Some(SavedDoc::CreditMemo(r)) => r.updated_at = old,
+        Some(SavedDoc::SalesReceipt(r)) => r.updated_at = old,
+        _ => panic!("a memo or receipt"),
+    }
+}
+
+fn p33_flow(kind: SalesDocKind) {
+    // Keep mine: their memo, my message.
+    let (_d, mut s, mut other, id) = two_windows(kind);
+    other.header.edit_step(|h| h.memo = "theirs".into());
+    settle(&mut other);
+    other.start_save(SaveIntent::Save, None);
+    settle(&mut other);
+    other.poll();
+    assert_eq!(other.saved_count, 1, "{:?} {:?}", other.error, other.notice);
+    s.header.edit_step(|h| h.customer_message = "Thanks".into());
+    settle(&mut s);
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    s.poll();
+    let open = s.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(merge.undone.is_empty());
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    settle(&mut s);
+    s.poll();
+    assert!(s.error.is_none(), "{:?}", s.error);
+    assert!(!s.is_dirty(), "saved: {:?}", s.notice);
+    let e = s.editing.as_ref().expect("open");
+    let (memo, message) = match &e.doc {
+        SavedDoc::CreditMemo(r) => (r.memo.clone(), r.customer_message.clone()),
+        SavedDoc::SalesReceipt(r) => (r.memo.clone(), r.customer_message.clone()),
+        SavedDoc::Invoice(_) => panic!("kind"),
+    };
+    assert_eq!(e.id, id);
+    assert_eq!(memo.as_deref(), Some("theirs"));
+    assert_eq!(message.as_deref(), Some("Thanks"));
+    // Use theirs: `other` meets the merge.
+    other.header.edit_step(|h| h.memo = "again".into());
+    settle(&mut other);
+    other.start_save(SaveIntent::Save, None);
+    settle(&mut other);
+    other.poll();
+    let open = other.conflict.open.take().expect("dialog");
+    other.run_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(other.header.current().customer_message, "Thanks");
+    assert!(!other.is_dirty());
+    // Silent: a new stamp, nothing editable changed.
+    old_stamp(&mut s);
+    s.header.edit_step(|h| h.memo = "mine".into());
+    let before = s.saved_count;
+    settle(&mut s);
+    s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    s.poll();
+    assert!(!s.conflict.is_open());
+    assert_eq!(s.saved_count, before + 1, "{:?}", s.error);
+}
+
+#[test]
+fn p33_a_credit_memo_keeps_mine_uses_theirs_and_resaves_silently() {
+    p33_flow(SalesDocKind::CreditMemo);
+}
+
+#[test]
+fn p33_a_sales_receipt_keeps_mine_uses_theirs_and_resaves_silently() {
+    p33_flow(SalesDocKind::SalesReceipt);
+}

@@ -24,6 +24,7 @@
 //! `--demo` answers from `company::demo::checks`.
 
 pub(crate) mod attach;
+mod conflict;
 // A04 WP-F2: draft mode (a document from Review Documents).
 mod draft;
 mod form;
@@ -331,6 +332,9 @@ pub struct WriteCheckScreen {
     pub(crate) template: crate::screens::templates::SaveFlow,
     /// A04 draft mode: the document draft this form enters (`draft.rs`).
     pub(crate) draft: draft::CheckDraftMode,
+    /// P33: their version being read after a stale save, then the dialog.
+    pub(crate) conflict:
+        crate::forms::conflict::ConflictFlow<cl_api::Versioned<cl_api::CheckRecord>>,
 }
 
 /// A blank check form (no lines: the grid holds them).
@@ -447,6 +451,7 @@ impl WriteCheckScreen {
             lists_keep_inputs: false,
             template: crate::screens::templates::SaveFlow::default(),
             draft: draft::CheckDraftMode::default(),
+            conflict: crate::forms::conflict::ConflictFlow::default(),
         };
         s.bus = s.link.bus().subscribe();
         s.start_load();
@@ -1135,6 +1140,8 @@ impl Screen for WriteCheckScreen {
         }
         self.compare_before();
         self.draw(ui);
+        let ctx = ui.ctx().clone();
+        self.conflict_ui(&ctx);
         self.fill_remaining();
         self.follow_items();
         self.compare_after();
@@ -1266,6 +1273,7 @@ impl WriteCheckScreen {
             || self.numbers_task.is_some()
             || self.balance_task.is_some()
             || self.save.task.is_some()
+            || self.conflict.busy()
             || self.load_task.is_some()
             || self.nav.task.is_some()
             || self.void.task.is_some()
@@ -1335,6 +1343,7 @@ impl WriteCheckScreen {
                 "error": self.save.error.is_some(),
                 "duplicate": self.save.duplicate.map(|(_, offer)| offer),
                 "stale": self.save.stale,
+                "conflict": self.conflict.state(),
             },
             "last_saved": self.save.last.as_ref().map(|l| json!({
                 "number": l.number,
