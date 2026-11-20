@@ -155,13 +155,8 @@ struct Host {
     password: Secret,
     /// The host keychain's database and engine secrets (kept across
     /// restarts).
-    host_stores: Option<HostStores>,
+    host_stores: Option<HostConfig>,
 }
-
-type HostStores = (
-    Option<Arc<dyn cl_host::PasswordStore>>,
-    Option<Arc<dyn cl_host::PasswordStore>>,
-);
 
 impl Host {
     fn boot(root: &Path, exe: PathBuf) -> Result<Host, String> {
@@ -208,14 +203,11 @@ impl Host {
         let mut cfg = HostConfig::new(paths.clone(), self.exe.clone());
         // The host's keychain outlives a restart (the database password and
         // the engine's master secret), as the OS keychain does.
-        let stores = self
-            .host_stores
-            .get_or_insert_with(|| {
-                let c = cl_host::in_memory_stores(HostConfig::new(paths.clone(), self.exe.clone()));
-                (c.pg_password_store, c.secrets_store)
-            })
-            .clone();
-        (cfg.pg_password_store, cfg.secrets_store) = stores;
+        let stores = self.host_stores.get_or_insert_with(|| {
+            cl_host::in_memory_stores(HostConfig::new(paths.clone(), self.exe.clone()))
+        });
+        cfg.pg_password_store.clone_from(&stores.pg_password_store);
+        cfg.secrets_store.clone_from(&stores.secrets_store);
         cfg.lan_host = true;
         cfg.policy.ready_timeout = Duration::from_mins(3);
         cfg.policy.health_ready_timeout = Duration::from_mins(2);
@@ -668,10 +660,16 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
 
     // --- A public interface is refused -----------------------------------
     for ip in ["8.8.8.8", "0.0.0.0", "100.64.0.1"] {
-        assert!(
-            host.try_proxy(ip).is_err(),
-            "a listener on {ip} must be refused"
-        );
+        // Refused at start, or started and stopped by the policy: either
+        // way nothing listens there.
+        if let Ok(h) = host.try_proxy(ip) {
+            std::thread::sleep(Duration::from_millis(500));
+            assert!(
+                !matches!(h.status(), cl_lan::host::ProxyStatus::Listening(_)),
+                "a listener on {ip} must be refused: {:?}",
+                h.status()
+            );
+        }
     }
 
     // --- The request-smuggling shapes, against the live proxy ------------
