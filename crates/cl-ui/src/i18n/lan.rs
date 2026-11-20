@@ -171,6 +171,12 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lan.field.salesTax", "Sales tax"),
     ("lan.field.paymentMethod", "Payment method"),
     ("lan.field.applications", "Invoices it pays"),
+    ("lan.field.tagNumber", "Tag number"),
+    ("lan.field.name", "Name"),
+    ("lan.field.tagGroup", "Group"),
+    ("lan.field.color", "Color"),
+    ("lan.field.description", "Description"),
+    ("lan.list.changed_elsewhere", "Someone else changed this since you opened it. Close it and open it again to see their changes."),
     ("lan.payment.applications", "{n} invoices or credits"),
     ("lan.payment.recheck", "Someone else changed which invoices this payment pays. Their choices are shown, with your other changes. Check the invoices, then save."),
 ];
