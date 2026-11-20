@@ -175,7 +175,8 @@ pub(super) async fn row_write(
     // it atomically.
     // U-291: the void or delete sends the stamp the row was read at, and
     // the engine compares it under the record's lock (LAN mode requires
-    // it, U-292). A row read without one takes the stamp read here.
+    // it, U-292). A row read without one takes the stamp read here (only
+    // from an engine that checks stamps).
     let mut stamp = w.version.and_then(|v| v.stamp());
     if let Some(expected) = w.version {
         let now = t.get(w.id).await?;
@@ -189,7 +190,11 @@ pub(super) async fn row_write(
                 details: cl_api::ConflictDetails::default(),
             });
         }
-    } else {
+    } else if s
+        .client()
+        .capabilities()
+        .has(cl_api::Capabilities::STALE_ALL)
+    {
         stamp = t.get(w.id).await?.version.stamp();
     }
     let ap = s.ap_voids();

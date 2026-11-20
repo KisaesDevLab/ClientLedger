@@ -908,3 +908,40 @@ fn p33_the_dialog_names_roles_terms_and_accounts_never_codes() {
     assert!(texts.iter().any(|x| x[0] == label("contactType")));
     assert!(texts.iter().any(|x| x[0] == label("expenseAccount")));
 }
+
+/// P33 (U-291 S2): a certificate upload moves the client's stamp; the open
+/// contact panel and the listed row take it (only a newer one), and the
+/// edits in the form stay.
+#[test]
+fn p33_an_uploaded_certificate_s_stamp_is_taken_by_the_open_contact_panel() {
+    let mut r = Rig::new(Role::Client);
+    let id =
+        r.s.contacts
+            .iter()
+            .find(|c| c.is_active)
+            .map(|c| c.id)
+            .expect("a client");
+    r.s.place_cursor(Some(id));
+    r.frames(2);
+    r.s.open_edit(Some(id));
+    r.frames(1);
+    r.form().form.edit_step(|d| d.phone = "555-0100".into());
+    let newer = cl_api::RecordStamp::parse("2031-01-02T03:04:05.678Z").expect("stamp");
+    let older = cl_api::RecordStamp::parse("2001-01-02T03:04:05.678Z").expect("stamp");
+    r.link
+        .bus()
+        .publish(crate::data_bus::Change::ContactStamp(id, newer));
+    r.frames(2);
+    let opened = r.form().opened.clone().expect("opened");
+    assert_eq!(opened.version().stamp(), Some(newer), "the panel took it");
+    assert_eq!(r.form().form.current().phone, "555-0100", "the edit stays");
+    let row = r.s.contacts.iter().find(|c| c.id == id).expect("row");
+    assert_eq!(row.version().stamp(), Some(newer), "the row took it");
+    // An older stamp (an answer landing late) never rolls it back.
+    r.link
+        .bus()
+        .publish(crate::data_bus::Change::ContactStamp(id, older));
+    r.frames(2);
+    let opened = r.form().opened.clone().expect("opened");
+    assert_eq!(opened.version().stamp(), Some(newer));
+}

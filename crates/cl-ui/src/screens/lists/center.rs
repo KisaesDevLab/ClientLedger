@@ -440,6 +440,28 @@ impl CenterScreen {
         }
     }
 
+    /// Takes a contact's new stamp from a write on something it owns (a
+    /// certificate upload, U-291 S2): the listed row and an open form of
+    /// that contact. Only a newer stamp is taken; the edits stay.
+    fn adopt_contact_stamp(&mut self, id: ContactId, stamp: cl_api::RecordStamp) {
+        let Some(at) = stamp.timestamp() else { return };
+        let newer = |c: &mut Contact| {
+            let held = c.updated_at.and_then(cl_api::RecordStamp::of_timestamp);
+            if held.is_none_or(|h| h < stamp) {
+                c.updated_at = Some(at);
+            }
+        };
+        if let Some(c) = self.contacts.iter_mut().find(|c| c.id == id) {
+            newer(c);
+        }
+        if let Panel::Form(f) = &mut self.panel
+            && f.editing == Some(id)
+            && let Some(c) = f.opened.as_mut()
+        {
+            newer(c);
+        }
+    }
+
     /// Saves in other windows of this app (Q-262): the names, balances
     /// and the shown contact's transactions come again from the engine.
     /// The cursor stays on its contact; an open form keeps its edits.
@@ -447,6 +469,9 @@ impl CenterScreen {
         let changes = self.link.bus().take(&mut self.bus);
         if changes.is_empty() {
             return;
+        }
+        for (id, stamp) in &changes.contact_stamps {
+            self.adopt_contact_stamp(*id, *stamp);
         }
         if changes.contacts && self.load.is_none() {
             self.refreshing = true;

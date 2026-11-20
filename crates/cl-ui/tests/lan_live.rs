@@ -509,6 +509,112 @@ fn is_stale(e: &ApiError) -> bool {
     )
 }
 
+/// In LAN mode a deactivation, a void and a delete go through on the stamp
+/// they were read at (no 428 `STALE_REQUIRED`; the `DELETE` stamp rides in
+/// the body, review S3), and on a stamp another workstation has moved since
+/// they are refused with 409 `STALE` and change nothing.
+fn stamped_removals(
+    a: &Desk,
+    sa: &Session,
+    b: &Desk,
+    sb: &Session,
+    debit: AccountId,
+    credit: AccountId,
+) {
+    // An account: B deactivates it on its read; A's older read is stale.
+    let acct = account(a, sa, AccountType::Expense, "Retired");
+    let a_read = a.run(sa.accounts().get(acct)).expect("A reads the account");
+    let b_read = b.run(sb.accounts().get(acct)).expect("B reads the account");
+    let off = b
+        .run(sb.accounts().deactivate(acct, &b_read.version, key()))
+        .expect("B deactivates on its stamp (no 428)");
+    assert!(!off.record.is_active);
+    let e = a
+        .run(sa.accounts().deactivate(acct, &a_read.version, key()))
+        .expect_err("A's deactivation on the old stamp");
+    assert!(is_stale(&e), "409 STALE: {e:?}");
+
+    // A journal entry: B edits it, so A's void on its older read is
+    // stale; on a fresh read the void goes through.
+    let memo = unique("void me");
+    let made = a
+        .run(sa.transactions().create_journal_entry(
+            &je2(on(), &memo, debit, credit, "7.00"),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect("entry");
+    let txn = made.record.id;
+    let a_old = a.run(sa.transactions().get(txn)).expect("A reads");
+    let b_read = b.run(sb.transactions().get(txn)).expect("B reads");
+    b.run(sb.transactions().update_journal_entry(
+        txn,
+        &b_read.version,
+        &je2(on(), &format!("{memo} (B)"), debit, credit, "7.00"),
+        &PostingOptions::default(),
+        key(),
+    ))
+    .expect("B edits");
+    let e = a
+        .run(sa.transactions().void(
+            txn,
+            a_old.version.stamp(),
+            "wrong entry",
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect_err("A's void on the old stamp");
+    assert!(is_stale(&e), "409 STALE: {e:?}");
+    let a_new = a.run(sa.transactions().get(txn)).expect("A reads again");
+    assert_ne!(a_new.record.status, cl_api::TxnStatus::Void, "not voided");
+    let voided = a
+        .run(sa.transactions().void(
+            txn,
+            a_new.version.stamp(),
+            "wrong entry",
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect("A voids on its fresh stamp (no 428)");
+    assert_eq!(voided.record.status, cl_api::TxnStatus::Void);
+
+    // A delete (`DELETE /transactions/{id}` reads its stamp from the body).
+    let made = a
+        .run(sa.transactions().create_journal_entry(
+            &je2(on(), &unique("delete me"), debit, credit, "3.00"),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect("entry");
+    let gone = made.record.id;
+    let a_old = a.run(sa.transactions().get(gone)).expect("A reads");
+    let b_read = b.run(sb.transactions().get(gone)).expect("B reads");
+    b.run(sb.transactions().update_journal_entry(
+        gone,
+        &b_read.version,
+        &je2(on(), &unique("delete me (B)"), debit, credit, "3.00"),
+        &PostingOptions::default(),
+        key(),
+    ))
+    .expect("B edits");
+    let opts = cl_api::DeleteOptions::default();
+    let e = a
+        .run(
+            sa.transactions()
+                .delete(gone, a_old.version.stamp(), &opts, key()),
+        )
+        .expect_err("A's delete on the old stamp");
+    assert!(is_stale(&e), "409 STALE: {e:?}");
+    let a_new = a.run(sa.transactions().get(gone)).expect("A reads again");
+    let deleted = a
+        .run(
+            sa.transactions()
+                .delete(gone, a_new.version.stamp(), &opts, key()),
+        )
+        .expect("A deletes on its fresh stamp (no 428)");
+    assert_eq!(deleted.record.status, cl_api::TxnStatus::Deleted);
+}
+
 /// Boots a host, or says why it can't (missing engine or `PostgreSQL`).
 fn host_or_skip(scratch: &Path) -> Option<Host> {
     let Some(exe) = engine_exe() else {
@@ -651,6 +757,9 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
     );
     let same = a.run(sa.transactions().get(id)).expect("read");
     assert_eq!(debits(&same.record), m("25.00"), "nothing changed");
+
+    // --- Deletes, deactivations and voids carry their stamps (U-292) ------
+    stamped_removals(&a, &sa, &b, &sb, supplies, cash);
 
     // --- Engine restart: reconnects, data intact (AC2) -------------------
     let before = a.generation().expect("generation");
