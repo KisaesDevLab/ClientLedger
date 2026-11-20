@@ -113,6 +113,8 @@ steps:
 
   # --- 3. No company open (QA-1): a new second computer gets here too ------------
   - command: file.close_company
+  # The demo opens with a changed check; its question is answered.
+  - click_if_present: {role: button, label: Discard changes}
   - assert_state: {key: company_open, equals: false}
   - assert_state: {key: screen.screen, equals: open_company}
   - click: {role: button, label: "Open a company on my office network"}
