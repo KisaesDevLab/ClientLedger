@@ -38,6 +38,10 @@ use crate::resources::operations::{
 };
 use crate::wire::{Capabilities, DesktopInfo, Health};
 
+/// A LAN save whose preparation waited longer than this is refused as not
+/// sent: the owner's press is stale (P33 QA-6).
+const STALE_PRESS: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Refresh when the access token has less than this many seconds left.
 const REFRESH_MARGIN_SECS: u64 = 60;
 
@@ -1035,13 +1039,42 @@ impl Session {
     /// this view's pin, or to the scope read once here for an unpinned
     /// session, so the company id and the token never come from two
     /// different companies.
+    /// P33 QA-6: a LAN workstation's save is refused as not sent when the
+    /// link is down now, or when what ran since the owner pressed Save
+    /// (`asked`) waited longer than [`STALE_PRESS`]. Never on the local
+    /// engine.
+    ///
+    /// # Errors
+    /// `Lan(NotSent)`.
+    pub(crate) fn lan_save_check(&self, asked: std::time::Instant) -> Result<(), ApiError> {
+        let t = self.client().exec().transport();
+        if t.writes_never_wait() && (t.write_held() || asked.elapsed() > STALE_PRESS) {
+            return Err(ApiError::Lan(crate::LanRefusal::NotSent));
+        }
+        Ok(())
+    }
+
     pub(crate) async fn send(
         &self,
         op: &Operation,
         mut call: Call,
         reconciler: Option<&dyn Reconciler>,
     ) -> Result<EngineReply, ApiError> {
+        // P33 QA-6: on a LAN workstation a save is never held for the host
+        // to come back: refused at once when the link is down, and refused
+        // when the steps before it (the engine info re-read after a
+        // restart) waited for the link, since the owner's press is stale.
+        let lan_save =
+            !call.method.is_read() && self.client().exec().transport().writes_never_wait();
+        let transport = self.client().exec().transport();
+        if lan_save && transport.write_held() {
+            return Err(ApiError::Lan(crate::LanRefusal::NotSent));
+        }
+        let asked = std::time::Instant::now();
         self.client().refresh_after_restart().await;
+        if lan_save && (transport.write_held() || asked.elapsed() > STALE_PRESS) {
+            return Err(ApiError::Lan(crate::LanRefusal::NotSent));
+        }
         if !op.company_scoped() {
             let out = self
                 .client()

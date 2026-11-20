@@ -1022,8 +1022,14 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
             held_key.clone(),
         ))
         .expect_err("no host: not sent");
+    // Not sent: refused by the link, or by a read that has to go first
+    // (sign-in refresh) finding the engine away. Either way the call is
+    // over, so nothing of it can go out later.
     assert!(
-        matches!(e, ApiError::Lan(LanRefusal::NotSent)),
+        matches!(
+            e,
+            ApiError::Lan(LanRefusal::NotSent) | ApiError::EngineUnavailable { permanent: false }
+        ),
         "refused as not sent: {e:?}"
     );
     assert!(
@@ -1109,7 +1115,8 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
         .run(sb2.transactions().get(id))
         .expect("read after a host restart");
     assert_eq!(debits(&after.record), m("25.00"), "data intact");
-    assert_eq!(after.record.memo.as_deref(), Some(a_memo.as_str()));
+    // The memo of the save made again after the proxy restart (QA-6).
+    assert_eq!(after.record.memo.as_deref(), Some(held_memo.as_str()));
     // And the books take writes again, from the host and a workstation.
     b.run(sb2.transactions().create_journal_entry(
         &je2(on(), &unique("after the crash"), supplies, cash, "3.00"),

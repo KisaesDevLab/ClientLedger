@@ -462,6 +462,17 @@ impl Transport {
         &self.cfg
     }
 
+    /// Saves never wait for this source's engine (a LAN workstation).
+    pub(crate) fn writes_never_wait(&self) -> bool {
+        !self.source.writes_wait()
+    }
+
+    /// A save now would be refused as not sent: its source never waits and
+    /// the engine is away (P33 QA-6).
+    pub(crate) fn write_held(&self) -> bool {
+        self.writes_never_wait() && !matches!(self.source.current(), EndpointState::Ready(_))
+    }
+
     /// The current endpoint state (never cached).
     pub(crate) fn current(&self) -> EndpointState {
         self.source.current()

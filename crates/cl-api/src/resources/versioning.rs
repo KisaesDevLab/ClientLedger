@@ -534,6 +534,10 @@ pub(crate) async fn update_guarded_reply<T>(
 where
     T: DeserializeOwned + EditableFields,
 {
+    // P33 QA-6: a LAN save is never held: not when the link is down, nor
+    // after a pre-read that waited for it.
+    let asked = std::time::Instant::now();
+    session.lan_save_check(asked)?;
     // The read, the probe and the write all belong to one company.
     let session = &session.pinned();
     let put_path = put_path.unwrap_or_else(|| u.path.clone());
@@ -562,6 +566,7 @@ where
             // with a fresh read.
             let current: Versioned<T> =
                 get_versioned(session, u.get, u.path.clone(), u.key).await?;
+            session.lan_save_check(asked)?;
             if current.version.stamp() != Some(*s) {
                 return Err(ApiError::Conflict {
                     reason: ConflictReason::Stale,
@@ -576,6 +581,7 @@ where
         RecordVersion::Fingerprint(f) | RecordVersion::Stamped { fingerprint: f, .. } => {
             let current: Versioned<T> =
                 get_versioned(session, u.get, u.path.clone(), u.key).await?;
+            session.lan_save_check(asked)?;
             let now = current.record.fingerprint();
             if &now != f {
                 return Err(ApiError::Conflict {
