@@ -570,7 +570,7 @@ mod tests {
         let rec = |i: usize| cl_settings::TransferRecord {
             path: Path::new("C:\\Users\\owner").join(&deep).join(&name),
             sha256: "f".repeat(64),
-            archive_id: format!("{:036}", i),
+            archive_id: format!("{i:036}"),
             created_at: Timestamp::parse_wire("2026-11-04T08:12:00.000Z").expect("ts"),
             totals: Some(cl_settings::TransferTotals {
                 as_of: cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("d"),
@@ -610,7 +610,7 @@ mod tests {
         // A short history is kept whole.
         let short: Vec<_> = (0..3).map(rec).collect();
         assert_eq!(host_transfers(&short).len(), 3);
-        assert!(host_transfers(&[]).is_empty());
+        assert_eq!(host_transfers(&[]), Vec::new());
     }
 
     #[test]

@@ -532,6 +532,7 @@ async fn engine_with_a_draft() -> MockServer {
 /// were discarded and which backup still holds them; the error itself is
 /// unchanged underneath (`kind()`), and its owner message is the same.
 #[tokio::test]
+#[allow(clippy::too_many_lines, reason = "one case per exit after the discard")]
 async fn errors_after_the_payroll_discard_say_so() {
     let failed_missing = json!({"status":"failed","error":{"code":"FILE_MISSING","message":"x","details":{"files":[
         {"table":"attachments","rowId":"8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02","reason":"FILE_MISSING"}]}}});

@@ -24,7 +24,7 @@ fn list(h: &Harness, s: &Session, end: CalendarDate) -> TxnList {
     for _ in 0..12 {
         match h.run(s.reports().transaction_list_exact(None, Some(end))) {
             Err(ApiError::RateLimited { .. }) => {
-                std::thread::sleep(std::time::Duration::from_secs(10))
+                std::thread::sleep(std::time::Duration::from_secs(10));
             }
             other => return other.unwrap_or_else(|e| panic!("transaction list: {e}")),
         }
@@ -89,7 +89,7 @@ pub fn transaction_list_ties_to_the_trial_balance_t9(h: &Harness) {
     let end = date(2045, 12, 31);
     let got = list(h, s, end);
     assert!(!got.hidden_notice, "the owner sees every account");
-    assert!(!got.rows.is_empty());
+    assert_ne!(got.rows.len(), 0);
     for p in &posted {
         assert_eq!(
             got.rows.iter().filter(|r| r.id == p.record.id).count(),
@@ -132,9 +132,10 @@ pub fn transaction_list_ties_to_the_trial_balance_t9(h: &Harness) {
     let mut prior = Decimal::ZERO;
     for r in &got.rows {
         let id = r.account_id.to_string();
-        let kind = match tb_net.get(&id) {
-            Some((k, _)) => k.clone(),
-            None => {
+        let kind = if let Some((k, _)) = tb_net.get(&id) {
+            k.clone()
+        } else {
+            {
                 let a = h
                     .run(s.accounts().get(r.account_id))
                     .unwrap_or_else(|e| panic!("account: {e}"));
