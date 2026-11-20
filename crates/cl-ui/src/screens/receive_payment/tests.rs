@@ -1002,3 +1002,35 @@ fn p33_a_payment_deleted_elsewhere_is_never_saved_again() {
     s.conflict_read(Err(ApiError::NotFound { code: None }), After::Stay);
     assert_eq!(s.notice, Some(crate::forms::conflict::GONE));
 }
+
+#[test]
+fn p33_their_amount_over_my_changed_applications_is_a_recheck_never_merged() {
+    let (_d, link) = link();
+    let (mut s, _other, id) = two_windows(&link);
+    // Mine: other invoices paid and a memo; theirs: a new amount only.
+    let conflict = cl_model::lan::Conflict::new(
+        &serde_json::json!({"amount": "100.00", "applications": {"rows": ["a"]}, "memo": "", "lines": []}),
+        &serde_json::json!({"amount": "100.00", "applications": {"rows": ["b"]}, "memo": "mine", "lines": []}),
+        &serde_json::json!({"amount": "120.00", "applications": {"rows": ["a"]}, "memo": "", "lines": []}),
+        "lines",
+    );
+    let merge = conflict.keep_mine();
+    let open = crate::forms::conflict::OpenConflict {
+        dialog: crate::screens::conflict_dialog::ConflictDialog::new(
+            conflict,
+            Box::new(|_| String::new()),
+        ),
+        theirs: stored(&link, id),
+        intent: cl_model::forms::SaveIntent::Save,
+    };
+    s.form.memo = "mine".into();
+    s.dirty = true;
+    let before = s.saved_count;
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    settle(&mut s);
+    assert_eq!(s.saved_count, before, "never saved on its own");
+    assert_eq!(s.notice, Some(super::conflict::RECHECK));
+    assert!(s.dirty);
+    assert_eq!(s.form.memo, "mine", "my other change kept");
+    assert_eq!(stored(&link, id).memo, None, "nothing saved yet");
+}

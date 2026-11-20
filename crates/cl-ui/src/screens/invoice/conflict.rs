@@ -158,12 +158,27 @@ impl InvoiceScreen {
             ))),
             self.money_style,
             &[],
-        );
+        )
+        .with_names(self.conflict_names());
         self.conflict.open = Some(OpenConflict {
             dialog: words.dialog(conflict),
             theirs,
             intent,
         });
+    }
+
+    /// The sales tax items and layouts by id, for the dialog's words.
+    pub(crate) fn conflict_names(&self) -> std::collections::HashMap<String, String> {
+        let taxes = self
+            .tax_items
+            .iter()
+            .map(|i| (i.id.to_string(), i.name.clone()));
+        let layouts = self
+            .print_books
+            .layouts
+            .iter()
+            .map(|l| (l.id.to_string(), l.name.clone()));
+        taxes.chain(layouts).collect()
     }
 
     /// Their document becomes the form's "as opened" and `mine` its fields,
@@ -189,7 +204,13 @@ impl InvoiceScreen {
     }
 
     /// Saves the merge; a credit memo waits for its preview, then saves.
+    /// A form busy with another save (or its closing-date question) keeps
+    /// the merge queued until it is free, never dropping it silently.
     fn resave(&mut self, intent: SaveIntent) {
+        if !self.idle() {
+            self.conflict_resave = Some(intent);
+            return;
+        }
         self.start_save(intent, None);
         if self.notice == Some("credit_memo.problem.updating") {
             self.notice = None;
@@ -200,6 +221,7 @@ impl InvoiceScreen {
     /// A merge waiting for the memo's preview.
     pub(crate) fn poll_resave(&mut self) {
         if self.preview_job.is_none()
+            && self.idle()
             && let Some(intent) = self.conflict_resave.take()
         {
             self.resave(intent);

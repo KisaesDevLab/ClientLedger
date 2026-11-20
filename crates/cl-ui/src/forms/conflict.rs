@@ -178,6 +178,32 @@ pub(crate) struct Words {
     style: MoneyStyle,
     /// Header fields that hold an amount.
     money: &'static [&'static str],
+    /// Other ids the form names itself (sales tax items, layouts).
+    names: Arc<std::collections::HashMap<String, String>>,
+}
+
+/// A wire code in words, for the fields that hold one (terms, payment
+/// method, charge or credit); `None` for anything else.
+#[must_use]
+pub(crate) fn code_text(field: &str, code: &str) -> Option<String> {
+    let key = |k: String| crate::i18n::has(&k).then(|| crate::i18n::t(&k));
+    match field {
+        "terms" => cl_model::lists::contacts::Terms::from_wire(code)
+            .map(|x| crate::i18n::t(x.label().as_str())),
+        "paymentMethod" => key(format!("payment.method.{code}"))
+            .or_else(|| key(format!("sales_receipt.method.{code}"))),
+        "kind" => key(format!("card.mode.{code}")),
+        _ => None,
+    }
+}
+
+/// A quantity as the owner reads it: no trailing zeros after the point.
+fn qty_text(wire: &str) -> String {
+    if wire.contains('.') {
+        wire.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {
+        wire.to_string()
+    }
 }
 
 impl Words {
@@ -194,12 +220,23 @@ impl Words {
             items,
             style,
             money,
+            names: Arc::default(),
         }
+    }
+
+    /// These words, also naming `names` (id text to name).
+    #[must_use]
+    pub fn with_names(mut self, names: std::collections::HashMap<String, String>) -> Words {
+        self.names = Arc::new(names);
+        self
     }
 
     /// An id's name (account, name, tag or item), if it is one.
     #[must_use]
     pub fn name(&self, id: &str) -> Option<String> {
+        if let Some(n) = self.names.get(id) {
+            return Some(n.clone());
+        }
         if let Ok(a) = cl_core::ids::AccountId::parse(id)
             && let Some(t) = self.lists.account_text(a)
         {
@@ -238,7 +275,7 @@ impl Words {
     pub fn field(&self, field: &str, v: &Value) -> Option<String> {
         match v {
             Value::String(s) if self.money.contains(&field) => self.amount(s),
-            Value::String(s) => self.name(s),
+            Value::String(s) => code_text(field, s).or_else(|| self.name(s)),
             Value::Array(ids) => {
                 let names: Vec<String> = ids
                     .iter()
@@ -251,7 +288,8 @@ impl Words {
         }
     }
 
-    /// One line in words: account or item, amount, memo or description.
+    /// One line in words: account or item, quantity and rate, amount,
+    /// memo or description.
     #[must_use]
     pub fn line(&self, v: &Value) -> String {
         let text = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or_default();
@@ -260,12 +298,23 @@ impl Words {
             .find(|s| !s.is_empty())
             .and_then(|id| self.name(id))
             .unwrap_or_default();
+        let (qty, rate) = (text("qty"), text("rate"));
+        let priced = match (qty.is_empty(), rate.is_empty()) {
+            (false, false) => format!(
+                "{} \u{00d7} {}",
+                qty_text(qty),
+                self.amount(rate).unwrap_or_else(|| rate.to_string())
+            ),
+            (false, true) => qty_text(qty),
+            (true, false) => self.amount(rate).unwrap_or_else(|| rate.to_string()),
+            (true, true) => String::new(),
+        };
         let amount = self.amount(text("amount")).unwrap_or_default();
         let memo = [text("memo"), text("description")]
             .into_iter()
             .find(|s| !s.is_empty())
             .unwrap_or_default();
-        [what.as_str(), amount.as_str(), memo]
+        [what.as_str(), priced.as_str(), amount.as_str(), memo]
             .into_iter()
             .filter(|s| !s.is_empty())
             .collect::<Vec<_>>()
@@ -324,6 +373,22 @@ mod tests {
         let wire = cl_core::Money::parse_wire("10.50").expect("m").to_wire();
         assert_eq!(expense_line(&line)["amount"], wire.as_str());
         assert_eq!(expense_line(&line)["memo"], "feed");
+    }
+
+    #[test]
+    fn codes_read_as_words_and_lines_show_quantity_and_rate() {
+        assert_eq!(code_text("terms", "net_30").as_deref(), Some("Net 30"));
+        assert_eq!(code_text("paymentMethod", "cash").as_deref(), Some("Cash"));
+        assert_eq!(code_text("kind", "credit").as_deref(), Some("Credit"));
+        assert_eq!(code_text("memo", "cash"), None);
+        assert_eq!(code_text("terms", "made_up"), None);
+        let w = Words::new(Arc::default(), None, MoneyStyle::default(), &[])
+            .with_names([("L1".to_string(), "Simple".to_string())].into());
+        assert_eq!(w.field("layout", &json!("L1")).as_deref(), Some("Simple"));
+        let line = w.line(&json!({"qty": "2.5000", "rate": "40.00", "description": "Mulch"}));
+        assert!(line.starts_with("2.5 \u{00d7} "), "{line}");
+        assert!(line.contains("40.00"), "{line}");
+        assert!(line.ends_with("Mulch"), "{line}");
     }
 
     #[test]

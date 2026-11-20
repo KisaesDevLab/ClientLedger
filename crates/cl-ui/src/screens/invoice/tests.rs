@@ -1099,3 +1099,49 @@ fn p33_an_invoice_deleted_elsewhere_is_never_saved_again() {
     assert_eq!(s.notice, Some(crate::forms::conflict::GONE));
     assert!(!s.conflict.is_open());
 }
+
+#[test]
+fn p33_a_merge_save_while_the_form_is_busy_waits_and_then_saves() {
+    let (_d, mut s, mut other, id) = two_windows();
+    other.header.edit_step(|h| h.memo = "theirs".into());
+    other.start_save(SaveIntent::Save, None);
+    s.header.edit(field::PO, |h| h.po_number = "PO-7".into());
+    s.start_save(SaveIntent::Save, None);
+    let open = s.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    // Another save is still running in this window.
+    s.save_job = Some(super::engine::Job::Done(None));
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    assert!(s.conflict_resave.is_some(), "queued, not dropped");
+    assert_ne!(stored(&s, id).po_number.as_deref(), Some("PO-7"));
+    s.save_job = None;
+    s.poll_resave();
+    assert!(s.conflict_resave.is_none());
+    let r = stored(&s, id);
+    assert_eq!(r.po_number.as_deref(), Some("PO-7"));
+    assert_eq!(r.txn.memo.as_deref(), Some("theirs"));
+}
+
+#[test]
+fn p33_the_dialog_names_layouts_and_sales_tax_and_shows_quantity_and_rate() {
+    let (_d, mut s, mut other, _id) = two_windows();
+    plain_lines(&mut other, &[("3", "40.00")]);
+    other.start_save(SaveIntent::Save, None);
+    s.header.edit_step(|h| h.memo = "mine".into());
+    s.start_save(SaveIntent::Save, None);
+    let open = s.conflict.open.as_ref().expect("dialog");
+    let names = s.conflict_names();
+    if let Some(t) = s.tax_items.first() {
+        assert_eq!(names.get(&t.id.to_string()), Some(&t.name));
+    }
+    let words =
+        crate::forms::conflict::Words::new(Arc::clone(&s.books.lists), None, s.money_style, &[]);
+    let theirs_line = super::conflict::doc_value(
+        &other.header.current().clone(),
+        &other.grid.value().lines,
+    )["lines"][0]
+        .clone();
+    let text = words.line(&theirs_line);
+    assert!(text.contains("3 \u{00d7} "), "{text}");
+    assert!(open.dialog.conflict().theirs_changed_lines());
+}
