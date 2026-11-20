@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use cl_api::{ApiError, ConflictReason, UserText};
+use cl_api::{ApiError, ConflictReason, EditableFields, UserText};
 use cl_core::ids::TenantId;
 use cl_model::CommandId;
 use cl_model::forms::SaveIntent;
@@ -493,4 +493,195 @@ fn on_hand_shows_for_parts_only_while_inventory_is_on() {
     );
     r.select(crate::company::demo::stock::FIRST_PART);
     assert_eq!(r.state("selected_on_hand_text"), "120 bag");
+}
+
+// --- P33: someone else saved the item first ---------------------------------
+
+use crate::screens::conflict_dialog::ConflictChoice;
+
+/// Item 1, open in the panel; someone else then sets its description in
+/// the books, and the list is read again (so it holds their copy).
+fn opened_then_changed_elsewhere(r: &mut Rig) -> cl_core::ids::ItemId {
+    let id = item_id(1);
+    r.select(1);
+    r.cmd("edit.edit_transaction");
+    {
+        let mut d = r.link.demo_state().expect("demo");
+        let i = d.items_mut().iter_mut().find(|x| x.id == id).expect("item");
+        i.fields.description = Some("theirs".into());
+    }
+    r.s.start_load();
+    r.frames(2);
+    id
+}
+
+fn stored(r: &Rig, id: cl_core::ids::ItemId) -> cl_api::Item {
+    let mut d = r.link.demo_state().expect("demo");
+    d.items_mut()
+        .iter()
+        .find(|x| x.id == id)
+        .cloned()
+        .expect("item")
+}
+
+#[test]
+fn p33_an_edit_is_guarded_by_the_item_as_opened_not_the_reloaded_list() {
+    let mut r = Rig::new();
+    let id = opened_then_changed_elsewhere(&mut r);
+    r.form()
+        .form
+        .edit(super::F_NAME, |d| d.name = "Mine".into());
+    r.s.save_form(SaveIntent::Save);
+    assert!(r.s.item_conflict.is_open(), "their change is never hidden");
+    assert_ne!(stored(&r, id).fields.name, "Mine", "nothing saved yet");
+    assert!(r.state("conflict").is_object());
+    assert!(!r.s.save_form(SaveIntent::Save), "no save while it is open");
+}
+
+#[test]
+fn p33_keep_mine_takes_their_description_and_keeps_my_name() {
+    let mut r = Rig::new();
+    let id = opened_then_changed_elsewhere(&mut r);
+    r.form()
+        .form
+        .edit(super::F_NAME, |d| d.name = "Mine".into());
+    r.s.save_form(SaveIntent::Save);
+    let open = r.s.item_conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(merge.undone.is_empty());
+    r.s.run_item_choice(open, ConflictChoice::KeepMine(merge));
+    let i = stored(&r, id);
+    assert_eq!(i.fields.name, "Mine");
+    assert_eq!(i.fields.description.as_deref(), Some("theirs"));
+}
+
+#[test]
+fn p33_use_theirs_shows_their_item_and_esc_is_back() {
+    let mut r = Rig::new();
+    let id = opened_then_changed_elsewhere(&mut r);
+    r.form()
+        .form
+        .edit(super::F_DESCRIPTION, |d| d.description = "mine".into());
+    r.s.save_form(SaveIntent::Save);
+    assert!(r.s.item_conflict.is_open());
+    assert!(r.cmd("form.revert"), "Esc is Back");
+    assert!(!r.s.item_conflict.is_open());
+    assert_eq!(
+        r.form().form.current().description,
+        "mine",
+        "Back keeps mine"
+    );
+    assert_eq!(r.state("warning"), "changed_elsewhere");
+    r.s.save_form(SaveIntent::Save);
+    let open = r.s.item_conflict.open.take().expect("dialog again");
+    r.s.run_item_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(r.form().form.current().description, "theirs");
+    assert!(!r.form().form.is_dirty());
+    assert_eq!(stored(&r, id).fields.description.as_deref(), Some("theirs"));
+}
+
+#[test]
+fn p33_a_new_version_with_nothing_editable_changed_saves_without_asking() {
+    let mut r = Rig::new();
+    let id = item_id(1);
+    r.select(1);
+    r.cmd("edit.edit_transaction");
+    // The panel's copy is older than the books (made inactive elsewhere:
+    // not a field the panel edits).
+    if let Some(o) = r.form().opened.as_mut() {
+        o.is_active = !o.is_active;
+    }
+    r.form()
+        .form
+        .edit(super::F_NAME, |d| d.name = "Mine".into());
+    r.s.save_form(SaveIntent::Save);
+    assert!(!r.s.item_conflict.is_open());
+    let i = stored(&r, id);
+    assert_eq!(i.fields.name, "Mine");
+    assert!(i.is_active, "their active flag is kept");
+}
+
+#[test]
+fn p33_a_second_stale_save_in_a_row_says_so_instead_of_looping() {
+    let mut r = Rig::new();
+    let id = item_id(1);
+    r.select(1);
+    r.cmd("edit.edit_transaction");
+    r.form()
+        .form
+        .edit(super::F_NAME, |d| d.name = "Mine".into());
+    let theirs = stored(&r, id);
+    r.s.conflict_for = Some(id);
+    r.s.resave_left = false;
+    r.s.item_conflict_read(
+        Ok(cl_api::Versioned {
+            version: cl_api::RecordVersion::Fingerprint(theirs.fingerprint()),
+            record: theirs,
+            stock_warnings: Vec::new(),
+        }),
+        SaveIntent::Save,
+    );
+    assert_eq!(r.state("warning"), "changed_elsewhere");
+    assert_ne!(stored(&r, id).fields.name, "Mine", "nothing saved");
+}
+
+#[test]
+fn p33_an_item_deleted_elsewhere_is_never_recreated() {
+    let mut r = Rig::new();
+    let id = opened_then_changed_elsewhere(&mut r);
+    r.link
+        .demo_state()
+        .expect("demo")
+        .items_mut()
+        .retain(|x| x.id != id);
+    r.form()
+        .form
+        .edit(super::F_NAME, |d| d.name = "Mine".into());
+    r.s.save_form(SaveIntent::Save);
+    assert_eq!(r.s.warn, Some(crate::forms::conflict::GONE));
+    assert!(
+        r.link
+            .demo_state()
+            .expect("demo")
+            .items_mut()
+            .iter()
+            .all(|x| x.id != id)
+    );
+}
+
+#[test]
+fn p33_the_dialog_names_accounts_and_kinds_never_ids() {
+    let mut r = Rig::new();
+    let id = item_id(1);
+    r.select(1);
+    r.cmd("edit.edit_transaction");
+    let mine_account = stored(&r, id).fields.income_account_id;
+    let other =
+        r.s.accounts
+            .iter()
+            .find(|a| a.id != mine_account)
+            .map(|a| a.id)
+            .expect("another account");
+    {
+        let mut d = r.link.demo_state().expect("demo");
+        let i = d.items_mut().iter_mut().find(|x| x.id == id).expect("item");
+        i.fields.income_account_id = other;
+    }
+    r.form()
+        .form
+        .edit(super::F_NAME, |d| d.name = "Mine".into());
+    r.s.save_form(SaveIntent::Save);
+    let open = r.s.item_conflict.open.as_ref().expect("dialog");
+    let texts = open.dialog.field_texts();
+    let row = texts
+        .iter()
+        .find(|x| x[0] == crate::i18n::t("lan.field.incomeAccount"))
+        .expect("income account row");
+    assert!(!row[3].contains(&other.to_string()), "{row:?}");
+    assert_eq!(row[3], r.s.account_name(other));
+    for x in &texts {
+        for v in &x[1..] {
+            assert!(cl_core::ids::AccountId::parse(v).is_err(), "{x:?}");
+        }
+    }
 }

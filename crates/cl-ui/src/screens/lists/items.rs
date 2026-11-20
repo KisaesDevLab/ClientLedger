@@ -146,6 +146,10 @@ struct FormPanel {
     task: Option<Task<Versioned<Item>>>,
     /// QA-8 (PR-4): a refused save scrolls its message into view once.
     show_problem: bool,
+    /// P33: the item as the panel opened it (an edit is guarded by it).
+    opened: Option<Item>,
+    /// P33: what the save in flight is for.
+    intent: SaveIntent,
 }
 
 impl FormPanel {
@@ -169,6 +173,8 @@ impl FormPanel {
             focus: Some(ItemField::Name),
             task: None,
             show_problem: false,
+            opened: None,
+            intent: SaveIntent::Save,
         }
     }
 
@@ -265,6 +271,12 @@ pub struct ItemsScreen {
     /// The list being read again after a save elsewhere: the cursor stays
     /// where it was and the keyboard is not moved.
     refreshing: bool,
+    /// P33: their item being read after a stale save, then the dialog.
+    item_conflict: crate::forms::conflict::ConflictFlow<Versioned<Item>>,
+    /// P33: the item that read is for.
+    conflict_for: Option<ItemId>,
+    /// P33: one silent re-save per owner save.
+    resave_left: bool,
 }
 
 impl ItemsScreen {
@@ -321,6 +333,9 @@ impl ItemsScreen {
             today: crate::shell::today(),
             bus: crate::data_bus::Subscription::detached(),
             refreshing: false,
+            item_conflict: crate::forms::conflict::ConflictFlow::default(),
+            conflict_for: None,
+            resave_left: false,
         };
         if s.link.is_demo() {
             s.today = crate::company::demo::DemoState::today();
@@ -449,26 +464,7 @@ impl ItemsScreen {
 
     fn apply(&mut self) {
         let keep = self.want_cursor.take().or_else(|| self.selected());
-        let entries = self
-            .items
-            .iter()
-            .map(|i| ItemEntry {
-                id: i.id,
-                name: i.fields.name.clone(),
-                description: i.fields.description.clone(),
-                price: i.fields.unit_price,
-                income_account: i.fields.income_account_id,
-                taxable: i.fields.is_taxable,
-                tax_code: i.fields.tax_code_id,
-                active: i.is_active,
-                kind: kind_of(i.fields.item_type),
-                discount_percent: i
-                    .fields
-                    .discount_percent
-                    .and_then(|p| cl_core::Quantity::parse_wire(&p.to_wire()).ok()),
-                part: part_panel::draft_of(&i.fields.purchase),
-            })
-            .collect();
+        let entries = self.items.iter().map(entry_of).collect();
         self.list = ItemList::new(entries);
         self.refilter();
         self.loaded = true;
@@ -679,6 +675,7 @@ impl ItemsScreen {
         }
         self.warn = None;
         self.panel = Some(Box::new(FormPanel::new(None, self.blank_draft(None))));
+        self.item_conflict.clear();
     }
 
     /// Enter or Ctrl+E on a row.
@@ -695,7 +692,10 @@ impl ItemsScreen {
             return;
         };
         self.warn = None;
-        self.panel = Some(Box::new(FormPanel::new(Some(id), ItemDraft::from_entry(e))));
+        let mut p = FormPanel::new(Some(id), ItemDraft::from_entry(e));
+        p.opened = self.item(id).cloned();
+        self.panel = Some(Box::new(p));
+        self.item_conflict.clear();
     }
 
     /// Ctrl+Shift+I.
@@ -766,6 +766,16 @@ impl ItemsScreen {
 
     /// Alt+N / Alt+S. Returns true when the save finished at once.
     pub fn save_form(&mut self, intent: SaveIntent) -> bool {
+        // P33: never while their item is being read or the dialog is open.
+        if self.item_conflict.busy() || self.item_conflict.is_open() {
+            return false;
+        }
+        self.resave_left = true;
+        self.save_inner(intent)
+    }
+
+    /// The save itself (also the conflict flow's re-save).
+    fn save_inner(&mut self, intent: SaveIntent) -> bool {
         let item_types = self.item_types;
         let checked = {
             let Some(panel) = self.panel.as_ref() else {
@@ -811,6 +821,7 @@ impl ItemsScreen {
         panel.part_problems.clear();
         panel.refusal = None;
         panel.error = None;
+        panel.intent = intent;
         match panel.form.begin_save(intent) {
             SaveStart::Send(_) => {}
             SaveStart::Skip(after) => {
@@ -850,18 +861,31 @@ impl ItemsScreen {
                 .and_then(|q| cl_api::SignedPercent::parse(&q.to_wire()).ok()),
             tax_code_id: checked.tax_code,
         };
+        // P33: an edit is guarded by the item as the panel opened it,
+        // never by the list as it is now (a refresh would hide their change).
         let editing = panel.editing;
-        let existing = editing.and_then(|id| self.items.iter().find(|i| i.id == id).cloned());
+        let existing = editing.and_then(|id| {
+            panel
+                .opened
+                .clone()
+                .or_else(|| self.items.iter().find(|i| i.id == id).cloned())
+        });
         if self.link.is_demo() {
-            let saved = demo_save_with_opening(&self.link, existing, fields, opening.as_ref());
-            let lock = self.lock();
-            match (saved, self.panel.as_mut()) {
-                (Ok(v), Some(panel)) => panel.task = Some(Task::ready(v)),
-                (Err(e), Some(panel)) => {
-                    panel.save_failed(e, lock);
+            let saved = match &existing {
+                Some(x) => demo_guard_item(&self.link, x),
+                None => Ok(()),
+            }
+            .and_then(|()| demo_save_with_opening(&self.link, existing, fields, opening.as_ref()));
+            match saved {
+                Ok(v) => {
+                    if let Some(panel) = self.panel.as_mut() {
+                        panel.task = Some(Task::ready(v));
+                    }
+                }
+                Err(e) => {
+                    self.item_save_failed(e);
                     return false;
                 }
-                _ => {}
             }
             return self.poll_save();
         }
@@ -919,14 +943,47 @@ impl ItemsScreen {
                 true
             }
             Err(e) => {
-                let lock = crate::screens::inventory::demo_lock(&self.link);
-                panel.save_failed(e, lock);
+                self.item_save_failed(e);
                 false
             }
         }
     }
 
+    /// A refused item save. P33: someone else saved it first: their item,
+    /// then the conflict dialog (or a silent re-save); deleted elsewhere:
+    /// never re-created.
+    fn item_save_failed(&mut self, e: ApiError) {
+        let lock = crate::screens::inventory::demo_lock(&self.link);
+        let Some(panel) = self.panel.as_mut() else {
+            return;
+        };
+        let stale = matches!(
+            e,
+            ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                ..
+            }
+        );
+        let gone = matches!(e, ApiError::NotFound { .. });
+        let (editing, intent) = (panel.editing, panel.intent);
+        panel.save_failed(e, lock);
+        match editing {
+            Some(id) if stale => {
+                panel.error = None;
+                panel.refusal = None;
+                self.item_conflict_start(id, intent);
+            }
+            Some(_) if gone => {
+                panel.error = None;
+                panel.refusal = None;
+                self.warn = Some(crate::forms::conflict::GONE);
+            }
+            _ => {}
+        }
+    }
+
     fn after_save(&mut self, after: AfterSave, saved: Option<ItemId>) {
+        self.item_conflict.clear();
         match after {
             AfterSave::Stay => {
                 if let Some(id) = saved
@@ -934,6 +991,7 @@ impl ItemsScreen {
                 {
                     let mut p = FormPanel::new(Some(id), ItemDraft::from_entry(e));
                     p.focus = None;
+                    p.opened = self.item(id).cloned();
                     self.panel = Some(Box::new(p));
                 }
             }
@@ -1402,6 +1460,7 @@ impl ItemsScreen {
     fn close_panel(&mut self) {
         let keep = self.selected();
         self.panel = None;
+        self.item_conflict.clear();
         self.sync_compact();
         self.place_cursor(keep);
     }
@@ -1487,6 +1546,50 @@ pub(crate) fn demo_save(
     }
 }
 
+/// The list's entry for an item (also the conflict dialog's view of
+/// theirs, so both read the same).
+pub(crate) fn entry_of(i: &Item) -> ItemEntry {
+    ItemEntry {
+        id: i.id,
+        name: i.fields.name.clone(),
+        description: i.fields.description.clone(),
+        price: i.fields.unit_price,
+        income_account: i.fields.income_account_id,
+        taxable: i.fields.is_taxable,
+        tax_code: i.fields.tax_code_id,
+        active: i.is_active,
+        kind: kind_of(i.fields.item_type),
+        discount_percent: i
+            .fields
+            .discount_percent
+            .and_then(|p| cl_core::Quantity::parse_wire(&p.to_wire()).ok()),
+        part: part_panel::draft_of(&i.fields.purchase),
+    }
+}
+
+/// P33: the demo's version check (`expectedUpdatedAt`): the stored item
+/// must still be the one the panel opened.
+fn demo_guard_item(link: &CompanyLink, opened: &Item) -> Result<(), ApiError> {
+    let mut d = link.demo_state().ok_or(ApiError::NoCompanyOpen)?;
+    let now = d
+        .items_mut()
+        .iter()
+        .find(|x| x.id == opened.id)
+        .cloned()
+        .ok_or(ApiError::NotFound { code: None })?;
+    if now.fingerprint() == opened.fingerprint() {
+        Ok(())
+    } else {
+        Err(ApiError::Conflict {
+            reason: ConflictReason::Stale,
+            current_version: None,
+            code: None,
+            message: cl_api::UserText::default(),
+            details: cl_api::ConflictDetails::default(),
+        })
+    }
+}
+
 /// The model's kind of an engine item type.
 fn kind_of(t: cl_api::ItemType) -> ItemKind {
     match t {
@@ -1525,6 +1628,7 @@ impl Screen for ItemsScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.parts = EnvParts::capture(ui.ctx());
         self.poll();
+        self.poll_item_conflict();
         self.hear_changes();
         self.sync_compact();
         let tokens = Tokens::of(ui.ctx());
@@ -1562,6 +1666,8 @@ impl Screen for ItemsScreen {
             }
         });
         self.layout = frame.end();
+        let ctx = ui.ctx().clone();
+        self.item_conflict_ui(&ctx);
     }
 
     fn fixed_layout(&self) -> bool {
@@ -1611,6 +1717,12 @@ impl Screen for ItemsScreen {
                     p.form.undo();
                 } else {
                     p.form.redo();
+                }
+            }
+            // P33: Esc in the conflict dialog is Back.
+            "form.revert" if self.item_conflict.is_open() => {
+                if let Some((open, choice)) = self.item_conflict.take_back() {
+                    self.run_item_choice(open, choice);
                 }
             }
             "form.revert" => match self.panel.as_mut() {
@@ -1692,6 +1804,7 @@ impl Screen for ItemsScreen {
             "error": error,
             "saving": saving,
             "toggling": self.toggle.is_some(),
+            "conflict": self.item_conflict.state(),
             "warning": self.warn.map(|w| w.rsplit('.').next().unwrap_or_default()),
             "note": self.note.map(|n| n.rsplit('.').next().unwrap_or_default()),
             "kinds_available": ItemKind::available_with(self.item_types, self.inventory).len(),
@@ -1731,3 +1844,5 @@ pub(crate) async fn save_existing(
 
 #[cfg(test)]
 mod tests;
+
+mod conflict;

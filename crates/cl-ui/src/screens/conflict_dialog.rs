@@ -123,6 +123,23 @@ impl ConflictDialog {
             .unwrap_or_else(|| value_text(v))
     }
 
+    /// Every changed field as drawn: label, as opened, mine, theirs.
+    #[must_use]
+    pub fn field_texts(&self) -> Vec<[String; 4]> {
+        self.conflict
+            .field_changes()
+            .iter()
+            .map(|f| {
+                [
+                    field_label(&f.field),
+                    self.value(&f.field, &f.original),
+                    self.value(&f.field, &f.mine),
+                    self.value(&f.field, &f.theirs),
+                ]
+            })
+            .collect()
+    }
+
     /// The conflict shown.
     #[must_use]
     pub fn conflict(&self) -> &Conflict {
