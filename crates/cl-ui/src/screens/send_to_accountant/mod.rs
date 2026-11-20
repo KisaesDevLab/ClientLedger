@@ -190,6 +190,9 @@ pub struct SendScreen {
     /// The app window had the focus last frame (QA-4: regaining it reads
     /// the totals again).
     focused: bool,
+    /// QA-4: a change arrived while a transfer ran or its result showed;
+    /// read again once nothing blocks it.
+    refresh_wanted: bool,
 }
 
 fn api_of(e: TransferError) -> ApiError {
@@ -249,6 +252,7 @@ impl SendScreen {
             history: Vec::new(),
             bus,
             focused: true,
+            refresh_wanted: false,
         };
         s.reload();
         s
@@ -337,9 +341,6 @@ impl SendScreen {
             match r {
                 Ok(o) => {
                     tracing::info!("transfer file saved");
-                    if o.discarded_payroll > 0 {
-                        self.announce_discard();
-                    }
                     self.outcome = Some(o);
                     self.scroll_result = true;
                     // QA-2: a made passphrase is shown once more (hidden
@@ -360,22 +361,11 @@ impl SendScreen {
                 }
                 Err(e) => {
                     tracing::warn!(detail = %cl_core::OwnerFacing::scrubbed_detail(&e), "transfer refused");
-                    if e.discarded().is_some() {
-                        self.announce_discard();
-                    }
                     self.scroll_result = matches!(e.kind(), TransferError::MissingFiles(_));
                     self.error = Some(e);
                 }
             }
         }
-    }
-
-    /// QA-14: the unposted payroll imports are gone; an open Import
-    /// Payroll on one of them starts over.
-    fn announce_discard(&self) {
-        self.link
-            .bus()
-            .publish_from(&self.bus, crate::data_bus::Change::PayrollDiscarded);
     }
 
     /// QA-4: reads the check totals, What's included and Sent before
@@ -388,8 +378,10 @@ impl SendScreen {
             || self.preview_job.is_some()
             || self.preflight_job.is_some()
         {
+            self.refresh_wanted = true;
             return;
         }
+        self.refresh_wanted = false;
         self.reload();
     }
 
@@ -399,7 +391,13 @@ impl SendScreen {
         let changes = self.link.bus().take(&mut self.bus);
         let back = focused && !self.focused;
         self.focused = focused;
-        if back || changes.ledger_any() || changes.lists() || changes.items || changes.bank_feed {
+        if back
+            || self.refresh_wanted
+            || changes.ledger_any()
+            || changes.lists()
+            || changes.items
+            || changes.bank_feed
+        {
             self.refresh();
         }
     }
@@ -563,6 +561,7 @@ impl SendScreen {
                 return;
             }
             if let Some(r) = demo {
+                announce_if_discarded(&self.link, &r);
                 self.task = Some(Task::ready(r));
                 self.poll();
                 return;
@@ -581,10 +580,19 @@ impl SendScreen {
             }
         });
         let sending = Sending::start();
+        let link = Arc::clone(&self.link);
         self.task = spawn_lifecycle(&self.link, group, move || async move {
             let _sending = sending;
-            cl_company::transfer::make_transfer(&session, &store, secrets.as_ref(), &req, &sink)
-                .await
+            let r = cl_company::transfer::make_transfer(
+                &session,
+                &store,
+                secrets.as_ref(),
+                &req,
+                &sink,
+            )
+            .await;
+            announce_if_discarded(&link, &r);
+            r
         })
         .ok();
         if self.task.is_none() {
@@ -667,6 +675,7 @@ impl Screen for SendScreen {
                 });
                 drop(sending);
                 if let Some(r) = r {
+                    announce_if_discarded(&self.link, &r);
                     self.task = Some(Task::ready(r));
                     self.poll();
                 }
@@ -749,6 +758,25 @@ impl SendScreen {
             (Some(p), Some(f)) => p.books_differ(f),
             _ => false,
         }
+    }
+}
+
+/// QA-14: when a transfer discarded the unposted payroll imports (it
+/// made the file, or failed after the discard), every window hears it,
+/// drawn or not: an open Import Payroll on one of them starts over. Called
+/// where the transfer ends (the lifecycle task, or the demo at once), not
+/// from drawing, so a Send tab in the background still tells it.
+pub(crate) fn announce_if_discarded(
+    link: &CompanyLink,
+    r: &Result<TransferOutcome, TransferError>,
+) {
+    let discarded = match r {
+        Ok(o) => o.discarded_payroll > 0,
+        Err(e) => e.discarded().is_some(),
+    };
+    if discarded {
+        link.bus()
+            .publish(crate::data_bus::Change::PayrollDiscarded);
     }
 }
 

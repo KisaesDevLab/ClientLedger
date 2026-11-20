@@ -1847,16 +1847,15 @@ fn the_control_channel_sees_only_locked_behind_the_idle_lock() {
     );
 }
 
-/// Q-P32z: Close Company and Sign Out asked for during a transfer are
-/// refused with a toast and do not run afterwards; only the idle lock's
-/// Sign Out waits (the lock stays up) and runs once the transfer ends.
+/// Q-P32z: Close Company and Sign Out during a transfer are refused with
+/// a toast, whoever asks, and nothing runs once the transfer ends; the
+/// idle lock stays up with its Sign Out disabled.
 #[test]
-fn close_and_sign_out_are_refused_and_the_idle_lock_waits_for_a_transfer() {
+fn close_and_sign_out_are_refused_during_a_transfer() {
     let ctx = context();
     let mut shell = demo();
     settle(&ctx, &mut shell, WIDE);
     assert!(shell.company.is_some(), "the demo company is open");
-    // The idle lock offers Sign Out only with nothing unsaved.
     for id in shell.windows.dirty_ids() {
         shell.windows.close_now(id);
     }
@@ -1865,31 +1864,17 @@ fn close_and_sign_out_are_refused_and_the_idle_lock_waits_for_a_transfer() {
     shell.sign_out();
     settle(&ctx, &mut shell, WIDE);
     assert!(shell.company.is_some(), "not closed while sending");
-    assert!(
-        !shell.sign_out_after_transfer,
-        "an owner's Sign Out is refused"
-    );
-    // Nothing runs when the transfer that refused them ends.
+    // The idle lock: drawn with its Sign Out disabled; still signed in.
+    shell.idle.lock_now();
+    settle(&ctx, &mut shell, WIDE);
+    assert!(shell.idle.locked(), "the lock stays up");
+    assert!(shell.company_link.as_ref().is_some_and(|l| l.signed_in()));
+    // Nothing runs when the transfer ends.
     drop(sending);
-    shell.resume_after_transfer();
     settle(&ctx, &mut shell, WIDE);
     assert!(shell.company.is_some(), "a refused Close never runs later");
-    // The idle lock's Sign Out waits for the next transfer.
-    let sending = crate::screens::send_to_accountant::Sending::start();
-    shell.idle.lock_now();
-    shell.sign_out_after_transfer = true;
-    shell.resume_after_transfer();
-    assert!(shell.idle.locked(), "still locked while sending");
-    assert!(shell.company.is_some());
-    // The transfer ends: the sign-out runs.
-    drop(sending);
-    shell.resume_after_transfer();
-    assert!(!shell.sign_out_after_transfer);
-    assert!(!shell.idle.locked());
-    settle(&ctx, &mut shell, WIDE);
-    assert!(shell.company.is_none(), "signed out after the transfer");
     assert!(
-        !shell.company_link.as_ref().is_some_and(|l| l.signed_in()),
-        "the session ended"
+        shell.company_link.as_ref().is_some_and(|l| l.signed_in()),
+        "a refused Sign Out never runs later"
     );
 }

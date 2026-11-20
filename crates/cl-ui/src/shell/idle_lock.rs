@@ -254,12 +254,22 @@ impl IdleLock {
                 if primary_button(ui, &t("lock.unlock")).clicked() || enter {
                     self.start_unlock(link);
                 }
-                let out = ui.add_enabled(dirty == 0, egui::Button::new(t("lock.sign_out")));
-                let out = if dirty > 0 {
+                // Q-P32z: no Sign Out while a transfer file is being made.
+                let sending = crate::screens::send_to_accountant::transfer_running();
+                let out = ui.add_enabled(
+                    dirty == 0 && !sending,
+                    egui::Button::new(t("lock.sign_out")),
+                );
+                let out = if sending {
+                    out.on_disabled_hover_text(t("send.busy_tip"))
+                } else if dirty > 0 {
                     out.on_disabled_hover_text(t("lock.sign_out_unsaved"))
                 } else {
                     out
                 };
+                if sending {
+                    ui.label(RichText::new(t("send.busy_tip")).size(12.0));
+                }
                 if out.clicked() {
                     action = Some(LockAction::SignOut);
                 }

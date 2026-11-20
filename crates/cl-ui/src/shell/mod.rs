@@ -204,11 +204,6 @@ pub struct Shell {
     idle: idle_lock::IdleLock,
     /// P29 WP2: File › Sign Out waits for the company to close.
     sign_out_after_close: bool,
-    /// P32 Q-P32z: the idle lock's Sign Out came while a transfer file
-    /// was being made; it runs when the transfer ends (the lock stays up
-    /// meanwhile). Close Company and Sign Out asked for by the owner are
-    /// refused instead, with a toast.
-    sign_out_after_transfer: bool,
 }
 
 impl Shell {
@@ -263,7 +258,6 @@ impl Shell {
             company_role: String::new(),
             idle: idle_lock::IdleLock::default(),
             sign_out_after_close: false,
-            sign_out_after_transfer: false,
             widths,
             prompt_focused: None,
             demo: options.demo,
@@ -707,8 +701,9 @@ impl Shell {
     /// are asked about), then end the session; the Open Company window
     /// asks for a sign-in. Automatic sign-in waits for the next start.
     fn sign_out(&mut self) {
-        // Q-P32z: never while a transfer file is being made. The owner is
-        // told to wait (the idle lock's Sign Out waits instead, below).
+        // Q-P32z: never while a transfer file is being made, whoever asks;
+        // the owner is told to wait and nothing runs later (the idle lock
+        // disables its Sign Out meanwhile).
         if crate::screens::send_to_accountant::transfer_running() {
             self.refuse_during_transfer();
             return;
@@ -726,17 +721,6 @@ impl Shell {
         }
         self.finish_sign_out(&link);
         self.dispatch_now(CommandId::new("file.open_company"));
-    }
-
-    /// Runs the idle lock's Sign Out that waited for a transfer, once it
-    /// has ended (Q-P32z). Called every frame.
-    fn resume_after_transfer(&mut self) {
-        if !self.sign_out_after_transfer || crate::screens::send_to_accountant::transfer_running() {
-            return;
-        }
-        self.sign_out_after_transfer = false;
-        self.idle.reset();
-        self.sign_out();
     }
 
     /// Q-P32z: Close Company or Sign Out while a transfer file is being
@@ -1573,7 +1557,6 @@ impl Shell {
         let tokens = Tokens::of(&ctx);
 
         self.apply_company_events(Some(&ctx));
-        self.resume_after_transfer();
         // Security review minor 5: a copied secret leaves the clipboard.
         crate::secret_clipboard::tick(&ctx);
         if self.show_idle_lock(ui) {
@@ -1649,8 +1632,9 @@ impl Shell {
         match self.idle.show(ui, &link, user.as_deref(), dirty) {
             Some(idle_lock::LockAction::SignOut) if dirty == 0 => {
                 if crate::screens::send_to_accountant::transfer_running() {
-                    // Q-P32z: stay locked; sign out when the transfer ends.
-                    self.sign_out_after_transfer = true;
+                    // Q-P32z: refused (the button is disabled meanwhile);
+                    // the lock stays up.
+                    self.refuse_during_transfer();
                 } else {
                     self.idle.reset();
                     self.sign_out();

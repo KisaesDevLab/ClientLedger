@@ -95,17 +95,18 @@ fn pdf(marker: &str) -> Vec<u8> {
     .into_bytes()
 }
 
-/// Every file under `dir` whose bytes contain `marker`.
-fn find_stored(dir: &Path, marker: &[u8], out: &mut Vec<PathBuf>) {
+/// Every file under `dir` whose bytes are exactly `want` (never a
+/// database page that merely mentions the file name).
+fn find_stored(dir: &Path, want: &[u8], out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for e in entries.flatten() {
         let p = e.path();
         if p.is_dir() {
-            find_stored(&p, marker, out);
-        } else if std::fs::metadata(&p).is_ok_and(|m| m.len() < 64 * 1024)
-            && std::fs::read(&p).is_ok_and(|b| b.windows(marker.len()).any(|w| w == marker))
+            find_stored(&p, want, out);
+        } else if std::fs::metadata(&p).is_ok_and(|m| m.len() == want.len() as u64)
+            && std::fs::read(&p).is_ok_and(|b| b == want)
         {
             out.push(p);
         }
@@ -174,11 +175,9 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     let data = scratch.join("data");
     for marker in markers {
         let mut found = Vec::new();
-        find_stored(&data, marker.as_bytes(), &mut found);
-        assert!(!found.is_empty(), "the stored copy of {marker} is on disk");
-        for p in found {
-            std::fs::remove_file(&p).expect("remove the stored file");
-        }
+        find_stored(&data, &pdf(marker), &mut found);
+        assert_eq!(found.len(), 1, "one stored copy of {marker}");
+        std::fs::remove_file(&found[0]).expect("remove the stored file");
     }
 
     // Probe: what the engine says for an ordinary desktop backup.
