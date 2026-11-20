@@ -775,6 +775,13 @@ impl DepositScreen {
                 done
             }
             // Q-PR4d: Esc cancels an open Quick Add prompt first.
+            // P33: Esc in the conflict dialog is Back.
+            "form.revert" if self.conflict.is_open() => {
+                if let Some((open, choice)) = self.conflict.take_back() {
+                    self.run_choice(open, choice);
+                }
+                true
+            }
             "form.revert" => self.quick_add.cancel() || self.revert_field(),
             crate::widgets::quick_add::DEV_RESET => {
                 crate::widgets::quick_add::demo_reset(&self.link)

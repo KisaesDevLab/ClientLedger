@@ -393,6 +393,7 @@ impl DepositScreen {
 
     /// Polls the save, the record being read, the list, Void.
     pub(crate) fn poll_save(&mut self) {
+        self.poll_conflict();
         if let Some(r) = self.save.task.as_mut().and_then(Task::try_take) {
             self.save.task = None;
             match r {
@@ -560,6 +561,7 @@ impl DepositScreen {
             FormLines::from_lines(Vec::new(), &mut self.lines.form_mut().adapter_mut().keys);
         self.lines.load(fresh, &*lists);
         self.editing = None;
+        self.conflict.clear();
         self.template.forget();
         self.record = None;
         self.show_summary = false;
@@ -621,10 +623,20 @@ impl DepositScreen {
             return;
         }
         match &e {
+            // P33: someone else saved it first: their version, then the
+            // conflict dialog (or a silent re-save).
+            ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                ..
+            } if self.editing.is_some() => self.conflict_start(intent),
             ApiError::Conflict {
                 reason: ConflictReason::Stale,
                 ..
             } => self.save.stale = true,
+            // P33: deleted elsewhere: never saved again.
+            ApiError::NotFound { .. } if self.editing.is_some() => {
+                self.save.notice = Some(crate::forms::conflict::GONE);
+            }
             _ => self.save.error = Some(e),
         }
     }
@@ -799,7 +811,7 @@ impl DepositScreen {
     /// The bank account a deposit went into: the form's own account if the
     /// record has its bank debit there, else the first deposit account
     /// with one.
-    fn record_of(&self, txn: &Transaction) -> Result<DepositRecord, ApiError> {
+    pub(crate) fn record_of(&self, txn: &Transaction) -> Result<DepositRecord, ApiError> {
         let mut candidates: Vec<AccountId> = self.account().into_iter().collect();
         candidates.extend(self.deposit_accounts().iter().map(|a| a.id));
         for a in candidates {
@@ -833,6 +845,7 @@ impl DepositScreen {
         if form.account != self.account() {
             self.panel.balance = None;
         }
+        self.conflict.clear();
         self.header.load(form);
         self.lines.load(lines, &*lists);
         self.template.forget();

@@ -19,6 +19,7 @@
 //! Engine calls run on the request queue and are polled each frame;
 //! `--demo` (and tests) answer through [`engine::LocalDeposits`].
 
+mod conflict;
 mod engine;
 mod form;
 mod payments;
@@ -260,6 +261,8 @@ pub struct DepositScreen {
     pub(crate) print_after_save: bool,
     /// Save as Template and the template this deposit came from (P15).
     pub(crate) template: crate::screens::templates::SaveFlow,
+    /// P33: their version being read after a stale save, then the dialog.
+    pub(crate) conflict: crate::forms::conflict::ConflictFlow<cl_api::Versioned<cl_api::Transaction>>,
 }
 
 /// A blank deposit (no lines: the grid holds them).
@@ -342,6 +345,7 @@ impl DepositScreen {
             nav_prompt: None,
             after_save_nav: None,
             print_after_save: false,
+            conflict: crate::forms::conflict::ConflictFlow::default(),
             template: crate::screens::templates::SaveFlow::default(),
         };
         s.bus = s.link.bus().subscribe();
@@ -635,6 +639,7 @@ impl DepositScreen {
     fn busy(&self) -> bool {
         self.lists_task.is_some()
             || self.save.task.is_some()
+            || self.conflict.busy()
             || self.load_task.is_some()
             || self.nav.task.is_some()
             || self.void.task.is_some()
@@ -698,6 +703,7 @@ impl DepositScreen {
                 "tag_refusal": self.save.tag_refusal,
                 "error": self.save.error.is_some(),
                 "stale": self.save.stale,
+                "conflict": self.conflict.state(),
                 "clearing_warning": self.save.clearing_warning,
             },
             "published": self.save.published.iter().map(ToString::to_string).collect::<Vec<_>>(),
@@ -747,6 +753,8 @@ impl Screen for DepositScreen {
             self.sync_inputs();
         }
         self.draw(ui);
+        let ctx = ui.ctx().clone();
+        self.conflict_ui(&ctx);
         self.recheck_problems();
         if let Some(cmd) = self.after_frame.take() {
             self.command(cmd);
