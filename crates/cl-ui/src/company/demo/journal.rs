@@ -295,6 +295,18 @@ pub fn save_with(
     Ok((id, v.version))
 }
 
+/// P33 (demo only): another person saves entry `id` (its adjusting flag
+/// flips), so this window's next save is stale. False when there is no such
+/// entry.
+pub fn simulate_other_edit(state: &mut DemoState, id: TransactionId) -> bool {
+    if get(state, id).is_err() {
+        return false;
+    }
+    let m = state.journal.meta.entry(id).or_default();
+    m.adjusting = !m.adjusting;
+    true
+}
+
 /// An entry as `GET /transactions/{id}` answers it, with its names, tags,
 /// Adjusting flag and reversal link.
 ///

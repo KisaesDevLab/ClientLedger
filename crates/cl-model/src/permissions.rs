@@ -1072,7 +1072,7 @@ pub fn need(id: CommandId) -> Option<Need> {
         // Company
         "company.journal_entry" => Write(R::Transactions),
         "company.information" => Read(R::CompanySettings),
-        "company.closing_date" | "company.users" => AdminOnly,
+        "company.closing_date" | "company.users" | "company.lan_setup" => AdminOnly,
         "company.send_to_accountant" => Read(R::CompanySettings),
         "company.audit_trail" => Read(R::AuditLog),
         // Your own password, automatic sign-in and idle lock.

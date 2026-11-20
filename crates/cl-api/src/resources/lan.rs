@@ -171,7 +171,7 @@ pub struct MaintenanceState {
 /// One change (U-294, provisional): ids and kinds only.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FeedChange {
+pub struct ChangeItem {
     /// `transaction`, `account`, `contact`, `item`, `tag`, ...
     pub kind: String,
     /// The record's id.
@@ -185,7 +185,7 @@ pub struct FeedChange {
 /// One page of the change feed.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct FeedPage {
+pub struct ChangePage {
     /// Where the next read starts.
     pub cursor: Option<String>,
     /// Changes when the books were replaced (restore, import, migration).
@@ -193,7 +193,7 @@ pub struct FeedPage {
     /// The cursor is too old or from another epoch: read everything again.
     pub reset: bool,
     /// What changed since the cursor.
-    pub changes: Vec<FeedChange>,
+    pub changes: Vec<ChangeItem>,
 }
 
 impl Session {
@@ -299,7 +299,7 @@ impl Session {
     /// # Errors
     /// `Local(Unsupported)` without `changes-v1` (poll the ledger-version
     /// stamp instead); `NoCompanyOpen`; any [`ApiError`].
-    pub async fn changes(&self, cursor: Option<&str>) -> Result<FeedPage, ApiError> {
+    pub async fn changes(&self, cursor: Option<&str>) -> Result<ChangePage, ApiError> {
         self.require(Capabilities::CHANGES)?;
         let mut call = Call::at(Method::Get, CHANGES.route());
         if let Some(c) = cursor {

@@ -447,6 +447,19 @@ impl JournalScreen {
         if self.closing_failed(&e, Pending::Save(intent)) {
             return;
         }
+        // P33: an edit someone else saved first: their version, then the
+        // conflict dialog (or a silent re-save).
+        if matches!(
+            e,
+            ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                ..
+            }
+        ) && self.editing.is_some()
+        {
+            self.conflict_start(intent);
+            return;
+        }
         self.engine_refusal(e);
     }
 
@@ -849,6 +862,13 @@ impl JournalScreen {
     pub(crate) fn form_command(&mut self, id: CommandId) -> bool {
         match id.as_str() {
             KIND => true,
+            // P33 (demo only): someone else saves the open entry.
+            "dev.lan_simulate_edit" => {
+                let (Some(e), Some(mut d)) = (self.editing.as_ref(), self.link.demo_state()) else {
+                    return false;
+                };
+                crate::company::demo::journal::simulate_other_edit(&mut d, e.id)
+            }
             "form.save_new" => {
                 self.start_save(SaveIntent::SaveAndNew, None);
                 true

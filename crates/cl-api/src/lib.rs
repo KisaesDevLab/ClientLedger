@@ -114,6 +114,9 @@ pub use resources::items::{
     Item, ItemFields, ItemFilter, ItemPurchase, ItemSort, ItemStock, ItemType, ItemUpdate, Items,
     OpeningStock, UNIT_LABEL_MAX_CHARS, UnitPrice,
 };
+pub use resources::lan::{
+    ChangeItem, ChangePage, LanAuditEvent, LanSession, MaintenanceState, is_device_id,
+};
 pub use resources::ledger::LedgerStamp;
 pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, ContactImportRow};
 pub use resources::me::Me;

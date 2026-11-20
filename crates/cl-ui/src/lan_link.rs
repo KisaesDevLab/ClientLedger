@@ -309,6 +309,375 @@ impl LanWorkstation {
     }
 }
 
+// ---- The live office network for the setup window (P33 D4) ----------------
+
+/// What the app hands the setup window: its data folder, the keychain and
+/// the running host (weak, so closing the app still stops it in order).
+struct LiveContext {
+    root: PathBuf,
+    store: Arc<dyn SecretStore>,
+    host: std::sync::Mutex<std::sync::Weak<LanHost>>,
+}
+
+static LIVE: std::sync::OnceLock<LiveContext> = std::sync::OnceLock::new();
+
+/// Called once by the app at start-up.
+pub fn install(root: PathBuf, store: Arc<dyn SecretStore>) {
+    let _ = LIVE.set(LiveContext {
+        root,
+        store,
+        host: std::sync::Mutex::new(std::sync::Weak::new()),
+    });
+}
+
+/// The host running in this process (the setup window's code, Allow and
+/// paired computers act on it).
+pub fn set_running_host(h: &Arc<LanHost>) {
+    if let Some(l) = LIVE.get() {
+        *l.host
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Arc::downgrade(h);
+    }
+}
+
+fn running_host() -> Option<Arc<LanHost>> {
+    LIVE.get().and_then(|l| {
+        l.host
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .upgrade()
+    })
+}
+
+type Event = (cl_api::LanAuditEvent, Option<String>, Option<String>);
+
+/// The live office network behind the setup window. Settings changes are
+/// written to `lan.json` and take effect at the next start ("Restart
+/// ClientLedger"); the code, Allow and Remove act on the running host.
+/// Network work (discovery, pairing) runs on its own thread, never on the
+/// window's.
+pub struct LiveLan {
+    settings: cl_lan::settings::LanSettings,
+    interfaces: Vec<cl_lan::policy::Candidate>,
+    restart: bool,
+    found: Vec<(String, String)>,
+    events: Vec<Event>,
+    pair_rx: Option<
+        std::sync::mpsc::Receiver<Result<cl_lan::settings::WorkstationSettings, &'static str>>,
+    >,
+    answer: Option<Result<(), &'static str>>,
+    browse_rx: Option<std::sync::mpsc::Receiver<Vec<(String, String)>>>,
+}
+
+impl LiveLan {
+    /// Reads `lan.json` and this computer's connections.
+    #[must_use]
+    pub fn open() -> LiveLan {
+        use cl_lan::policy::Interfaces;
+        let settings = LIVE
+            .get()
+            .map(|l| cl_lan::settings::LanSettings::load(&settings_path(&l.root)))
+            .unwrap_or_default();
+        LiveLan {
+            interfaces: cl_lan::policy::candidates(&cl_lan::policy::OsInterfaces.list()),
+            settings,
+            restart: false,
+            found: Vec::new(),
+            events: Vec::new(),
+            pair_rx: None,
+            answer: None,
+            browse_rx: None,
+        }
+    }
+
+    fn save(&mut self) -> Result<(), &'static str> {
+        let l = LIVE.get().ok_or("lan.restart")?;
+        let _ = std::fs::create_dir_all(lan_dir(&l.root));
+        self.settings
+            .save(&settings_path(&l.root))
+            .map_err(|_| "lan.save_failed")?;
+        self.restart = true;
+        Ok(())
+    }
+}
+
+impl crate::screens::lan_setup::LanControl for LiveLan {
+    fn view(&self) -> crate::screens::lan_setup::LanView {
+        use crate::screens::lan_setup::{CodeShown, DeviceRow, LanView};
+        use cl_lan::pairing::CodeView;
+        let host = running_host();
+        let chosen = self.settings.host.as_ref().and_then(|h| {
+            self.interfaces
+                .iter()
+                .position(|c| c.addr.name == h.interface && c.addr.ip == h.ip)
+        });
+        let (code, request, devices, fingerprint) = match &host {
+            Some(h) => (
+                match h.pairing().view() {
+                    CodeView::None => CodeShown::None,
+                    CodeView::Active {
+                        display,
+                        seconds_left,
+                        tries_left,
+                    } => CodeShown::Active {
+                        display,
+                        minutes: seconds_left.div_ceil(60),
+                        tries: tries_left,
+                    },
+                    CodeView::Burned => CodeShown::Burned,
+                },
+                h.pairing().pending().map(|p| (p.label, p.peer.to_string())),
+                h.registry()
+                    .list()
+                    .into_iter()
+                    .map(|d| DeviceRow {
+                        label: d.label,
+                        fingerprint: d.fingerprint,
+                        paired: d.paired_at.get(..10).unwrap_or_default().to_string(),
+                        signed_in: None,
+                    })
+                    .collect(),
+                Some(h.fingerprint().hex()),
+            ),
+            None => (CodeShown::None, None, Vec::new(), None),
+        };
+        LanView {
+            mode: self.settings.mode,
+            interfaces: self.interfaces.clone(),
+            chosen,
+            fingerprint,
+            code,
+            request,
+            devices,
+            announce: self.settings.host.as_ref().is_none_or(|h| h.announce),
+            start_at_sign_in: self.settings.host.as_ref().is_some_and(|h| h.background),
+            found: self.found.clone(),
+            paired_host: self
+                .settings
+                .workstation
+                .as_ref()
+                .map(|w| w.host.to_string()),
+            link: "connecting",
+            restart_needed: self.restart,
+        }
+    }
+
+    fn set_host(&mut self, on: bool, chosen: Option<usize>) -> Result<(), &'static str> {
+        use cl_lan::settings::{LanSettings, Mode};
+        if on {
+            let c = chosen
+                .and_then(|i| self.interfaces.get(i))
+                .filter(|c| c.refusal.is_none())
+                .ok_or("lan.host.iface.none")?;
+            let keep = self.settings.host.clone();
+            let mut h = LanSettings::host_on(c.addr.name.clone(), c.addr.ip);
+            if let Some(k) = keep {
+                h.announce = k.announce;
+                h.background = k.background;
+            }
+            self.settings.host = Some(h);
+            self.settings.mode = Mode::Host;
+            self.events
+                .push((cl_api::LanAuditEvent::LanHostModeOn, None, None));
+        } else {
+            self.settings.mode = Mode::Off;
+            if let Some(h) = self.settings.host.as_mut()
+                && h.background
+            {
+                h.background = false;
+                let _ = cl_host::service::uninstall();
+            }
+            self.events
+                .push((cl_api::LanAuditEvent::LanHostModeOff, None, None));
+        }
+        self.save()
+    }
+
+    fn new_code(&mut self) {
+        if let Some(h) = running_host()
+            && let Err(e) = h.pairing().new_code(&h.fingerprint())
+        {
+            tracing::warn!(error = %e, "pairing code could not be made");
+        }
+    }
+
+    fn cancel_code(&mut self) {
+        if let Some(h) = running_host() {
+            h.pairing().cancel_code();
+        }
+    }
+
+    fn decide(&mut self, allow: bool) {
+        if let Some(h) = running_host()
+            && let Some(p) = h.pairing().pending()
+            && h.pairing().decide(p.id, allow)
+            && allow
+        {
+            self.events.push((
+                cl_api::LanAuditEvent::LanDevicePaired,
+                Some(p.fingerprint.hex()),
+                Some(p.label),
+            ));
+        }
+    }
+
+    fn remove(&mut self, i: usize) {
+        let Some(h) = running_host() else {
+            return;
+        };
+        let Some(d) = h.registry().list().into_iter().nth(i) else {
+            return;
+        };
+        if let Some(fp) = Fingerprint::from_hex(&d.fingerprint)
+            && h.registry().remove(&fp).unwrap_or(false)
+        {
+            self.events.push((
+                cl_api::LanAuditEvent::LanDeviceRemoved,
+                Some(d.fingerprint),
+                Some(d.label),
+            ));
+        }
+    }
+
+    fn set_announce(&mut self, on: bool) {
+        if let Some(h) = self.settings.host.as_mut() {
+            h.announce = on;
+            let _ = self.save();
+        }
+    }
+
+    fn set_start_at_sign_in(&mut self, on: bool) -> Result<(), &'static str> {
+        let Some(h) = self.settings.host.as_mut() else {
+            return Err("lan.host.iface.none");
+        };
+        let r = if on {
+            std::env::current_exe()
+                .map_err(|_| "lan.service_failed")
+                .and_then(|exe| {
+                    cl_host::service::install(&exe, None).map_err(|_| "lan.service_failed")
+                })
+        } else {
+            cl_host::service::uninstall().map_err(|_| "lan.service_failed")
+        };
+        r?;
+        h.background = on;
+        self.save()
+    }
+
+    fn search(&mut self) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.browse_rx = Some(rx);
+        let _ = std::thread::Builder::new()
+            .name("cl-lan-browse".into())
+            .spawn(move || {
+                let found = cl_lan::discovery::MdnsDiscovery::default()
+                    .browse(Duration::from_secs(3))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|f| (f.name, f.addr.to_string()))
+                    .collect();
+                let _ = tx.send(found);
+            });
+    }
+
+    fn pair(&mut self, addr: &str, code: &str) {
+        let Some(l) = LIVE.get() else {
+            self.answer = Some(Err("lan.restart"));
+            return;
+        };
+        let addr = addr.trim();
+        let host: Option<SocketAddr> = addr.parse().ok().or_else(|| {
+            addr.parse::<std::net::IpAddr>()
+                .ok()
+                .map(|ip| SocketAddr::new(ip, cl_lan::host::DEFAULT_PORT))
+        });
+        let Some(host) = host else {
+            self.answer = Some(Err("lan.ws.no_address"));
+            return;
+        };
+        let Some(code) = cl_lan::pinning::PairingCode::parse(code) else {
+            self.answer = Some(Err("lan.pair.refused.wrong_code"));
+            return;
+        };
+        let (store, dir) = (Arc::clone(&l.store), lan_dir(&l.root));
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.pair_rx = Some(rx);
+        let _ = std::thread::Builder::new()
+            .name("cl-lan-pair".into())
+            .spawn(move || {
+                let r = (|| {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(|_| "lan.ws.unreachable")?;
+                    let (device, _) = Identity::load_or_create(&*store, &dir, Role::Device)
+                        .map_err(|_| "lan.ws.unreachable")?;
+                    let label = std::env::var("COMPUTERNAME")
+                        .or_else(|_| std::env::var("HOSTNAME"))
+                        .unwrap_or_else(|_| "Workstation".into());
+                    let fp = rt
+                        .block_on(cl_lan::client::pair(host, code, &device, &label))
+                        .map_err(|e| match e {
+                            cl_lan::client::CallError::Pair(r) => refusal_key(r),
+                            _ => "lan.ws.unreachable",
+                        })?;
+                    Ok(WorkstationSettings {
+                        host,
+                        host_fingerprint: fp.hex(),
+                    })
+                })();
+                let _ = tx.send(r);
+            });
+    }
+
+    fn poll_pair(&mut self) -> Option<Result<(), &'static str>> {
+        if let Some(rx) = &self.browse_rx
+            && let Ok(found) = rx.try_recv()
+        {
+            self.found = found;
+            self.browse_rx = None;
+        }
+        if let Some(rx) = &self.pair_rx
+            && let Ok(r) = rx.try_recv()
+        {
+            self.pair_rx = None;
+            self.answer = Some(r.and_then(|ws| {
+                self.settings.workstation = Some(ws);
+                self.settings.mode = cl_lan::settings::Mode::Workstation;
+                self.save()
+            }));
+        }
+        self.answer.take()
+    }
+
+    fn pairing(&self) -> bool {
+        self.pair_rx.is_some()
+    }
+
+    fn forget_host(&mut self) {
+        self.settings.workstation = None;
+        self.settings.mode = cl_lan::settings::Mode::Off;
+        let _ = self.save();
+    }
+
+    fn take_events(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.events)
+    }
+}
+
+/// The i18n key of a pairing refusal.
+#[must_use]
+pub fn refusal_key(r: cl_lan::pairing::PairRefusal) -> &'static str {
+    use cl_lan::pairing::PairRefusal as P;
+    match r {
+        P::NoCode => "lan.pair.refused.no_code",
+        P::WrongCode => "lan.pair.refused.wrong_code",
+        P::Burned => "lan.pair.refused.burned",
+        P::Busy => "lan.pair.refused.busy",
+        P::Denied => "lan.pair.refused.denied",
+        P::TimedOut => "lan.pair.refused.timed_out",
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
