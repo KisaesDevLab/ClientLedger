@@ -4,12 +4,20 @@ How Claude Code builds ClientLedger with subagents and the right model for each 
 
 ## Usage rules (owner 2026-10-26, Q-301; these win over the sections below)
 
-1. **One review per phase.** One `reviewer` (opus) covering code and security together, plus `ui-verifier` for screens. No separate plan reviews and no per-PR `security-reviewer`, except: Tier H phases and process checkpoints keep the `process-reviewer` (xhigh) plan review, and engine PRs are reviewed inside the phase's combined review.
+1. **One review per phase.** One `reviewer` (opus) covering code and security together, plus one hands-on QA pass for screens (rule 7). No separate plan reviews and no per-PR `security-reviewer`, except: Tier H phases and process checkpoints keep the `process-reviewer` (xhigh) plan review, and engine PRs are reviewed inside the phase's combined review.
 2. **At most 2 implementers per phase**, each with a bigger, coherent work package. Fewer handoffs, cold builds and merge conflicts; no memory kills.
 3. **Sonnet for routine coding:** control-channel scenarios, demo-backend parity, docs, engine pin bumps, CI fixes. Opus stays on money, posting, engine changes, security-sensitive code, plans and reviews.
 4. **Lean orchestration:** plans ≤ 2,000 words; briefs name only the sections and files to read; agents never read whole plans or archives; the orchestrator reports to the owner at milestones or when the owner is needed, not after every event.
-5. **Full local `cargo xtask ci` once per phase**, before the PR. Work packages run clippy and targeted tests only; GitHub CI covers the three OSes.
+5. **Full local `cargo xtask ci` once per phase**, before the PR, unless the PR's GitHub CI runs the same gates on Windows (it does since P31); then PR CI is the full run and the local full run is skipped (Q-368). Work packages run clippy and targeted tests only; GitHub CI covers the three OSes.
 6. **Engine PRs merge when green** (CI passes, npm-audit excepted while it also fails on engine main) and the phase's combined review has no open findings on them. The owner gets a one-line summary.
+7. **Testing and review sized to the risk (owner 2026-11-20, Q-368; applies from P34).**
+   - **Reviews by tier:** Tier H: `process-reviewer` plan review, combined `reviewer`, hands-on QA. Tier M: combined `reviewer` and a short QA, no plan review. Tier L: combined `reviewer` only (plus QA when the phase adds a screen).
+   - **One hands-on pass.** The real-engine QA (`ui-verifier` agent, opus) also runs `cargo xtask ui-check <screen> --compare` and judges mockup deviations; there is no separate UI-verifier pass.
+   - **Checkpoints cover seams only.** A `PR-x` checkpoint traces processes across phases and runs the adversarial cases; it does not re-review code a phase's combined review already read.
+   - **One test level per behaviour.** Engine contract → contract test; UI or model logic → unit test; each acceptance criterion → one live/soak test; each bug found → one regression test at the cheapest level that catches it. No duplicate tests of the same behaviour at several levels.
+   - **Targeted while working, full once.** Agents run only the affected crates' tests while iterating; the full suite runs once per phase (rule 5).
+   - **Drop rule.** If a review layer finds no Blocking issue in two consecutive phases of a tier, it is dropped for that tier (logged in STATE.md and here).
+   - **Measure.** Each phase's STATE.md log entry lists which layer found each Blocking issue (plan review, combined review, QA, soak/live test, CI, checkpoint).
 
 ## Principles
 
@@ -60,9 +68,9 @@ Fable is used only when the owner explicitly asks for it on a specific task (Q-2
 
 | Tier | Phases | Implementer | Architect plan | Reviews |
 | --- | --- | --- | --- | --- |
-| **H** — money, posting, concurrency, data movement, migrations, core widget | P02, P05, P10, P12, P15, P21, P23, P24, P25, P27, P28, P31, P32, P33, P34, P36; post-beta P40, P42 | `opus`, effort high | required (`architect` on opus) | `reviewer` (opus) + `ui-verifier` (opus); `security-reviewer` (opus) where listed below |
-| **M** — feature screens with accounting effects | P08, P09, P11, P13, P14, P17, P18, P20, P22, P26, P29, P30; post-beta P41, P43, P45, P46, P47, P48 | `opus`, effort medium; effort high for any work package touching money, posting, closing date, backup/restore or secrets | only if engine-scout reports an M/L gap | `reviewer` (opus) + `ui-verifier` |
-| **L** — scaffolding, shell, printing, packaging, docs | P00, P01, P03, P04, P06, P07, P16, P19, P35, P37, P38, P39; post-beta P44 | `opus`, effort medium | no | `ui-verifier` for screens; `reviewer` optional |
+| **H** — money, posting, concurrency, data movement, migrations, core widget | P02, P05, P10, P12, P15, P21, P23, P24, P25, P27, P28, P31, P32, P33, P34, P36; post-beta P40, P42 | `opus`, effort high | required (`architect` on opus) | plan review (`process-reviewer`) + `reviewer` (opus) + hands-on QA with `--compare` (Q-368); security in the combined review where listed below |
+| **M** — feature screens with accounting effects | P08, P09, P11, P13, P14, P17, P18, P20, P22, P26, P29, P30; post-beta P41, P43, P45, P46, P47, P48 | `opus`, effort medium; effort high for any work package touching money, posting, closing date, backup/restore or secrets | only if engine-scout reports an M/L gap | `reviewer` (opus) + short hands-on QA with `--compare` (Q-368) |
+| **L** — scaffolding, shell, printing, packaging, docs | P00, P01, P03, P04, P06, P07, P16, P19, P35, P37, P38, P39; post-beta P44 | `opus`, effort medium | no | `reviewer` (opus); hands-on QA only when the phase adds a screen (Q-368) |
 
 `security-reviewer` (opus) also runs on P03, P04, P07, P09, P29, P32, P33, P35, P36, and P37, regardless of tier.
 
@@ -88,7 +96,7 @@ orchestrator (opus)
  │   security-reviewer (opus)   listed phases only            │
  │   docs-writer (sonnet)       help pages                    │
  ├─ rust-implementer (fresh)    fix all findings, one brief   │ a new agent, not a resume
- ├─ ui-verifier (opus)          screens, once, after fixes    │
+ ├─ QA (ui-verifier, opus)      real engine + --compare, once │ Q-368: replaces the separate UI pass
  ├─ reviewer re-check           only for Blocking findings in │ otherwise CI + named tests
  │                              money/data/secret code        │
  ├─ bookkeeper (sonnet)          STATE/QUESTIONS/UPSTREAM      │
@@ -123,7 +131,7 @@ Token rules (owner, 2026-10-18) — keep quality, cut waste:
 
 1. **Fresh agents for fix passes.** After reviews, start a new implementer with one combined brief (every finding with file:line, the plan section, the tests to add). Do not resume the original implementer: its history is the largest cost in a phase.
 2. **Small startup reads.** Agents read only what CLAUDE.md lists for their task: STATE.md's board and recent entries, the one phase section, the Q-IDs the phase cites (search `docs/history/phase-decisions.md`, never read it whole), U-rows only for engine work, and plan sections by line range. The bookkeeper keeps STATE.md to the last four log entries and moves a closed phase's `Q-Pxx` rows to the archive.
-3. **One review round.** Tier L/M phases outside the security list get one `reviewer` that also covers security; listed phases add `security-reviewer`. The `ui-verifier` runs once, after the fix pass. A verification re-review runs only for Blocking findings in money, posting, closing dates, backup/restore, concurrency or secrets.
+3. **One review round.** Tier L/M phases outside the security list get one `reviewer` that also covers security; listed phases add `security-reviewer`. The hands-on QA pass (`ui-verifier` agent, real engine plus `--compare`) runs once, after the fix pass (Q-368). A verification re-review runs only for Blocking findings in money, posting, closing dates, backup/restore, concurrency or secrets.
 4. **Small work packages.** Tier H implementers take two or three plan steps per agent; the next package starts a fresh agent from the plan, not a resume. Agents commit after every step so a turn limit loses nothing.
 5. **Quiet tools.** `cargo xtask ci` is quiet locally (one line per passing gate, only the explaining lines of a failure); use `--verbose` only to debug. `ui-verifier` opens the `--compare` page and the screenshots of failing or changed screens, not every PNG.
 6. **Flaky tests fixed at once.** A test that fails once on CI and passes on re-run is fixed in the same PR (or the next commit to main), never just re-run twice.
