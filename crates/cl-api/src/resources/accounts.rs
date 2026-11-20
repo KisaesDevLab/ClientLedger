@@ -433,10 +433,13 @@ impl Accounts<'_> {
     /// sent); `Validation` with code `SENSITIVE_NOT_ALLOWED` for a bank,
     /// credit card or built-in account or a parent of one
     /// ([`crate::is_sensitive_not_allowed`]); `Forbidden` for a non-Admin;
-    /// `NotFound`; any [`ApiError`].
+    /// `NotFound`; `Conflict { Stale }` when the account changed since
+    /// `expected` was read (`expectedUpdatedAt`, U-291). The answer is the
+    /// account with its new stamp ([`Account::version`]).
     pub async fn set_sensitive(
         &self,
         id: AccountId,
+        expected: &RecordVersion,
         on: bool,
         key: IdempotencyKey,
     ) -> Result<Account, ApiError> {
@@ -449,7 +452,8 @@ impl Accounts<'_> {
         {
             return Err(ApiError::Local(crate::errors::LocalValidation::Unsupported));
         }
-        let body = serde_json::json!({ "isSensitive": on });
+        let mut body = serde_json::json!({ "isSensitive": on });
+        crate::resources::versioning::stamp_body(self.0, &mut body, expected.stamp());
         let mut call = crate::client::Call::new(
             crate::client::Method::Put,
             ACCOUNT_SENSITIVE_PUT.route(),
@@ -466,13 +470,16 @@ impl Accounts<'_> {
     /// Deactivates an account (`DELETE`; refused while it has a balance).
     ///
     /// # Errors
-    /// `Validation`; any [`ApiError`].
+    /// `Conflict { Stale }` when it changed since `expected` was read
+    /// (`expectedUpdatedAt` in the body, U-291); `Validation`; any [`ApiError`].
     pub async fn deactivate(
         &self,
         id: AccountId,
+        expected: &RecordVersion,
         key: IdempotencyKey,
     ) -> Result<Versioned<Account>, ApiError> {
-        let reply = common::deactivate(self.0, &SPEC, &id.to_string(), key).await?;
+        let reply =
+            common::deactivate(self.0, &SPEC, &id.to_string(), expected.stamp(), key).await?;
         saved_from(&reply.body, SPEC.item_key)
     }
 }
@@ -660,7 +667,11 @@ mod tests {
             .await
             .expect("update");
         accts
-            .deactivate(id(), IdempotencyKey::new())
+            .deactivate(
+                id(),
+                &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                IdempotencyKey::new(),
+            )
             .await
             .expect("deactivate");
 

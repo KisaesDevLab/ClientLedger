@@ -734,8 +734,9 @@ impl ItemsScreen {
                 key: Some(key.clone()),
             };
             let pending = if item.is_active {
+                let version = item.version();
                 group.write(&session, label, move |s| async move {
-                    s.items().deactivate(id, key).await?;
+                    s.items().deactivate(id, &version, key).await?;
                     s.items().get(id).await
                 })
             } else {

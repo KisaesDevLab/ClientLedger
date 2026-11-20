@@ -38,8 +38,8 @@ use crate::resources::operations::{
 use crate::resources::posting::{PostingOptions, posting_body};
 use crate::resources::reconcile::{OutcomeMatcher, Probe, Search, row_fp};
 use crate::resources::versioning::{
-    EditableFields, GuardedUpdate, RecordVersion, Versioned, fingerprint_of, saved_from,
-    update_guarded,
+    EditableFields, GuardedUpdate, RecordStamp, RecordVersion, Versioned, fingerprint_of,
+    saved_from, stamp_body, update_guarded,
 };
 use crate::session::Session;
 use crate::wire::{Capabilities, Page, PageRequest};
@@ -1247,10 +1247,13 @@ impl Transactions<'_> {
     ///
     /// # Errors
     /// `Local(MissingReason)` for a blank reason (nothing sent),
-    /// `ClosedPeriod`, `Validation` (already void), or any [`ApiError`].
+    /// `ClosedPeriod`, `Validation` (already void), `Conflict { Stale }`
+    /// when it changed since `stamp` was read (`expectedUpdatedAt`, U-291;
+    /// LAN mode requires it, U-292), or any [`ApiError`].
     pub async fn void(
         &self,
         id: TransactionId,
+        stamp: Option<RecordStamp>,
         reason: &str,
         opts: &PostingOptions,
         key: IdempotencyKey,
@@ -1261,7 +1264,9 @@ impl Transactions<'_> {
         if reason.is_empty() {
             return Err(ApiError::Local(LocalValidation::MissingReason));
         }
-        let body = posting_body(s, json!({ "reason": reason }), opts)?;
+        let mut body = json!({ "reason": reason });
+        stamp_body(s, &mut body, stamp);
+        let body = posting_body(s, body, opts)?;
         let path = format!("{}/{id}/void", SPEC.base);
         let matcher = OutcomeMatcher::Field {
             get: &TXN_GET,
@@ -1289,11 +1294,13 @@ impl Transactions<'_> {
     /// for a reason over 500 characters. From the engine: `Conflict` with
     /// `Reconciled`, `AlreadyDeleted`, `DeleteUnsupported` (Q-245: void it
     /// instead) or `DeleteLinked`; `ClosedPeriod`; `ClosingPasswordRejected`;
-    /// `ClosingPasswordRateLimited`; `NotFound`; `OutcomeUnknown`; any
-    /// [`ApiError`].
+    /// `ClosingPasswordRateLimited`; `NotFound`; `OutcomeUnknown`;
+    /// `Conflict { Stale }` when it changed since `stamp` was read
+    /// (`expectedUpdatedAt` in the body, U-291); any [`ApiError`].
     pub async fn delete(
         &self,
         id: TransactionId,
+        stamp: Option<RecordStamp>,
         opts: &DeleteOptions,
         key: IdempotencyKey,
     ) -> Result<Versioned<Transaction>, ApiError> {
@@ -1321,7 +1328,11 @@ impl Transactions<'_> {
                 .clone()
                 .map(crate::resources::posting::ClosedPeriodAuthorization::with_password),
         };
-        let body = posting_body(s, Value::Object(body), &opts)?;
+        // The transaction DELETE reads its stamp from the body (its route
+        // takes `{reason, closingPassword, expectedUpdatedAt}`).
+        let mut body = Value::Object(body);
+        stamp_body(s, &mut body, stamp);
+        let body = posting_body(s, body, &opts)?;
         let path = SPEC.path(&id.to_string());
         let matcher = OutcomeMatcher::Field {
             get: &TXN_GET,

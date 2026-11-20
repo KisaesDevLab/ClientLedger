@@ -1131,8 +1131,15 @@ fn contact_merge_moves_drafts_and_layouts(h: &Harness) {
         }))
         .expect("layout");
     }
-    h.run(s.contacts().merge(from, into, None, key()))
-        .expect("merge");
+    let (from_v, into_v) = (
+        h.run(s.contacts().get(from)).expect("from").version,
+        h.run(s.contacts().get(into)).expect("into").version,
+    );
+    h.run(
+        s.contacts()
+            .merge((from, &from_v), (into, &into_v), None, key()),
+    )
+    .expect("merge");
     assert_eq!(get(h, s, d.id).suggested_contact_id, Some(into));
     assert_eq!(
         h.run(s.vendor_templates().list(Some(from)))
@@ -1698,10 +1705,18 @@ fn attach_matrix(h: &Harness) {
 
     // A void record is not posted.
     let gone = charge(h, s, card, exp, on, "18.76");
-    h.run(
-        s.transactions()
-            .void(gone, "Synthetic void", &PostingOptions::default(), key()),
-    )
+    let at = h
+        .run(s.transactions().get(gone))
+        .expect("read")
+        .version
+        .stamp();
+    h.run(s.transactions().void(
+        gone,
+        at,
+        "Synthetic void",
+        &PostingOptions::default(),
+        key(),
+    ))
     .expect("void");
     let (file, d) = new_draft(h, s);
     let e = attach(h, s, &d, gone).expect_err("void");
@@ -1772,9 +1787,14 @@ fn amount_filter_is_exact(h: &Harness) {
         !search("7310.10", None).contains(&late),
         "the dates bound it"
     );
+    let at = h
+        .run(s.transactions().get(b))
+        .expect("read")
+        .version
+        .stamp();
     h.run(
         s.transactions()
-            .void(b, "Synthetic void", &PostingOptions::default(), key()),
+            .void(b, at, "Synthetic void", &PostingOptions::default(), key()),
     )
     .expect("void");
     assert_eq!(search("7310.10", None), vec![a], "posted only");
@@ -2223,8 +2243,14 @@ impl CaseWorld<'_> {
                 Answer::ok(201, json!({"id": id}))
             }
             "void" => {
+                let id = self.txn_id(args);
+                let at = h
+                    .run(s.transactions().get(id))
+                    .ok()
+                    .and_then(|t| t.version.stamp());
                 h.run(s.transactions().void(
-                    self.txn_id(args),
+                    id,
+                    at,
                     "Synthetic void",
                     &PostingOptions::default(),
                     key(),

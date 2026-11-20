@@ -964,7 +964,7 @@ impl DepositScreen {
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
             s.transactions()
-                .void(e.id, &reason, &options(password), key)
+                .void(e.id, e.version.stamp(), &reason, &options(password), key)
                 .await?;
             Ok(())
         }) {

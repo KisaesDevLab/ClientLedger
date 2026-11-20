@@ -480,5 +480,6 @@ pub fn hand_fixture_and_writes(h: &Harness) {
             .any(|x| x.id == next.id),
         "listed"
     );
-    h.run(budgets.delete(&next.id)).expect("delete");
+    h.run(budgets.delete(&next.id, next.version))
+        .expect("delete");
 }

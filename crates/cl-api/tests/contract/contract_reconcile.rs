@@ -699,10 +699,13 @@ pub fn checking_account_rows_and_reconciled_refusals(h: &Harness) {
         .expect_err("the date is reconciled");
     assert!(reconciled(&err), "{err:?}");
     let err = h
-        .run(
-            s.transactions()
-                .void(made.record.id, "qa", &PostingOptions::default(), key()),
-        )
+        .run(s.transactions().void(
+            made.record.id,
+            None,
+            "qa",
+            &PostingOptions::default(),
+            key(),
+        ))
         .expect_err("void is reconciled");
     assert!(reconciled(&err), "{err:?}");
     let memo = je2(date(2026, 2, 3), "memo only", b.expense, b.bank, "25.00");

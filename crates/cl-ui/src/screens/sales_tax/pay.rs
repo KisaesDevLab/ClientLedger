@@ -587,8 +587,12 @@ impl PayScreen {
                             .map(|()| Wrote::Voided)
                     },
                     move |s| async move {
+                        // The payment history rows carry no stamp, so the
+                        // payment is read for it just before the void
+                        // (U-291; LAN mode requires one, U-292).
+                        let read = s.transactions().get(id).await?;
                         s.transactions()
-                            .void(id, &reason, &opts, key)
+                            .void(id, read.version.stamp(), &reason, &opts, key)
                             .await
                             .map(|_| Wrote::Voided)
                     },

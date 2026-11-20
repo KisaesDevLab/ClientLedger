@@ -923,6 +923,7 @@ pub fn void_via_transactions_route_reopens(h: &Harness) {
     assert_eq!(invoice_balance(h, s, x.i1091), m("385.00"));
     h.run(s.transactions().void(
         rec.id,
+        None,
         "contract: entered twice",
         &PostingOptions::default(),
         key(),
@@ -961,6 +962,7 @@ pub fn void_via_transactions_route_reopens(h: &Harness) {
     let e = h
         .run(s.transactions().void(
             dep.id,
+            None,
             "contract: deposited",
             &PostingOptions::default(),
             key(),

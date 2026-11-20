@@ -697,8 +697,9 @@ impl CenterScreen {
                 key: Some(key.clone()),
             };
             let pending = if contact.is_active {
+                let version = contact.version();
                 group.write(&session, label, move |s| async move {
-                    s.contacts().deactivate(id, key).await
+                    s.contacts().deactivate(id, &version, key).await
                 })
             } else {
                 let version = contact.version();
@@ -856,6 +857,19 @@ impl CenterScreen {
             }
             return;
         }
+        // Both contacts as listed: their stamps go with the merge, which
+        // the engine refuses (409 STALE) if either changed (U-291).
+        let unread = cl_api::RecordVersion::Fingerprint([0; 32]);
+        let version_of = |id| {
+            self.contacts
+                .iter()
+                .find(|c| c.id == id)
+                .map_or(unread, Contact::version)
+        };
+        let (source_v, target_v) = (version_of(source), version_of(target));
+        let Panel::Merge(m) = &mut self.panel else {
+            return;
+        };
         let (Some(session), Some(group)) = (self.link.session(), self.group.as_ref()) else {
             m.closing.nothing_sent();
             return;
@@ -867,7 +881,12 @@ impl CenterScreen {
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
             s.contacts()
-                .merge(source, target, password.as_ref(), key)
+                .merge(
+                    (source, &source_v),
+                    (target, &target_v),
+                    password.as_ref(),
+                    key,
+                )
                 .await
         }) {
             m.task = Some(Task::Pending(p));

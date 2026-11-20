@@ -37,7 +37,7 @@ use crate::resources::operations::{
 };
 use crate::resources::posting::{ClosedPeriodAuthorization, PostingOptions, posting_body};
 use crate::resources::reconcile::{OutcomeMatcher, Probe};
-use crate::resources::versioning::saved_unreadable;
+use crate::resources::versioning::{RecordStamp, saved_unreadable, stamp_body, stamp_delete};
 use crate::session::{Session, decode, json_body};
 use crate::wire::Capabilities;
 
@@ -256,6 +256,17 @@ pub struct DailyTemplate {
     /// Its lines (active and removed), by sort order.
     #[serde(default)]
     pub lines: Vec<DailyLine>,
+    /// The stamp it was read at (`updatedAt`), sent with its next rename,
+    /// lines save or delete (U-291; LAN mode requires it, U-292).
+    #[serde(rename = "updatedAt", default, deserialize_with = "stamp_de")]
+    pub stamp: Option<RecordStamp>,
+}
+
+/// A stamp field: the engine's millisecond UTC text, anything else `None`.
+fn stamp_de<'de, D: Deserializer<'de>>(d: D) -> Result<Option<RecordStamp>, D::Error> {
+    Ok(Option::<String>::deserialize(d)?
+        .as_deref()
+        .and_then(RecordStamp::parse))
 }
 
 const fn custom() -> Preset {
@@ -454,6 +465,9 @@ pub struct DailyEntry {
     pub totals: DailyTotals,
     /// The layout as the engine read it with the day.
     pub layout: Option<DailyTemplate>,
+    /// The stamp it was read at (`updatedAt`), sent with its next save or
+    /// delete (U-291; LAN mode requires it, U-292).
+    pub stamp: Option<RecordStamp>,
 }
 
 /// Hides the notes and amounts.
@@ -494,6 +508,8 @@ struct EntryWire {
     total_payments: Money,
     #[serde(default)]
     template: Option<DailyTemplate>,
+    #[serde(default, deserialize_with = "stamp_de")]
+    updated_at: Option<RecordStamp>,
 }
 
 impl From<EntryWire> for DailyEntry {
@@ -514,6 +530,7 @@ impl From<EntryWire> for DailyEntry {
                 payments: w.total_payments,
             },
             layout: w.template,
+            stamp: w.updated_at,
         }
     }
 }
@@ -896,8 +913,14 @@ impl DailySales<'_> {
     ///
     /// # Errors
     /// `Local(InvalidValue)` for an empty or over-long name; any [`ApiError`].
-    pub async fn rename(&self, id: DailyTemplateId, name: &str) -> Result<DailyTemplate, ApiError> {
-        let body = json!({ "name": name_ok(name)? });
+    pub async fn rename(
+        &self,
+        id: DailyTemplateId,
+        stamp: Option<RecordStamp>,
+        name: &str,
+    ) -> Result<DailyTemplate, ApiError> {
+        let mut body = json!({ "name": name_ok(name)? });
+        stamp_body(self.0, &mut body, stamp);
         let call = write_call(
             Method::Put,
             DAILY_TEMPLATE_PUT.route(),
@@ -908,16 +931,22 @@ impl DailySales<'_> {
         template_from_json(&reply.body).map_err(saved_unreadable)
     }
 
-    /// Deletes a layout (the engine keeps it for its old days).
+    /// Deletes a layout read at `stamp` (`expectedUpdatedAt` in the body, U-291; the
+    /// engine keeps it for its old days).
     ///
     /// # Errors
-    /// Any [`ApiError`].
-    pub async fn delete_template(&self, id: DailyTemplateId) -> Result<(), ApiError> {
+    /// `Conflict { Stale }`; any [`ApiError`].
+    pub async fn delete_template(
+        &self,
+        id: DailyTemplateId,
+        stamp: Option<RecordStamp>,
+    ) -> Result<(), ApiError> {
         let mut call = Call::new(
             Method::Delete,
             DAILY_TEMPLATE_DELETE.route(),
             format!("/api/v1/daily-sales/templates/{id}"),
         );
+        stamp_delete(self.0, &mut call, stamp);
         call.idempotency_key = Some(IdempotencyKey::new());
         self.0.send(&DAILY_TEMPLATE_DELETE, call, None).await?;
         Ok(())
@@ -933,9 +962,11 @@ impl DailySales<'_> {
     pub async fn replace_lines(
         &self,
         id: DailyTemplateId,
+        stamp: Option<RecordStamp>,
         lines: &[DailyLineInput],
     ) -> Result<DailyTemplate, ApiError> {
-        let body = lines_body(lines)?;
+        let mut body = lines_body(lines)?;
+        stamp_body(self.0, &mut body, stamp);
         let call = write_call(
             Method::Put,
             DAILY_TEMPLATE_LINES.route(),
@@ -1022,10 +1053,12 @@ impl DailySales<'_> {
     pub async fn update_draft(
         &self,
         id: DailyEntryId,
+        stamp: Option<RecordStamp>,
         d: &DailyEntryDraft,
         key: IdempotencyKey,
     ) -> Result<DailyEntry, ApiError> {
-        let body = draft_body(d, false)?;
+        let mut body = draft_body(d, false)?;
+        stamp_body(self.0, &mut body, stamp);
         let mut call = Call::new(
             Method::Put,
             DAILY_ENTRY_PUT.route(),
@@ -1140,16 +1173,23 @@ impl DailySales<'_> {
         entry_from_json(&reply.body).map_err(saved_unreadable)
     }
 
-    /// Deletes a draft day (a posted day is voided instead).
+    /// Deletes a draft day read at `stamp` (`expectedUpdatedAt` in the body, U-291;
+    /// a posted day is voided instead).
     ///
     /// # Errors
-    /// `Validation` for a posted day; any [`ApiError`].
-    pub async fn delete_draft(&self, id: DailyEntryId) -> Result<(), ApiError> {
+    /// `Validation` for a posted day; `Conflict { Stale }`; any
+    /// [`ApiError`].
+    pub async fn delete_draft(
+        &self,
+        id: DailyEntryId,
+        stamp: Option<RecordStamp>,
+    ) -> Result<(), ApiError> {
         let mut call = Call::new(
             Method::Delete,
             DAILY_ENTRY_DELETE.route(),
             format!("/api/v1/daily-sales/entries/{id}"),
         );
+        stamp_delete(self.0, &mut call, stamp);
         call.idempotency_key = Some(IdempotencyKey::new());
         self.0.send(&DAILY_ENTRY_DELETE, call, None).await?;
         Ok(())

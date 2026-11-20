@@ -27,6 +27,7 @@ use crate::resources::operations::{
     FEED_REPROCESS_RULES, FEED_RULE_CREATE, FEED_RULE_DELETE, FEED_RULE_LIST,
     FEED_RULE_SUGGESTION_DISMISS, FEED_RULE_SUGGESTIONS, FEED_RULE_UPDATE,
 };
+use crate::resources::versioning::{RecordStamp, stamp_body, stamp_delete};
 use crate::session::{Session, json_body};
 
 /// Money in, money out, or either (`amount_sign` in the feed sign: money
@@ -53,7 +54,7 @@ pub struct FeedRule {
     pub active: bool,
     /// "Accept all from this rule" is offered (never posts on its own).
     pub auto_accept: bool,
-    /// The change token (`updatedAt`).
+    /// The change token (`updatedAt`): sent back as `expectedUpdatedAt`.
     pub updated_at: Option<String>,
     /// The bank's description contains this (owner data).
     pub description: Option<String>,
@@ -70,6 +71,14 @@ pub struct FeedRule {
     /// The desktop can edit it (one AND of the conditions above, set
     /// account / set tag actions).
     pub simple: bool,
+}
+
+impl FeedRule {
+    /// The stamp it was read at, when `updated_at` is one.
+    #[must_use]
+    pub fn stamp(&self) -> Option<RecordStamp> {
+        self.updated_at.as_deref().and_then(RecordStamp::parse)
+    }
 }
 
 impl fmt::Debug for FeedRule {
@@ -392,32 +401,37 @@ impl FeedRules<'_> {
         feed_rules_from(&reply.body)
     }
 
-    /// Saves a rule: creates it without an id, else replaces it.
+    /// Saves a rule: creates it without an id, else replaces it if it is
+    /// still at its `updated_at` (`expectedUpdatedAt`, U-291).
     ///
     /// # Errors
-    /// [`feed_rule_body`]'s checks; any [`ApiError`].
+    /// [`feed_rule_body`]'s checks; `Conflict { Stale }`; any [`ApiError`].
     pub async fn save(&self, r: &FeedRule) -> Result<(), ApiError> {
-        let body = json_body(&feed_rule_body(r)?)?;
+        let mut body = feed_rule_body(r)?;
         match &r.id {
             None => {
-                let call = Call::at(Method::Post, FEED_RULE_CREATE.route()).json_body(body);
+                let call =
+                    Call::at(Method::Post, FEED_RULE_CREATE.route()).json_body(json_body(&body)?);
                 self.0.send(&FEED_RULE_CREATE, call, None).await?;
             }
             Some(id) => {
+                stamp_body(self.0, &mut body, r.stamp());
                 let call = Call::new(Method::Put, FEED_RULE_UPDATE.route(), rule_path(id)?)
-                    .json_body(body);
+                    .json_body(json_body(&body)?);
                 self.0.send(&FEED_RULE_UPDATE, call, None).await?;
             }
         }
         Ok(())
     }
 
-    /// Deletes a rule.
+    /// Deletes a rule read at `stamp` ([`FeedRule::stamp`], sent as
+    /// `expectedUpdatedAt` in the body, U-291).
     ///
     /// # Errors
-    /// Any [`ApiError`].
-    pub async fn delete(&self, id: &str) -> Result<(), ApiError> {
-        let call = Call::new(Method::Delete, FEED_RULE_DELETE.route(), rule_path(id)?);
+    /// `Conflict { Stale }`; any [`ApiError`].
+    pub async fn delete(&self, id: &str, stamp: Option<RecordStamp>) -> Result<(), ApiError> {
+        let mut call = Call::new(Method::Delete, FEED_RULE_DELETE.route(), rule_path(id)?);
+        stamp_delete(self.0, &mut call, stamp);
         self.0.send(&FEED_RULE_DELETE, call, None).await?;
         Ok(())
     }

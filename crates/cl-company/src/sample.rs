@@ -1145,7 +1145,7 @@ async fn seed_layouts(
             .create_template(&layout.name, Some(sample_preset(&layout.preset)))
             .await
         {
-            Ok(t) => daily.replace_lines(t.id, &lines).await.map(|_| ()),
+            Ok(t) => daily.replace_lines(t.id, t.stamp, &lines).await.map(|_| ()),
             Err(e) => Err(e),
         };
         if let Err(e) = seeded {

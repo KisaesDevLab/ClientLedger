@@ -173,8 +173,13 @@ pub(super) async fn row_write(
     // short window in which another window's edit is not caught.
     // With U-17 the version goes in `If-Match` and the engine checks
     // it atomically.
+    // U-291: the void or delete sends the stamp the row was read at, and
+    // the engine compares it under the record's lock (LAN mode requires
+    // it, U-292). A row read without one takes the stamp read here.
+    let mut stamp = w.version.and_then(|v| v.stamp());
     if let Some(expected) = w.version {
         let now = t.get(w.id).await?;
+        stamp = stamp.or(now.version.stamp());
         if now.version != expected {
             return Err(ApiError::Conflict {
                 reason: ConflictReason::Stale,
@@ -184,21 +189,29 @@ pub(super) async fn row_write(
                 details: cl_api::ConflictDetails::default(),
             });
         }
+    } else {
+        stamp = t.get(w.id).await?.version.stamp();
     }
     let ap = s.ap_voids();
     // PR-4 S4: the costing walk's NEGATIVE_STOCK warnings come back.
     Ok(match (w.kind, w.route) {
         (ActionKind::Void, VoidRoute::Generic) => {
-            t.void(w.id, &w.void_reason, &with_password(w.password), w.key)
-                .await?
-                .stock_warnings
+            t.void(
+                w.id,
+                stamp,
+                &w.void_reason,
+                &with_password(w.password),
+                w.key,
+            )
+            .await?
+            .stock_warnings
         }
-        (ActionKind::Void, VoidRoute::Bill) => ap.bill(w.id, &w.void_reason, w.key).await?,
+        (ActionKind::Void, VoidRoute::Bill) => ap.bill(w.id, stamp, &w.void_reason, w.key).await?,
         (ActionKind::Void, VoidRoute::VendorCredit) => {
-            ap.vendor_credit(w.id, &w.void_reason, w.key).await?
+            ap.vendor_credit(w.id, stamp, &w.void_reason, w.key).await?
         }
         (ActionKind::Void, VoidRoute::BillPayment) => {
-            ap.bill_payment(w.id, &w.void_reason, w.key).await?;
+            ap.bill_payment(w.id, stamp, &w.void_reason, w.key).await?;
             Vec::new()
         }
         (ActionKind::Delete, _) => {
@@ -206,7 +219,7 @@ pub(super) async fn row_write(
                 reason: w.reason,
                 closing_password: w.password,
             };
-            t.delete(w.id, &opts, w.key).await?.stock_warnings
+            t.delete(w.id, stamp, &opts, w.key).await?.stock_warnings
         }
     })
 }

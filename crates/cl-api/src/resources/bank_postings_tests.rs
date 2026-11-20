@@ -652,7 +652,7 @@ async fn delete_is_gated_by_its_capability_and_the_password_by_its_own() {
     let s = session_with_caps(&server, &[]).await;
     let e = s
         .transactions()
-        .delete(id, &DeleteOptions::default(), IdempotencyKey::new())
+        .delete(id, None, &DeleteOptions::default(), IdempotencyKey::new())
         .await
         .expect_err("gated");
     assert_eq!(e, ApiError::Local(LocalValidation::TxnDeleteUnavailable));
@@ -665,7 +665,7 @@ async fn delete_is_gated_by_its_capability_and_the_password_by_its_own() {
     };
     let e = s
         .transactions()
-        .delete(id, &with_pw, IdempotencyKey::new())
+        .delete(id, None, &with_pw, IdempotencyKey::new())
         .await
         .expect_err("password gated");
     assert_eq!(
@@ -678,7 +678,7 @@ async fn delete_is_gated_by_its_capability_and_the_password_by_its_own() {
     };
     let e = s
         .transactions()
-        .delete(id, &long, IdempotencyKey::new())
+        .delete(id, None, &long, IdempotencyKey::new())
         .await
         .expect_err("long reason");
     assert_eq!(e, ApiError::Local(LocalValidation::InvalidValue));
@@ -715,7 +715,7 @@ async fn delete_sends_the_reason_and_password_and_reads_the_deleted_record() {
     };
     let gone = s
         .transactions()
-        .delete(id, &opts, IdempotencyKey::new())
+        .delete(id, None, &opts, IdempotencyKey::new())
         .await
         .expect("deleted");
     assert_eq!(gone.record.status, TxnStatus::Deleted);
@@ -730,7 +730,7 @@ async fn delete_sends_the_reason_and_password_and_reads_the_deleted_record() {
 
     let e = s
         .transactions()
-        .delete(id, &DeleteOptions::default(), IdempotencyKey::new())
+        .delete(id, None, &DeleteOptions::default(), IdempotencyKey::new())
         .await
         .expect_err("unsupported");
     assert!(matches!(

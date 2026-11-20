@@ -81,6 +81,7 @@ pub fn update_and_void_keep_the_before_image(h: &Harness) {
     let updated_lines = txn_lines(&updated.record);
     h.run(s.transactions().void(
         made.record.id,
+        None,
         "audit test",
         &PostingOptions::default(),
         key(),
@@ -160,7 +161,7 @@ pub fn delete_keeps_every_line_in_the_audit_trail(h: &Harness) {
         closing_password: None,
     };
     let gone = h
-        .run(s.transactions().delete(made.record.id, &opts, key()))
+        .run(s.transactions().delete(made.record.id, None, &opts, key()))
         .expect("delete");
     assert_eq!(gone.record.status, TxnStatus::Deleted);
 
@@ -188,7 +189,7 @@ pub fn delete_keeps_every_line_in_the_audit_trail(h: &Harness) {
     let e = h
         .run(
             s.transactions()
-                .delete(made.record.id, &DeleteOptions::default(), key()),
+                .delete(made.record.id, None, &DeleteOptions::default(), key()),
         )
         .expect_err("already deleted");
     assert!(
@@ -204,6 +205,7 @@ pub fn delete_keeps_every_line_in_the_audit_trail(h: &Harness) {
     let e = h
         .run(s.transactions().void(
             made.record.id,
+            None,
             "after delete",
             &PostingOptions::default(),
             key(),

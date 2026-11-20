@@ -599,7 +599,7 @@ impl JournalScreen {
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
             s.transactions()
-                .void(e.id, &reason, &options(password), key)
+                .void(e.id, e.version.stamp(), &reason, &options(password), key)
                 .await?;
             Ok(())
         }) {
@@ -638,7 +638,11 @@ impl JournalScreen {
                 reason: None,
                 closing_password: password,
             };
-            let r = s.transactions().delete(e.id, &opts, key).await.map(|_| ());
+            let r = s
+                .transactions()
+                .delete(e.id, e.version.stamp(), &opts, key)
+                .await
+                .map(|_| ());
             delete_answer(r, retry)
         }) {
             self.action_task = Some((Pending::Delete, Task::Pending(p)));

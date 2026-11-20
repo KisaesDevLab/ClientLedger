@@ -88,6 +88,7 @@ pub fn boundaries_round_trip(h: &Harness) {
         );
         h.run(s.transactions().void(
             made.record.id,
+            None,
             "boundary test",
             &PostingOptions::default(),
             key(),
@@ -240,9 +241,12 @@ pub fn engine_tolerance_probe_money_strict(h: &Harness) {
         .as_str()
         .and_then(|v| cl_core::ids::TransactionId::parse(v).ok())
         .expect("id");
-    h.run(
-        s.transactions()
-            .void(id, "tolerance probe", &PostingOptions::default(), key()),
-    )
+    h.run(s.transactions().void(
+        id,
+        None,
+        "tolerance probe",
+        &PostingOptions::default(),
+        key(),
+    ))
     .expect("void the probe");
 }

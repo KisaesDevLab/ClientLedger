@@ -839,8 +839,11 @@ impl TagsScreen {
                 what: "orphan.tag_delete",
                 key: Some(key.clone()),
             };
+            let Some(version) = self.tag(id).map(Tag::version) else {
+                return;
+            };
             match group.write(&session, label, move |s| async move {
-                s.tags().delete(id, key).await
+                s.tags().delete(id, &version, key).await
             }) {
                 Ok(p) => Task::Pending(p),
                 Err(_) => return,
@@ -1094,6 +1097,7 @@ impl TagsScreen {
                     fields,
                     sort_order: Some(i64::from(n) + 1),
                     tags: Vec::new(),
+                    updated_at: None,
                 };
                 groups.push(g.clone());
                 g
@@ -1113,9 +1117,14 @@ impl TagsScreen {
             what: "orphan.tag_group_save",
             key: Some(key.clone()),
         };
+        // The group as listed: its stamp goes with the save (U-291); the
+        // answer, with its new stamp, replaces it in the list.
+        let stamp = editing
+            .and_then(|id| self.groups.iter().find(|g| g.id == id))
+            .and_then(TagGroup::stamp);
         let pending = match editing {
             Some(id) => group.write(&session, label, move |s| async move {
-                s.tags().update_group(id, &fields, key).await
+                s.tags().update_group(id, stamp, &fields, key).await
             }),
             None => group.write(&session, label, move |s| async move {
                 s.tags().create_group(&fields, key).await
@@ -1209,8 +1218,16 @@ impl TagsScreen {
             what: "orphan.tag_group_save",
             key: Some(key.clone()),
         };
+        let stamp = self
+            .groups
+            .iter()
+            .find(|g| g.id == id)
+            .and_then(TagGroup::stamp);
+        let Panel::Group(f) = &mut self.panel else {
+            return;
+        };
         if let Ok(p) = group.write(&session, label, move |s| async move {
-            s.tags().delete_group(id, key).await
+            s.tags().delete_group(id, stamp, key).await
         }) {
             f.deleting = Some(Task::Pending(p));
         }
@@ -1265,8 +1282,22 @@ impl TagsScreen {
             what: "orphan.tag_merge",
             key: Some(key.clone()),
         };
+        // Both tags as listed: their stamps go with the merge (U-291).
+        let unread = cl_api::RecordVersion::Fingerprint([0; 32]);
+        let version_of = |id| self.tag(id).map_or(unread, Tag::version);
+        let (source_v, target_v) = (version_of(source), version_of(target));
+        let Panel::Merge(m) = &mut self.panel else {
+            return;
+        };
         if let Ok(p) = group.write(&session, label, move |s| async move {
-            s.tags().merge(source, target, password.as_ref(), key).await
+            s.tags()
+                .merge(
+                    (source, &source_v),
+                    (target, &target_v),
+                    password.as_ref(),
+                    key,
+                )
+                .await
         }) {
             m.task = Some(Task::Pending(p));
         } else {

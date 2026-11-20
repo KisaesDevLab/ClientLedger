@@ -500,8 +500,13 @@ pub fn a_contact_merge_keeps_a_memorized_figure(h: &Harness) {
             .iter()
             .any(|c| amount(c) == Decimal::new(3_123_400, 4))
     );
-    h.run(s.contacts().merge(dup, kept, None, key()))
-        .expect("merge");
+    h.run(s.contacts().merge(
+        (dup, &cl_api::RecordVersion::Fingerprint([0; 32])),
+        (kept, &cl_api::RecordVersion::Fingerprint([0; 32])),
+        None,
+        key(),
+    ))
+    .expect("merge");
     let after = total_of(&saved_run().expect("after the merge"));
     assert_eq!(after, before, "the figure is kept (Q-PRA2b)");
     let row = h
@@ -540,7 +545,7 @@ pub fn a_deleted_tag_group_is_missing(h: &Harness) {
         json!([{"key": "tag", "tagGroupId": group.to_string()}]),
     );
     let saved = memorize(h, s, builder("range", None, json!([sec])));
-    h.run(s.tags().delete_group(group, key()))
+    h.run(s.tags().delete_group(group, None, key()))
         .expect("delete the group");
     let row = h
         .run(s.report_definitions().get(&saved.id))

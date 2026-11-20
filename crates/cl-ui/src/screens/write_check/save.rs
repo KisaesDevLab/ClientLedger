@@ -1479,7 +1479,13 @@ impl WriteCheckScreen {
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
             Ok(s.transactions()
-                .void(e.id, &reason, &options(password), key)
+                .void(
+                    e.id,
+                    e.txn_version.stamp().or(e.version.stamp()),
+                    &reason,
+                    &options(password),
+                    key,
+                )
                 .await?
                 .stock_warnings)
         }) {

@@ -897,6 +897,7 @@ fn template_of(l: &DemoLayout) -> Result<cl_api::DailyTemplate, ApiError> {
         is_active: l.active,
         default_tag: None,
         lines,
+        stamp: None,
     })
 }
 
@@ -973,6 +974,7 @@ fn entry_of(state: &mut DemoState, id: u32) -> Result<cl_api::DailyEntry, ApiErr
             payments: c.payments,
         },
         layout: Some(template_of(&l)?),
+        stamp: None,
     })
 }
 

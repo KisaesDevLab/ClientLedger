@@ -142,22 +142,42 @@ pub fn closed_period_needs_the_password_u47(h: &Harness) {
 
     // Contacts: the closed-period entry's line names the duplicate.
     let e = h
-        .run(s.contacts().merge(dup, kept, None, key()))
+        .run(s.contacts().merge(
+            (dup, &cl_api::RecordVersion::Fingerprint([0; 32])),
+            (kept, &cl_api::RecordVersion::Fingerprint([0; 32])),
+            None,
+            key(),
+        ))
         .expect_err("needs the password");
     needs_password(&e);
     assert_eq!(line_contact(), Some(dup), "nothing moved");
-    h.run(s.contacts().merge(dup, kept, Some(&pw), key()))
-        .expect("merge with the password");
+    h.run(s.contacts().merge(
+        (dup, &cl_api::RecordVersion::Fingerprint([0; 32])),
+        (kept, &cl_api::RecordVersion::Fingerprint([0; 32])),
+        Some(&pw),
+        key(),
+    ))
+    .expect("merge with the password");
     assert_eq!(line_contact(), Some(kept), "the closed-period line moved");
 
     // Tags: the same entry carries the tag on a line.
     let e = h
-        .run(s.tags().merge(old_tag, new_tag, None, key()))
+        .run(s.tags().merge(
+            (old_tag, &cl_api::RecordVersion::Fingerprint([0; 32])),
+            (new_tag, &cl_api::RecordVersion::Fingerprint([0; 32])),
+            None,
+            key(),
+        ))
         .expect_err("needs the password");
     needs_password(&e);
     assert!(h.run(s.tags().get(old_tag)).is_ok(), "source kept");
-    h.run(s.tags().merge(old_tag, new_tag, Some(&pw), key()))
-        .expect("merge with the password");
+    h.run(s.tags().merge(
+        (old_tag, &cl_api::RecordVersion::Fingerprint([0; 32])),
+        (new_tag, &cl_api::RecordVersion::Fingerprint([0; 32])),
+        Some(&pw),
+        key(),
+    ))
+    .expect("merge with the password");
     assert!(h.run(s.tags().get(old_tag)).is_err(), "source deleted");
     let moved = h.run(s.tags().usage(new_tag)).expect("usage");
     assert_eq!(moved.transaction_lines, 1, "the line tag moved");

@@ -817,7 +817,10 @@ async fn billable_costs_price_levels_and_client_sales() {
             .map(|_| ()),
         s.invoices().price_levels().list().await.map(|_| ()),
         s.invoices().client_sales(client()).await.map(|_| ()),
-        s.invoices().set_client_sales(client(), None, None).await,
+        s.invoices()
+            .set_client_sales(client(), None, None, None)
+            .await
+            .map(|_| ()),
     ];
     for e in refused {
         assert_eq!(e, Err(ApiError::Local(LocalValidation::Unsupported)));
@@ -905,7 +908,7 @@ async fn billable_costs_price_levels_and_client_sales() {
         Some("10")
     );
     s.invoices()
-        .set_client_sales(client(), None, SignedPercent::parse("12.5").ok())
+        .set_client_sales(client(), None, None, SignedPercent::parse("12.5").ok())
         .await
         .expect("set");
     assert_eq!(

@@ -448,7 +448,10 @@ fn step(
         // answers the walk's NEGATIVE_STOCK warnings for any document.
         "void" => {
             let doc = book.docs[st(s, "doc").expect("doc")];
-            let v = h.run(co.s.transactions().void(doc, "golden void", &opts, key()))?;
+            let v = h.run(
+                co.s.transactions()
+                    .void(doc, None, "golden void", &opts, key()),
+            )?;
             assert_eq!(v.record.status, cl_api::TxnStatus::Void);
             warnings = v.stock_warnings;
             None
@@ -459,7 +462,7 @@ fn step(
                 reason: Some("golden delete".into()),
                 closing_password: st(s, "closingPassword").map(Secret::new),
             };
-            let v = h.run(co.s.transactions().delete(doc, &o, key()))?;
+            let v = h.run(co.s.transactions().delete(doc, None, &o, key()))?;
             if let Some(want) = st(&s["expect"], "status") {
                 assert_eq!(want, "deleted");
                 assert_eq!(v.record.status, cl_api::TxnStatus::Deleted);

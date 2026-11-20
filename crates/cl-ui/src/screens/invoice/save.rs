@@ -740,7 +740,13 @@ impl InvoiceScreen {
                 },
                 move |s| async move {
                     s.transactions()
-                        .void(e.id, &reason, &options(pw), key)
+                        .void(
+                            e.id,
+                            expected.and_then(cl_api::RecordStamp::of_timestamp),
+                            &reason,
+                            &options(pw),
+                            key,
+                        )
                         .await?;
                     s.credit_memos().get(e.id).await.map(SavedDoc::CreditMemo)
                 },
@@ -756,7 +762,13 @@ impl InvoiceScreen {
                 },
                 move |s| async move {
                     s.transactions()
-                        .void(e.id, &reason, &options(pw), key)
+                        .void(
+                            e.id,
+                            expected.and_then(cl_api::RecordStamp::of_timestamp),
+                            &reason,
+                            &options(pw),
+                            key,
+                        )
                         .await?;
                     s.sales_receipts()
                         .get(e.id)

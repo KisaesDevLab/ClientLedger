@@ -198,6 +198,7 @@ pub fn closed_period_void_delete_and_batch_are_in_the_exceptions_report(h: &Harn
     );
     let voided = h.run(s.transactions().void(
         to_void.record.id,
+        None,
         "closed-period void",
         &PostingOptions {
             closed_period: Some(ClosedPeriodAuthorization::with_password(pw.clone())),
@@ -206,6 +207,7 @@ pub fn closed_period_void_delete_and_batch_are_in_the_exceptions_report(h: &Harn
     ));
     let deleted = h.run(s.transactions().delete(
         to_delete.record.id,
+        None,
         &DeleteOptions {
             reason: Some("closed-period delete".into()),
             closing_password: Some(pw.clone()),

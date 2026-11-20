@@ -127,7 +127,12 @@ async fn set_sensitive_needs_the_capability_and_puts_only_the_flag() {
     let s = session_with_caps(&server, &[]).await;
     let e = s
         .accounts()
-        .set_sensitive(id, true, IdempotencyKey::new())
+        .set_sensitive(
+            id,
+            &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+            true,
+            IdempotencyKey::new(),
+        )
         .await
         .expect_err("refused locally");
     assert!(matches!(e, ApiError::Local(_)));
@@ -148,7 +153,12 @@ async fn set_sensitive_needs_the_capability_and_puts_only_the_flag() {
     let s = session_with_caps(&server, &[Capabilities::ACCOUNT_SENSITIVE]).await;
     let a = s
         .accounts()
-        .set_sensitive(id, true, IdempotencyKey::new())
+        .set_sensitive(
+            id,
+            &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+            true,
+            IdempotencyKey::new(),
+        )
         .await
         .expect("marked");
     assert!(a.is_sensitive);
@@ -178,6 +188,7 @@ async fn a_refused_mark_comes_back_as_the_plain_validation_refusal() {
         .accounts()
         .set_sensitive(
             AccountId::parse(ACCT).expect("id"),
+            &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
             true,
             IdempotencyKey::new(),
         )

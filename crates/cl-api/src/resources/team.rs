@@ -30,6 +30,7 @@ use crate::resources::operations::{
     TEAM_TEMPLATE_PUT, TEAM_TEMPLATES, TEAM_TEMPLATES_CREATE, TEAM_UNLOCK, TEAM_USER_PATCH,
     TEAM_USER_PERMISSIONS, TEAM_USER_PERMISSIONS_PUT, TEAM_USERS,
 };
+use crate::resources::versioning::{RecordStamp, stamp_body, stamp_delete};
 use crate::session::{Session, decode, json_body};
 
 /// A permission map: engine key → `none` | `view` | `full`.
@@ -84,6 +85,9 @@ pub struct RoleTemplate {
     pub description: Option<String>,
     /// The key map.
     pub permissions: PermissionMap,
+    /// The stamp it was read at (`updatedAt`), sent with its next save or
+    /// delete (U-291; LAN mode requires it, U-292).
+    pub stamp: Option<RecordStamp>,
 }
 
 /// A user's permission row: the template and per-user overrides.
@@ -219,6 +223,8 @@ struct WireTemplate {
     description: Option<String>,
     #[serde(default)]
     permissions: PermissionMap,
+    #[serde(default)]
+    updated_at: Option<String>,
 }
 
 fn uuid_of(s: &str, what: &'static str) -> Result<Uuid, ApiError> {
@@ -234,6 +240,7 @@ impl TryFrom<WireTemplate> for RoleTemplate {
             name: w.name,
             description: w.description,
             permissions: w.permissions,
+            stamp: w.updated_at.as_deref().and_then(RecordStamp::parse),
         })
     }
 }
@@ -574,13 +581,16 @@ impl Team<'_> {
         decode::<Body>(&reply, "role template")?.template.try_into()
     }
 
-    /// Replaces a template's name and map (last write wins).
+    /// Replaces a template's name and map, if it is still at `stamp`
+    /// ([`RoleTemplate::stamp`], sent as `expectedUpdatedAt`, U-291). The
+    /// answer carries the new stamp.
     ///
     /// # Errors
-    /// `NotFound`; `Validation`; any [`ApiError`].
+    /// `NotFound`; `Validation`; `Conflict { Stale }`; any [`ApiError`].
     pub async fn update_template(
         &self,
         id: Uuid,
+        stamp: Option<RecordStamp>,
         name: &str,
         permissions: &PermissionMap,
     ) -> Result<RoleTemplate, ApiError> {
@@ -588,30 +598,41 @@ impl Team<'_> {
         struct Body {
             template: WireTemplate,
         }
+        let mut body = serde_json::to_value(TemplateBody {
+            name,
+            description: None,
+            permissions,
+        })
+        .map_err(|_| ApiError::Decode {
+            what: "request body",
+        })?;
+        stamp_body(self.0, &mut body, stamp);
         let call = Call::new(
             Method::Put,
             TEAM_TEMPLATE_PUT.route(),
             format!("/api/v1/company/permission-templates/{id}"),
         )
-        .json_body(json_body(&TemplateBody {
-            name,
-            description: None,
-            permissions,
-        })?);
+        .json_body(json_body(&body)?);
         let reply = self.0.send(&TEAM_TEMPLATE_PUT, call, None).await?;
         decode::<Body>(&reply, "role template")?.template.try_into()
     }
 
-    /// Deletes a template (its holders keep their overrides only).
+    /// Deletes a template read at `stamp` (`expectedUpdatedAt` in the body, U-291;
+    /// its holders keep their overrides only).
     ///
     /// # Errors
-    /// `NotFound`; any [`ApiError`].
-    pub async fn delete_template(&self, id: Uuid) -> Result<(), ApiError> {
-        let call = Call::new(
+    /// `NotFound`; `Conflict { Stale }`; any [`ApiError`].
+    pub async fn delete_template(
+        &self,
+        id: Uuid,
+        stamp: Option<RecordStamp>,
+    ) -> Result<(), ApiError> {
+        let mut call = Call::new(
             Method::Delete,
             TEAM_TEMPLATE_DELETE.route(),
             format!("/api/v1/company/permission-templates/{id}"),
         );
+        stamp_delete(self.0, &mut call, stamp);
         self.0
             .send(&TEAM_TEMPLATE_DELETE, call, None)
             .await

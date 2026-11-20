@@ -876,9 +876,15 @@ impl SaveFlow {
     /// What Void voids: the open record, else the one this window saved
     /// last; (id, date in the books).
     pub(crate) fn void_target(&self) -> Option<(TransactionId, CalendarDate)> {
+        self.void_record().map(|(id, date, _)| (id, date))
+    }
+
+    /// [`Self::void_target`] with the stamp it was read (or saved) at,
+    /// which the void sends back (U-291; LAN mode requires it, U-292).
+    fn void_record(&self) -> Option<(TransactionId, CalendarDate, Option<cl_api::RecordStamp>)> {
         self.editing
-            .map(|e| (e.id, e.old_date))
-            .or_else(|| self.last.map(|r| (r.id, r.date)))
+            .map(|e| (e.id, e.old_date, e.version.stamp()))
+            .or_else(|| self.last.map(|r| (r.id, r.date, r.version.stamp())))
     }
 
     /// Edit > Void Transaction: the open record (or the one saved last).
@@ -904,7 +910,7 @@ impl SaveFlow {
         closing: Option<CalendarDate>,
         password: Option<Secret>,
     ) -> bool {
-        let Some((id, date)) = self.void_target() else {
+        let Some((id, date, stamp)) = self.void_record() else {
             return false;
         };
         let reason = self.void_reason.trim().to_string();
@@ -957,7 +963,7 @@ impl SaveFlow {
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
             Ok(s.transactions()
-                .void(id, &reason, &options(password), key)
+                .void(id, stamp, &reason, &options(password), key)
                 .await?
                 .stock_warnings)
         }) {

@@ -238,6 +238,64 @@ pub fn with_expected_stamp(body: &[u8], stamp: RecordStamp) -> Vec<u8> {
     }
 }
 
+/// Whether the engine checks record stamps itself (`stale-all-v1`, U-291).
+/// Every stale-checked write sends its stamp then (LAN mode refuses one
+/// without it, 428 `STALE_REQUIRED`, U-292).
+pub(crate) fn engine_checks_stamps(session: &Session) -> bool {
+    session
+        .client()
+        .capabilities()
+        .has(crate::wire::Capabilities::STALE_ALL)
+}
+
+/// Adds `expectedUpdatedAt` to a JSON object body when the engine checks
+/// stamps and the stamp is known (U-291; the body for PUT, POST and the
+/// transaction DELETE).
+pub(crate) fn stamp_body(session: &Session, body: &mut Value, stamp: Option<RecordStamp>) {
+    if let (Some(s), true, Value::Object(map)) = (stamp, engine_checks_stamps(session), body) {
+        map.insert("expectedUpdatedAt".to_string(), Value::String(s.text()));
+    }
+}
+
+/// Gives a DELETE the JSON body `{expectedUpdatedAt}` when the engine
+/// checks stamps and the stamp is known (U-291). The body, not the query:
+/// the engine's `expectStamp` reads the body first and `DELETE
+/// /transactions/{id}` reads only the body (review S3), so the body is the
+/// one place every `expectStamp` DELETE reads. Routes whose handler parses
+/// the query instead (vendor layout templates; `version` on budgets,
+/// report definitions and templates) set their own query.
+pub(crate) fn stamp_delete(session: &Session, call: &mut Call, stamp: Option<RecordStamp>) {
+    if let (Some(s), true) = (stamp, engine_checks_stamps(session)) {
+        let body = serde_json::json!({ "expectedUpdatedAt": s.text() });
+        // A stamp is no secret, so the call's `sensitive` flag stays.
+        call.body = Some(zeroize::Zeroizing::new(
+            serde_json::to_vec(&body).unwrap_or_default(),
+        ));
+    }
+}
+
+/// Per-item stamps of a bulk write (`stamps {id: updatedAt}`, U-291): only
+/// the known ones, and only when the engine checks stamps. No known stamp
+/// sends no map: `{}` would pass LAN mode's 428 while comparing nothing,
+/// so a caller that read no stamps is refused there instead of silently
+/// unguarded.
+pub(crate) fn stamp_items(
+    session: &Session,
+    body: &mut Value,
+    stamps: impl IntoIterator<Item = (String, Option<RecordStamp>)>,
+) {
+    if !engine_checks_stamps(session) {
+        return;
+    }
+    let map: serde_json::Map<String, Value> = stamps
+        .into_iter()
+        .filter_map(|(id, s)| s.map(|s| (id, Value::String(s.text()))))
+        .collect();
+    if let (false, Value::Object(b)) = (map.is_empty(), body) {
+        b.insert("stamps".to_string(), Value::Object(map));
+    }
+}
+
 impl std::fmt::Debug for RecordVersion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

@@ -137,8 +137,10 @@ fn computed(spec: &Value) -> (String, String, Vec<String>) {
         if lan == "host" {
             host.push(format!("{method} {route}"));
         }
+        // `bulk` writes take per-item `stamps` (LAN mode requires the map,
+        // U-292), so they are listed with the stamped routes.
         if let Some(s) = o.get("x-stale").and_then(Value::as_str)
-            && s.starts_with("stale(")
+            && (s.starts_with("stale(") || s == "bulk")
         {
             stale.push(format!("{method} {route} {s}"));
         }
@@ -154,7 +156,7 @@ fn computed(spec: &Value) -> (String, String, Vec<String>) {
     };
     (
         head(
-            "cl-api operations that edit a stale-checked record (x-stale), with the stamp dialect.",
+            "cl-api operations that edit a stale-checked record (x-stale: stale(*) or bulk), with the stamp dialect.",
         ) + &stale.join("\n")
             + "\n",
         head(

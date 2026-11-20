@@ -291,10 +291,13 @@ fn bounce(h: &Harness, s: &Session, pay: TransactionId, on: CalendarDate) -> Tra
 }
 
 fn void(h: &Harness, s: &Session, id: TransactionId) {
-    h.run(
-        s.transactions()
-            .void(id, "contract: aging tie", &PostingOptions::default(), key()),
-    )
+    h.run(s.transactions().void(
+        id,
+        None,
+        "contract: aging tie",
+        &PostingOptions::default(),
+        key(),
+    ))
     .unwrap_or_else(|e| panic!("void: {e}"));
 }
 

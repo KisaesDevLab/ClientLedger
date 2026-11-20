@@ -806,7 +806,9 @@ impl Printing<'_> {
             }),
         );
         let body = json!({ "layouts": layouts });
-        let call = Call::at(Method::Put, CHECK_SETTINGS_PUT.route()).json_body(json_body(&body)?);
+        // The company row's stamp (check settings live on it; U-291).
+        let body = self.0.company_row_body(json_body(&body)?).await?;
+        let call = Call::at(Method::Put, CHECK_SETTINGS_PUT.route()).json_body(body);
         self.0.send(&CHECK_SETTINGS_PUT, call, None).await.map(drop)
     }
 

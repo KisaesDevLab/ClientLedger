@@ -298,7 +298,7 @@ impl SalesEdit {
                     }
                     Ok::<(), ApiError>(())
                 },
-                move |s| async move { s.invoices().set_client_layout(client, layout).await },
+                move |s| async move { client_write(&s, client, ClientWrite::Layout(layout)).await },
             ));
         }
         if !self.levels_dirty() {
@@ -338,7 +338,7 @@ impl SalesEdit {
                 }
                 Ok::<(), ApiError>(())
             },
-            move |s| async move { s.invoices().set_client_sales(client, level, markup).await },
+            move |s| async move { client_write(&s, client, ClientWrite::Sales(level, markup)).await },
         ));
         self.poll();
     }
@@ -654,5 +654,39 @@ mod tests {
         assert!(s.check());
         s.markup = "1000.5".into();
         assert!(!s.check());
+    }
+}
+
+/// One of the client's sales settings written to its contact.
+#[derive(Clone, Copy)]
+enum ClientWrite {
+    Layout(Option<cl_api::InvoiceLayoutId>),
+    Sales(Option<cl_api::PriceLevelId>, Option<cl_api::SignedPercent>),
+}
+
+/// Writes `w` on the contact's stamp (U-291; LAN mode requires one,
+/// U-292). These partial writes send only their own fields and run right
+/// after the contact form's save, two at a time, so the stamp is read just
+/// before each, and a 409 `STALE` is sent once more on the stamp it
+/// reports: the write changes no field anyone else edits.
+async fn client_write(
+    s: &cl_api::Session,
+    client: ContactId,
+    w: ClientWrite,
+) -> Result<(), ApiError> {
+    let send = |stamp| async move {
+        match w {
+            ClientWrite::Layout(l) => s.invoices().set_client_layout(client, stamp, l).await,
+            ClientWrite::Sales(l, m) => s.invoices().set_client_sales(client, stamp, l, m).await,
+        }
+    };
+    let stamp = s.contacts().get(client).await?.version.stamp();
+    match send(stamp).await {
+        Err(ApiError::Conflict {
+            reason: cl_api::ConflictReason::Stale,
+            current_version: Some(now),
+            ..
+        }) => send(now.stamp()).await.map(drop),
+        r => r.map(drop),
     }
 }

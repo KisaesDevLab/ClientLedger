@@ -351,16 +351,23 @@ impl UnitSets<'_> {
         decode_one(&reply.body, "unitSet", "unit set")
     }
 
-    /// Deletes a set no item or line names.
+    /// Deletes a set no item or line names, if it is still at `expected`
+    /// (its `updatedAt` as read, sent as `expectedUpdatedAt` in the body,
+    /// U-291; LAN mode requires it, U-292).
     ///
     /// # Errors
-    /// `UNIT_IN_USE`; `NotFound`; any [`ApiError`].
-    pub async fn delete(&self, id: UnitSetId) -> Result<(), ApiError> {
+    /// `UNIT_IN_USE`; `NotFound`; `Conflict { Stale }`; any [`ApiError`].
+    pub async fn delete(&self, id: UnitSetId, expected: Timestamp) -> Result<(), ApiError> {
         require(self.0, Capabilities::UNITS_OF_MEASURE)?;
-        let call = Call::new(
+        let mut call = Call::new(
             Method::Delete,
             UNIT_SET_DELETE.route(),
             id_path(UNIT_SET_DELETE.route(), id),
+        );
+        crate::resources::versioning::stamp_delete(
+            self.0,
+            &mut call,
+            crate::resources::versioning::RecordStamp::of_timestamp(expected),
         );
         self.0.send(&UNIT_SET_DELETE, call, None).await?;
         Ok(())

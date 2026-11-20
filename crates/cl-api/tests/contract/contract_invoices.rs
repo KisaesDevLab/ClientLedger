@@ -175,7 +175,7 @@ pub fn price_level_and_discount(h: &Harness) {
                 }),
         )
         .expect("level");
-    h.run(s.invoices().set_client_sales(c, Some(level.id), None))
+    h.run(s.invoices().set_client_sales(c, None, Some(level.id), None))
         .expect("client level");
     let new = NewInvoice::new(
         c,

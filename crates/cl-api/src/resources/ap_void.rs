@@ -17,7 +17,8 @@
 //! `ApiError::ClosedPeriod`. P17 WP2's `Bills::void` and
 //! `VendorCredits::void` use the same path ([`void_with`]) with the A/P
 //! options (closing-date password with `ap-closing-v1`, the stale guard
-//! with `ap-edit-v1`).
+//! with `ap-edit-v1`). Every void carries the stamp the document was read
+//! at (U-291; LAN mode refuses one without it, U-292).
 
 use cl_core::ids::TransactionId;
 use serde_json::{Value, json};
@@ -31,6 +32,7 @@ use crate::resources::operations::{
 };
 use crate::resources::reconcile::{OutcomeMatcher, Probe};
 use crate::resources::transactions::SPEC;
+use crate::resources::versioning::RecordStamp;
 use crate::session::Session;
 
 /// The A/P document voids of a session (`session.ap_voids()`).
@@ -55,10 +57,11 @@ impl ApVoids<'_> {
     pub async fn bill(
         &self,
         id: TransactionId,
+        stamp: Option<RecordStamp>,
         reason: &str,
         key: IdempotencyKey,
     ) -> Result<Vec<crate::resources::inventory::NegativeStock>, ApiError> {
-        void(self.0, &BILL_VOID, "/api/v1/bills", id, reason, key).await
+        void(self.0, &BILL_VOID, "/api/v1/bills", id, stamp, reason, key).await
     }
 
     /// Voids a vendor credit (`POST /vendor-credits/{id}/void`). A reason
@@ -71,6 +74,7 @@ impl ApVoids<'_> {
     pub async fn vendor_credit(
         &self,
         id: TransactionId,
+        stamp: Option<RecordStamp>,
         reason: &str,
         key: IdempotencyKey,
     ) -> Result<Vec<crate::resources::inventory::NegativeStock>, ApiError> {
@@ -79,6 +83,7 @@ impl ApVoids<'_> {
             &VENDOR_CREDIT_VOID,
             "/api/v1/vendor-credits",
             id,
+            stamp,
             reason,
             key,
         )
@@ -96,6 +101,7 @@ impl ApVoids<'_> {
     pub async fn bill_payment(
         &self,
         id: TransactionId,
+        stamp: Option<RecordStamp>,
         reason: &str,
         key: IdempotencyKey,
     ) -> Result<(), ApiError> {
@@ -104,6 +110,7 @@ impl ApVoids<'_> {
             &BILL_PAYMENT_VOID,
             "/api/v1/bill-payments",
             id,
+            stamp,
             reason,
             key,
         )
@@ -117,19 +124,15 @@ async fn void(
     op: &'static Operation,
     base: &str,
     id: TransactionId,
+    stamp: Option<RecordStamp>,
     reason: &str,
     key: IdempotencyKey,
 ) -> Result<Vec<crate::resources::inventory::NegativeStock>, ApiError> {
-    void_with(
-        session,
-        op,
-        base,
-        id,
-        reason,
-        &ApWriteOptions::default(),
-        key,
-    )
-    .await
+    let opts = ApWriteOptions {
+        expected_updated_at: stamp.and_then(RecordStamp::timestamp),
+        ..ApWriteOptions::default()
+    };
+    void_with(session, op, base, id, reason, &opts, key).await
 }
 
 /// A void through a document's own route with the A/P options (P17 WP2):
@@ -210,15 +213,15 @@ mod tests {
             .await;
         let s = company_session(&server);
         s.ap_voids()
-            .bill(id(), " paid twice ", IdempotencyKey::new())
+            .bill(id(), None, " paid twice ", IdempotencyKey::new())
             .await
             .expect("bill");
         s.ap_voids()
-            .vendor_credit(id(), "x", IdempotencyKey::new())
+            .vendor_credit(id(), None, "x", IdempotencyKey::new())
             .await
             .expect("credit");
         s.ap_voids()
-            .bill_payment(id(), "x", IdempotencyKey::new())
+            .bill_payment(id(), None, "x", IdempotencyKey::new())
             .await
             .expect("payment");
         let posts = requests(&server, "POST").await;
@@ -253,14 +256,14 @@ mod tests {
         let s = company_session(&server);
         let e = s
             .ap_voids()
-            .bill(id(), "  ", IdempotencyKey::new())
+            .bill(id(), None, "  ", IdempotencyKey::new())
             .await
             .expect_err("blank");
         assert_eq!(e, ApiError::Local(LocalValidation::MissingReason));
         assert!(requests(&server, "POST").await.is_empty());
         let e = s
             .ap_voids()
-            .bill(id(), "x", IdempotencyKey::new())
+            .bill(id(), None, "x", IdempotencyKey::new())
             .await
             .expect_err("paid");
         assert!(matches!(e, ApiError::Validation(_)), "{e:?}");

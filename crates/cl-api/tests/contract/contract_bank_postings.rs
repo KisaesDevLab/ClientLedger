@@ -224,6 +224,7 @@ pub fn each_kind_round_trip_update_and_void(h: &Harness) {
         let voided = h
             .run(s.transactions().void(
                 made.record.id,
+                None,
                 "entered by mistake",
                 &PostingOptions::default(),
                 key(),

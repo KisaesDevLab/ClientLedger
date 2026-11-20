@@ -211,6 +211,7 @@ pub fn grouping_clears_payments_clearing(h: &Harness) {
     // Voiding the deposit returns the payments to pending (E2).
     h.run(s.transactions().void(
         made.record.id,
+        None,
         "contract: release",
         &PostingOptions::default(),
         key(),
@@ -667,6 +668,7 @@ pub fn clearing_warning_on_create_and_edit(h: &Harness) {
     assert!(again.clearing_would_go_negative, "an edit warns");
     h.run(s.transactions().void(
         made.saved.record.id,
+        None,
         "contract: clean up",
         &PostingOptions::default(),
         key(),

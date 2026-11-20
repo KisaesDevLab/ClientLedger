@@ -225,7 +225,13 @@ async fn blank_void_reason_and_unavailable_override_send_nothing() {
     let id = TransactionId::parse(T1).expect("id");
     let e = s
         .transactions()
-        .void(id, "  ", &PostingOptions::default(), IdempotencyKey::new())
+        .void(
+            id,
+            None,
+            "  ",
+            &PostingOptions::default(),
+            IdempotencyKey::new(),
+        )
         .await
         .expect_err("reason");
     assert_eq!(e, ApiError::Local(LocalValidation::MissingReason));
@@ -363,6 +369,7 @@ async fn void_sends_the_reason_and_update_is_guarded() {
     let voided = tx
         .void(
             id,
+            None,
             " duplicate entry ",
             &PostingOptions::default(),
             IdempotencyKey::new(),
@@ -530,6 +537,7 @@ async fn void_not_applied_after_restart_is_retried_and_update_found_is_committed
         .transactions()
         .void(
             id,
+            None,
             "typo",
             &PostingOptions::default(),
             IdempotencyKey::new(),
@@ -625,6 +633,7 @@ async fn master_data_create_is_found_by_exact_name_and_delete_by_absence() {
     s.tags()
         .delete(
             TagId::parse("5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
+            &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
             IdempotencyKey::new(),
         )
         .await

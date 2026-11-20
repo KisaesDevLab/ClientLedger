@@ -87,4 +87,6 @@ mod journal_tests;
 #[cfg(test)]
 mod sensitive_tests;
 #[cfg(test)]
+mod stale_guard_tests;
+#[cfg(test)]
 pub(crate) mod testkit;

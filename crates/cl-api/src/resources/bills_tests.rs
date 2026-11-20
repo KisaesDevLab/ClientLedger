@@ -1119,7 +1119,7 @@ async fn lost_credit_create_bill_edit_and_void_are_reconciled() {
         .await
         .expect("reconciled void");
     s.ap_voids()
-        .vendor_credit(id(), "duplicate", IdempotencyKey::new())
+        .vendor_credit(id(), None, "duplicate", IdempotencyKey::new())
         .await
         .expect("reconciled credit void (same path)");
     assert_eq!(requests(&server, "POST").await.len(), 2);

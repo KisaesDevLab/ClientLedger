@@ -647,8 +647,9 @@ impl ChartScreen {
                 key: Some(key.clone()),
             };
             let pending = if account.is_active {
+                let version = account.version();
                 group.write(&session, label, move |s| async move {
-                    s.accounts().deactivate(id, key).await
+                    s.accounts().deactivate(id, &version, key).await
                 })
             } else {
                 let version = account.version();
@@ -1051,13 +1052,25 @@ impl ChartScreen {
             self.warn = Some("sensitive.not_saved");
             return;
         };
+        // The account as listed: its stamp goes with the mark (U-291; LAN
+        // mode requires it, U-292). The answer replaces the row, new stamp
+        // and all (`poll_mark`).
+        let Some(version) = self
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .map(Account::version)
+        else {
+            self.warn = Some("sensitive.not_saved");
+            return;
+        };
         let key = IdempotencyKey::new();
         let label = OrphanLabel {
             what: "orphan.account_save",
             key: Some(key.clone()),
         };
         match group.write(&session, label, move |s| async move {
-            s.accounts().set_sensitive(id, on, key).await
+            s.accounts().set_sensitive(id, &version, on, key).await
         }) {
             Ok(p) => self.mark = Some((id, Task::Pending(p))),
             Err(_) => self.warn = Some("sensitive.not_saved"),

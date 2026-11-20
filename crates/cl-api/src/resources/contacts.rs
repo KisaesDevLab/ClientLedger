@@ -496,13 +496,16 @@ impl Contacts<'_> {
     /// Deactivates a contact.
     ///
     /// # Errors
-    /// Any [`ApiError`].
+    /// `Conflict { Stale }` when it changed since `expected` was read
+    /// (`expectedUpdatedAt` in the body, U-291); any [`ApiError`].
     pub async fn deactivate(
         &self,
         id: ContactId,
+        expected: &RecordVersion,
         key: IdempotencyKey,
     ) -> Result<Versioned<Contact>, ApiError> {
-        let reply = common::deactivate(self.0, &SPEC, &id.to_string(), key).await?;
+        let reply =
+            common::deactivate(self.0, &SPEC, &id.to_string(), expected.stamp(), key).await?;
         saved_from(&reply.body, SPEC.item_key)
     }
 
@@ -523,11 +526,12 @@ impl Contacts<'_> {
     /// `Local(ClosedPeriodOverrideUnavailable)` (a password without
     /// `merge-closing-date-v1`). From the engine: `ClosedPeriod`,
     /// `ClosingPasswordRejected`, `ClosingPasswordRateLimited`, `NotFound`;
-    /// any [`ApiError`].
+    /// `Conflict { Stale }` when either contact changed since its version
+    /// was read (per-item `stamps`, U-291); any [`ApiError`].
     pub async fn merge(
         &self,
-        source: ContactId,
-        target: ContactId,
+        source: (ContactId, &RecordVersion),
+        target: (ContactId, &RecordVersion),
         closing_password: Option<&cl_core::Secret>,
         key: IdempotencyKey,
     ) -> Result<Versioned<Contact>, ApiError> {
@@ -539,18 +543,30 @@ impl Contacts<'_> {
             #[serde(skip_serializing_if = "Option::is_none")]
             closing_password: Option<&'a str>,
         }
+        let ((source, source_v), (target, target_v)) = (source, target);
         if source == target {
             return Err(ApiError::Local(
                 crate::errors::LocalValidation::InvalidValue,
             ));
         }
         let closing_password = merge_password(self.0, closing_password)?;
-        let mut call =
-            Call::at(Method::Post, CONTACTS_MERGE.route()).json_body(json_body(&Body {
-                source_id: source,
-                target_id: target,
-                closing_password,
-            })?);
+        let mut body = serde_json::to_value(Body {
+            source_id: source,
+            target_id: target,
+            closing_password,
+        })
+        .map_err(|_| ApiError::Decode {
+            what: "request body",
+        })?;
+        crate::resources::versioning::stamp_items(
+            self.0,
+            &mut body,
+            [
+                (source.to_string(), source_v.stamp()),
+                (target.to_string(), target_v.stamp()),
+            ],
+        );
+        let mut call = Call::at(Method::Post, CONTACTS_MERGE.route()).json_body(json_body(&body)?);
         call.idempotency_key = Some(key);
         let reply = self.0.send(&CONTACTS_MERGE, call, None).await?;
         saved_from(&reply.body, SPEC.item_key)
@@ -737,7 +753,11 @@ pub(crate) mod tests {
             "limit=1&offset=0"
         );
         s.contacts()
-            .deactivate(id(), IdempotencyKey::new())
+            .deactivate(
+                id(),
+                &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                IdempotencyKey::new(),
+            )
             .await
             .expect("off");
     }
@@ -786,7 +806,18 @@ pub(crate) mod tests {
         let s = session_with_caps(&server, &[]).await;
         let e = s
             .contacts()
-            .merge(other, id(), Some(&pw), IdempotencyKey::new())
+            .merge(
+                (
+                    other,
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                (
+                    id(),
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                Some(&pw),
+                IdempotencyKey::new(),
+            )
             .await
             .expect_err("gated");
         assert_eq!(
@@ -817,7 +848,18 @@ pub(crate) mod tests {
         let s = session_with_caps(&server, &[crate::wire::Capabilities::MERGE_CLOSING_DATE]).await;
         let locked = s
             .contacts()
-            .merge(other, id(), None, IdempotencyKey::new())
+            .merge(
+                (
+                    other,
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                (
+                    id(),
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                None,
+                IdempotencyKey::new(),
+            )
             .await
             .expect_err("locked");
         let ApiError::ClosedPeriod(c) = &locked else {
@@ -826,7 +868,18 @@ pub(crate) mod tests {
         assert_eq!(c.password_required, Some(true));
         let wrong = s
             .contacts()
-            .merge(other, id(), Some(&pw), IdempotencyKey::new())
+            .merge(
+                (
+                    other,
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                (
+                    id(),
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                Some(&pw),
+                IdempotencyKey::new(),
+            )
             .await
             .expect_err("wrong");
         assert_eq!(wrong, ApiError::ClosingPasswordRejected);
@@ -859,7 +912,18 @@ pub(crate) mod tests {
         let other = ContactId::parse("3a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a09").expect("id");
         let kept = s
             .contacts()
-            .merge(other, id(), None, IdempotencyKey::new())
+            .merge(
+                (
+                    other,
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                (
+                    id(),
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                None,
+                IdempotencyKey::new(),
+            )
             .await
             .expect("merge");
         assert_eq!(kept.record.id, id());
@@ -870,7 +934,18 @@ pub(crate) mod tests {
         assert!(post.get("closingPassword").is_none());
         let same = s
             .contacts()
-            .merge(id(), id(), None, IdempotencyKey::new())
+            .merge(
+                (
+                    id(),
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                (
+                    id(),
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                None,
+                IdempotencyKey::new(),
+            )
             .await
             .expect_err("self merge");
         assert!(matches!(same, ApiError::Local(_)), "{same:?}");

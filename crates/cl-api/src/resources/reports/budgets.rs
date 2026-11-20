@@ -446,17 +446,20 @@ impl Budgets<'_> {
         budget(&self.json(&BUDGET_PUT, call).await?)
     }
 
-    /// Deletes a budget and its lines.
+    /// Deletes a budget and its lines if it is still at `version`
+    /// (`?version=`; 409 `STALE_VERSION` otherwise; LAN mode requires it,
+    /// U-292).
     ///
     /// # Errors
-    /// Any [`ApiError`].
-    pub async fn delete(&self, id: &str) -> Result<(), ApiError> {
+    /// [`BudgetRefusal::Stale`]; any [`ApiError`].
+    pub async fn delete(&self, id: &str, version: u64) -> Result<(), ApiError> {
         self.require()?;
-        let call = Call::new(
+        let mut call = Call::new(
             Method::Delete,
             BUDGET_DELETE.route(),
             path(BUDGET_DELETE.route(), id),
         );
+        call.query.push(("version".into(), version.to_string()));
         self.0.send(&BUDGET_DELETE, call, None).await.map(drop)
     }
 
