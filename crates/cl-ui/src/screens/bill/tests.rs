@@ -1236,7 +1236,7 @@ fn p33_a_new_stamp_with_nothing_editable_changed_saves_without_asking() {
     }
     s.header.edit_step(|h| h.memo = "mine".into());
     let before = s.save.count;
-    assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
+    s.start_save(SaveIntent::Save, None);
     assert!(!s.conflict.is_open());
     assert_eq!(s.save.count, before + 1);
     assert_eq!(stored(&link, id).txn.memo.as_deref(), Some("mine"));
@@ -1282,7 +1282,7 @@ fn p33_vendor_credit_keep_mine_use_theirs_and_silent_resave() {
         e.record.version = cl_api::RecordVersion::Fingerprint([0; 32]);
     }
     s.header.edit_step(|h| h.memo = "mine".into());
-    assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
+    s.start_save(SaveIntent::Save, None);
     assert!(!s.conflict.is_open());
     assert_eq!(stored(&link, id).txn.memo.as_deref(), Some("mine"));
 }

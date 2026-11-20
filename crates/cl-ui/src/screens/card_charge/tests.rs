@@ -1035,7 +1035,7 @@ fn p33_a_new_stamp_with_nothing_editable_changed_saves_without_asking() {
     }
     a.header.edit_step(|h| h.memo = "mine".into());
     let before = a.flow.count;
-    assert!(a.start_save(SaveIntent::Save, None), "{}", a.state());
+    a.start_save(SaveIntent::Save, None);
     assert!(!a.conflict.is_open());
     assert_eq!(a.flow.count, before + 1);
     assert_eq!(stored_memo(&link, id).as_deref(), Some("mine"));

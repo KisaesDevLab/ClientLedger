@@ -321,7 +321,8 @@ mod tests {
             ..line.clone()
         };
         assert_eq!(expense_line(&line), expense_line(&other), "row keys never count");
-        assert_eq!(expense_line(&line)["amount"], "10.50");
+        let wire = cl_core::Money::parse_wire("10.50").expect("m").to_wire();
+        assert_eq!(expense_line(&line)["amount"], wire.as_str());
         assert_eq!(expense_line(&line)["memo"], "feed");
     }
 

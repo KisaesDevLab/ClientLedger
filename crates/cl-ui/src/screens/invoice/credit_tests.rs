@@ -692,16 +692,25 @@ fn p33_flow(kind: SalesDocKind) {
     // Keep mine: their memo, my message.
     let (_d, mut s, mut other, id) = two_windows(kind);
     other.header.edit_step(|h| h.memo = "theirs".into());
+    settle(&mut other);
     other.start_save(SaveIntent::Save, None);
+    settle(&mut other);
+    other.poll();
     assert_eq!(other.saved_count, 1, "{:?} {:?}", other.error, other.notice);
     s.header
         .edit_step(|h| h.customer_message = "Thanks".into());
+    settle(&mut s);
     s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    s.poll();
     let open = s.conflict.open.take().expect("dialog");
     let merge = open.dialog.conflict().keep_mine();
     assert!(merge.undone.is_empty());
     s.run_choice(open, ConflictChoice::KeepMine(merge));
+    settle(&mut s);
+    s.poll();
     assert!(s.error.is_none(), "{:?}", s.error);
+    assert!(!s.is_dirty(), "saved: {:?}", s.notice);
     let e = s.editing.as_ref().expect("open");
     let (memo, message) = match &e.doc {
         SavedDoc::CreditMemo(r) => (r.memo.clone(), r.customer_message.clone()),
@@ -713,7 +722,10 @@ fn p33_flow(kind: SalesDocKind) {
     assert_eq!(message.as_deref(), Some("Thanks"));
     // Use theirs: `other` meets the merge.
     other.header.edit_step(|h| h.memo = "again".into());
+    settle(&mut other);
     other.start_save(SaveIntent::Save, None);
+    settle(&mut other);
+    other.poll();
     let open = other.conflict.open.take().expect("dialog");
     other.run_choice(open, ConflictChoice::UseTheirs);
     assert_eq!(other.header.current().customer_message, "Thanks");
@@ -722,7 +734,10 @@ fn p33_flow(kind: SalesDocKind) {
     old_stamp(&mut s);
     s.header.edit_step(|h| h.memo = "mine".into());
     let before = s.saved_count;
+    settle(&mut s);
     s.start_save(SaveIntent::Save, None);
+    settle(&mut s);
+    s.poll();
     assert!(!s.conflict.is_open());
     assert_eq!(s.saved_count, before + 1, "{:?}", s.error);
 }

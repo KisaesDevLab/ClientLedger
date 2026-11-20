@@ -645,6 +645,7 @@ impl InvoiceScreen {
         };
         self.conflict.clear();
         self.conflict_job = None;
+        self.conflict_resave = None;
         self.header.load(form);
         self.grid.load(lines);
         self.editing = Some(Editing::of(v));

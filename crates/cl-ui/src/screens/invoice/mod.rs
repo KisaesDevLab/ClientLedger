@@ -384,6 +384,8 @@ pub struct InvoiceScreen {
     pub(crate) conflict_job: Option<(Job<SavedDoc>, cl_model::forms::SaveIntent)>,
     /// P33: the conflict dialog.
     pub(crate) conflict: crate::forms::conflict::ConflictFlow<SavedDoc>,
+    /// P33: a merge waiting for the credit memo's preview.
+    pub(crate) conflict_resave: Option<cl_model::forms::SaveIntent>,
     pub(crate) nav_job: Option<Job<Vec<TransactionId>>>,
     pub(crate) nav: Vec<TransactionId>,
     pub(crate) nav_at: Option<usize>,
@@ -515,6 +517,7 @@ impl InvoiceScreen {
             load_job: None,
             conflict_job: None,
             conflict: crate::forms::conflict::ConflictFlow::default(),
+            conflict_resave: None,
             nav_job: None,
             nav: Vec::new(),
             nav_at: None,
@@ -816,6 +819,7 @@ impl InvoiceScreen {
     pub(crate) fn poll(&mut self) {
         self.poll_returns();
         self.poll_conflict();
+        self.poll_resave();
         let mut lists = self.books.poll();
         if let Some(r) = engine::poll(&mut self.items_job) {
             self.items = r.unwrap_or_default();

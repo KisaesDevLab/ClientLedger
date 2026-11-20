@@ -147,7 +147,7 @@ impl InvoiceScreen {
         );
         if conflict.silent_resave() {
             self.adopt(theirs, (their_form, their_lines), mine);
-            self.start_save(intent, None);
+            self.resave(intent);
             return;
         }
         let words = Words::new(
@@ -186,6 +186,24 @@ impl InvoiceScreen {
         self.key = None;
         self.stale = false;
         self.sync_inputs();
+    }
+
+    /// Saves the merge; a credit memo waits for its preview, then saves.
+    fn resave(&mut self, intent: SaveIntent) {
+        self.start_save(intent, None);
+        if self.notice == Some("credit_memo.problem.updating") {
+            self.notice = None;
+            self.conflict_resave = Some(intent);
+        }
+    }
+
+    /// A merge waiting for the memo's preview.
+    pub(crate) fn poll_resave(&mut self) {
+        if self.preview_job.is_none()
+            && let Some(intent) = self.conflict_resave.take()
+        {
+            self.resave(intent);
+        }
     }
 
     /// Draws the open dialog and runs the owner's choice.
@@ -242,7 +260,7 @@ impl InvoiceScreen {
                     mine.1 = v.lines;
                 }
                 self.adopt(open.theirs, (tf, their_lines), mine);
-                self.start_save(open.intent, None);
+                self.resave(open.intent);
             }
         }
     }

@@ -51,6 +51,23 @@ pub(crate) struct Sides {
 }
 
 impl CardChargeScreen {
+    /// P33, after a refused save (the demo's or the engine's): someone
+    /// else saved it first: their version, then the conflict dialog (or a
+    /// silent re-save); deleted elsewhere: never saved again.
+    pub(crate) fn after_failed(&mut self) {
+        let stale = self.flow.stale_intent.take();
+        if self.flow.editing.is_none() {
+            return;
+        }
+        if let Some(intent) = stale {
+            self.flow.stale = false;
+            self.conflict_start(intent);
+        } else if matches!(self.flow.error, Some(ApiError::NotFound { .. })) {
+            self.flow.error = None;
+            self.flow.notice = Some(GONE);
+        }
+    }
+
     /// A save came back stale: read their version (the dialog follows).
     pub(crate) fn conflict_start(&mut self, intent: SaveIntent) {
         let Some(id) = self.flow.editing.map(|e| e.id) else {

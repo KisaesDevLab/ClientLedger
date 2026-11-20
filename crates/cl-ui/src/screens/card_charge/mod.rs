@@ -759,7 +759,11 @@ impl CardChargeScreen {
                 let _: SaveStart<CardForm> = self.header.begin_save(intent);
                 false
             }
-            Sent::Asked | Sent::Failed => false,
+            Sent::Failed => {
+                self.after_failed();
+                false
+            }
+            Sent::Asked => false,
         }
     }
 
@@ -849,27 +853,8 @@ impl CardChargeScreen {
             self.flow.intent = None;
             return;
         }
-        // P33: someone else saved it first: their version, then the
-        // conflict dialog (or a silent re-save).
-        if matches!(
-            e,
-            ApiError::Conflict {
-                reason: cl_api::ConflictReason::Stale,
-                ..
-            }
-        ) && self.flow.editing.is_some()
-        {
-            let intent = self.flow.intent.take().unwrap_or(SaveIntent::Save);
-            self.conflict_start(intent);
-            return;
-        }
-        // P33: deleted elsewhere: never saved again.
-        if matches!(e, ApiError::NotFound { .. }) && self.flow.editing.is_some() {
-            self.flow.intent = None;
-            self.flow.notice = Some(crate::forms::conflict::GONE);
-            return;
-        }
         self.flow.failed(&self.link, e, closing);
+        self.after_failed();
     }
 
     /// The recheck or the owner answered an unknown save (B2). Found: the
