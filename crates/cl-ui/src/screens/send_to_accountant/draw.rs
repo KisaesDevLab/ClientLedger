@@ -49,8 +49,10 @@ enum Act {
     Save,
     MakeOne,
     Copy,
+    CopyResult,
     Payroll(bool),
     OpenFolder,
+    Refresh,
     OpenRecord(Option<String>, Option<String>),
     Iif,
 }
@@ -79,14 +81,14 @@ pub(super) fn screen(s: &mut SendScreen, ui: &mut Ui) {
                     included(s, &mut cols[0], &tokens);
                     cols[0].add_space(10.0);
                     history(s, &mut cols[0], &tokens);
-                    totals(s, &mut cols[1], &tokens, true);
+                    totals(s, &mut cols[1], &tokens, true, &mut act);
                     cols[1].add_space(10.0);
                     file_card(s, &mut cols[1], &tokens, &mut act);
                 });
             } else {
                 included(s, ui, &tokens);
                 ui.add_space(10.0);
-                totals(s, ui, &tokens, false);
+                totals(s, ui, &tokens, false, &mut act);
                 ui.add_space(10.0);
                 file_card(s, ui, &tokens, &mut act);
                 ui.add_space(10.0);
@@ -100,6 +102,10 @@ pub(super) fn screen(s: &mut SendScreen, ui: &mut Ui) {
         Some(Act::Copy) => {
             crate::secret_clipboard::copy(&ctx, s.passphrase.text().to_string());
             s.message = Some("send.copied");
+            s.recorded = true;
+        }
+        Some(Act::CopyResult) => {
+            crate::secret_clipboard::copy(&ctx, s.result_pass.text().to_string());
         }
         Some(Act::Payroll(discard)) => s.answer_payroll(discard, Some(&ctx)),
         Some(Act::OpenFolder) => {
@@ -116,6 +122,7 @@ pub(super) fn screen(s: &mut SendScreen, ui: &mut Ui) {
         }
         Some(Act::OpenRecord(kind, id)) => s.open_record(kind.as_deref(), id.as_deref()),
         Some(Act::Iif) => s.open_iif(),
+        Some(Act::Refresh) => s.refresh(),
         None => {}
     }
 }
@@ -266,7 +273,7 @@ fn totals_grid(ui: &mut Ui, p: &VerificationTotals, id: &str, pairs: bool) {
         });
 }
 
-fn totals(s: &SendScreen, ui: &mut Ui, tokens: &Tokens, wide: bool) {
+fn totals(s: &SendScreen, ui: &mut Ui, tokens: &Tokens, wide: bool, act: &mut Option<Act>) {
     form::card(ui, tokens, |ui| {
         // Two pairs a row only when the card has room for them.
         let pairs = wide || ui.available_width() >= 560.0;
@@ -282,6 +289,23 @@ fn totals(s: &SendScreen, ui: &mut Ui, tokens: &Tokens, wide: bool) {
             (None, Some(p)) => {
                 ui.add(egui::Label::new(RichText::new(t("send.totals")).strong()).wrap());
                 totals_grid(ui, p, "send_totals_preview", pairs);
+                // QA-4: read again after changes in another window.
+                ui.horizontal(|ui| {
+                    let busy = s.preview_job.is_some() || s.preflight_job.is_some();
+                    if ui
+                        .add_enabled(
+                            !busy && s.task.is_none(),
+                            egui::Button::new(t("send.refresh")),
+                        )
+                        .on_hover_text(t("send.refresh.tip"))
+                        .clicked()
+                    {
+                        *act = Some(Act::Refresh);
+                    }
+                    if busy {
+                        form::hint(ui, tokens, &t("send.totals.loading"));
+                    }
+                });
             }
             (None, None) => {
                 ui.label(RichText::new(t("send.totals")).strong());
@@ -317,10 +341,24 @@ fn file_card(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<
     let running = s.task.is_some() || s.held.is_some();
     form::card(ui, tokens, |ui| {
         ui.add_enabled_ui(!running, |ui| {
-            form::field(ui, &t("send.file_name"), &mut s.file_name);
+            // QA-9: the whole width, so the default name is never cut.
+            ui.horizontal(|ui| {
+                let l = ui.add(egui::Label::new(t("send.file_name")).selectable(false));
+                ui.add_sized(
+                    [ui.available_width(), 24.0],
+                    egui::TextEdit::singleline(&mut s.file_name),
+                )
+                .labelled_by(l.id);
+            });
             ui.add_space(4.0);
-            form::password_secret(ui, &t("send.passphrase"), &mut s.passphrase);
-            form::password_secret(ui, &t("send.passphrase_again"), &mut s.again);
+            let a = form::password_secret(ui, &t("send.passphrase"), &mut s.passphrase);
+            let b = form::password_secret(ui, &t("send.passphrase_again"), &mut s.again);
+            if a.changed() || b.changed() {
+                // Typed by the owner: no longer the one Make one for me made.
+                s.generated = false;
+                s.show_generated = false;
+                s.recorded = false;
+            }
             form::hint(ui, tokens, &t("send.passphrase.hint"));
             ui.horizontal_wrapped(|ui| {
                 if ui
@@ -339,6 +377,12 @@ fn file_card(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<
                 }
                 generated(s, ui);
             });
+            // QA-2: a made passphrase must be copied or written down
+            // before Save, or nobody can open the file.
+            if s.generated {
+                ui.checkbox(&mut s.recorded, t("send.recorded"))
+                    .on_hover_text(t("send.recorded.tip"));
+            }
             if let Some(k) = s.message {
                 form::inline_note(ui, tokens, &t(k));
             }
@@ -376,9 +420,13 @@ fn file_card(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<
             form::progress_line(ui, tokens, &text);
         } else if s.ask != Ask::Payroll {
             ui.horizontal(|ui| {
-                ui.add_enabled_ui(s.supported(), |ui| {
-                    if crate::widgets::primary_button(ui, &t("send.save")).clicked() {
+                ui.add_enabled_ui(s.supported() && s.can_save_now(), |ui| {
+                    let r = crate::widgets::primary_button(ui, &t("send.save"));
+                    if r.clicked() {
                         *act = Some(Act::Save);
+                    }
+                    if !s.can_save_now() {
+                        r.on_disabled_hover_text(t("send.recorded.first"));
                     }
                 });
             });
@@ -422,34 +470,11 @@ fn result(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<Act
     let mut shown: Option<egui::Response> = None;
     if let Some(TransferError::MissingFiles(files)) = s.error.as_ref().map(TransferError::kind) {
         ui.add_space(8.0);
-        let r = form::card_tight(ui, tokens, |ui| {
-            ui.label(RichText::new(t("send.missing.title")).strong());
-            form::hint(ui, tokens, &t("send.missing.body"));
-            egui::Grid::new("send_missing")
-                .num_columns(3)
-                .show(ui, |ui| {
-                    for f in files {
-                        ui.label(
-                            f.file_name
-                                .clone()
-                                .unwrap_or_else(|| t("send.missing.unknown")),
-                        );
-                        ui.label(t(&format!("send.missing.reason.{}", f.reason)));
-                        if ui
-                            .add_enabled(
-                                f.record_id.is_some(),
-                                egui::Button::new(t("send.open_record")),
-                            )
-                            .clicked()
-                        {
-                            *act =
-                                Some(Act::OpenRecord(f.record_type.clone(), f.record_id.clone()));
-                        }
-                        ui.end_row();
-                    }
-                });
-            ui.label("")
-        });
+        let (r, ask) =
+            crate::widgets::missing_files::panel(ui, tokens, files, "send.missing.body", "send");
+        if let Some((kind, id)) = ask {
+            *act = Some(Act::OpenRecord(kind, id));
+        }
         shown = Some(r);
     }
     if let Some(o) = &s.outcome {
@@ -468,6 +493,27 @@ fn result(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<Act
                         &[("n", &count_text(o.discarded_payroll))],
                     ),
                 );
+            }
+            if !s.result_pass.is_empty() {
+                ui.add_space(4.0);
+                ui.label(RichText::new(t("send.done.passphrase")).strong());
+                ui.horizontal_wrapped(|ui| {
+                    ui.checkbox(&mut s.show_result_pass, t("send.show"))
+                        .on_hover_text(t("send.show.tip"));
+                    if ui
+                        .button(t("send.copy"))
+                        .on_hover_text(t("send.copy.tip"))
+                        .clicked()
+                    {
+                        *act = Some(Act::CopyResult);
+                    }
+                });
+                if s.show_result_pass {
+                    let l = ui.label(RichText::new(s.result_pass.text()).monospace().strong());
+                    ui.ctx().accesskit_node_builder(l.id, |node| {
+                        node.set_description(cl_automation::inspect::SECRET_MARK);
+                    });
+                }
             }
             ui.horizontal(|ui| ui.button(t("send.open_folder"))).inner
         });

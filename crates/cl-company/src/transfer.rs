@@ -198,8 +198,10 @@ impl cl_core::OwnerFacing for TransferError {
                 "error.transfer.passphrase_short",
                 "fix.transfer.passphrase_short",
             ),
+            // QA-11: say which pair (the backup passphrase may be asked
+            // on the same screen).
             TransferError::PassphraseMismatch => M::with_fix(
-                "error.company.passphrase_mismatch",
+                "error.transfer.passphrase_mismatch",
                 "fix.company.passphrase_mismatch",
             ),
             TransferError::SameAsBackupPassphrase => M::with_fix(
@@ -463,6 +465,9 @@ pub async fn make_transfer(
         .get(req.tenant_id)
         .cloned()
         .ok_or(CompanyError::UnknownCompany)?;
+    // QA-12: a folder that can't be written fails now, not after the
+    // backup and the whole export.
+    check_writable(&req.dest)?;
 
     // 2. Backup first.
     tracing::info!("transfer: backup first");
@@ -504,6 +509,36 @@ pub async fn make_transfer(
             }
         }
     })
+}
+
+/// Writes and removes `<dest>.partial` (the name the file is placed
+/// through), so a folder that is missing or can't be written is found
+/// before anything is sent (QA-12).
+fn check_writable(dest: &Path) -> Result<(), CompanyError> {
+    let probe = partial_path(dest);
+    // As placing the file does later: a missing folder is made.
+    if let Some(dir) = dest.parent() {
+        std::fs::create_dir_all(dir).map_err(CompanyError::io("check transfer folder"))?;
+    }
+    let made = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .map_err(CompanyError::io("check transfer folder"));
+    match made {
+        Ok(f) => {
+            drop(f);
+            let _ = std::fs::remove_file(&probe);
+            Ok(())
+        }
+        // A `.partial` left by an earlier run: the folder can be written.
+        Err(CompanyError::Io { source, .. })
+            if source.kind() == std::io::ErrorKind::AlreadyExists =>
+        {
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Steps 3 to 7: discard, export, check, place, record. `discarded`

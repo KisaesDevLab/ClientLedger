@@ -797,6 +797,14 @@ impl PayrollImportScreen {
         if changes.backup_passphrase {
             self.need_passphrase = false;
         }
+        // P32 QA-14: Send to My Accountant discarded every unposted
+        // import, this one included: start over and say why.
+        if changes.payroll_discarded && self.upload.is_some() && self.may_discard() {
+            // Already gone: nothing to discard again when the old state drops.
+            self.upload = None;
+            self.start_over();
+            self.file_error = Some("payroll.discarded_by_transfer");
+        }
         if changes.backup_passphrase
             && matches!(
                 self.backup_failed,

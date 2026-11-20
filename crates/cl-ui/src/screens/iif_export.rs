@@ -280,7 +280,14 @@ fn tidy(path: &std::path::Path) -> String {
 /// Plain words for a limitation.
 #[must_use]
 pub fn limitation_text(l: &Limitation) -> String {
-    let n = |k: &str, v: u64| t_with(k, &[("n", &count_text(v))]);
+    // QA-6: "1 account", not "1 accounts" (`.one` keys).
+    let n = |k: &str, v: u64| {
+        crate::i18n::t_count(
+            k,
+            usize::try_from(v).unwrap_or(usize::MAX),
+            &[("n", &count_text(v))],
+        )
+    };
     match l {
         Limitation::FallbackAccountTypes(v) => n("iif.limit.fallback", *v),
         Limitation::ItemsLeftOut(v) => n("iif.limit.items", *v),

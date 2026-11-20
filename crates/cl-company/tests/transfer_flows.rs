@@ -562,6 +562,41 @@ async fn missing_files_found_by_the_backup_first_are_listed() {
     );
 }
 
+/// QA-12: a destination that can't be written fails before the backup:
+/// nothing is sent and no backup is made.
+#[tokio::test]
+async fn an_unwritable_destination_sends_nothing() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let server = engine(&["tenant-archive-v1", "tenant-archive-transfer-v1"]).await;
+    mount_jobs(&server, dir.path(), honoured()).await;
+    let s = session(&server).await;
+    let (store, secrets) = stores(dir.path());
+    // The "folder" is a file, so nothing can be written inside it.
+    let blocker = dir.path().join("not-a-folder");
+    std::fs::write(&blocker, b"x").expect("write");
+    let mut req = request(dir.path(), true);
+    req.dest = std::path::absolute(blocker.join("Ozark.clxfer")).expect("abs");
+    let e = make_transfer(&s, &store, &secrets, &req, &silent())
+        .await
+        .expect_err("unwritable");
+    assert_eq!(
+        cl_core::OwnerFacing::owner_message(&e).key,
+        "error.company.file",
+        "{e:?}"
+    );
+    assert!(archive_posts(&server).await.is_empty(), "nothing sent");
+    assert!(
+        store
+            .load()
+            .expect("store")
+            .get(t(T1))
+            .expect("co")
+            .backups
+            .is_empty(),
+        "no backup made"
+    );
+}
+
 /// Q-P32u: 409 `TENANT_BUSY` is "busy", never queued.
 #[tokio::test]
 async fn a_busy_engine_is_busy() {

@@ -27,7 +27,7 @@ fn the_preview_shows_and_a_short_passphrase_sends_nothing() {
     s.passphrase = SecretText::from("long enough passphrase");
     s.again = SecretText::from("long enough passphrasE");
     s.save(None);
-    assert_eq!(s.state()["error"], "error.company.passphrase_mismatch");
+    assert_eq!(s.state()["error"], "error.transfer.passphrase_mismatch");
 }
 
 #[test]
@@ -38,8 +38,19 @@ fn make_one_then_save_records_a_file_and_clears_the_passphrase() {
     assert_eq!(s.passphrase.text().len(), 24);
     // The state never carries the passphrase itself.
     assert!(!s.state().to_string().contains(s.passphrase.text()));
+    // QA-2: Save waits until it is copied or written down.
+    s.save(None);
+    assert_eq!(s.state()["done"], false);
+    assert_eq!(s.message, Some("send.recorded.first"));
+    s.recorded = true;
+    let made = s.passphrase.text().to_string();
     s.save(None);
     assert_eq!(s.state()["done"], true, "{}", s.state());
+    // Shown once more in the result, hidden until Show; never in state().
+    assert_eq!(s.state()["result_passphrase"], true);
+    assert_eq!(s.state()["result_passphrase_shown"], false);
+    assert_eq!(s.result_pass.text(), made);
+    assert!(!s.state().to_string().contains(&made));
     assert_eq!(s.state()["history"], 1);
     assert_eq!(
         s.state()["passphrase_filled"],
@@ -53,6 +64,9 @@ fn make_one_then_save_records_a_file_and_clears_the_passphrase() {
         Some("clxfer")
     );
     assert_eq!(s.state()["totals_differ"], false);
+    // The next Save wipes the one kept for the result.
+    s.save(None);
+    assert_eq!(s.state()["result_passphrase"], false);
 }
 
 #[test]
@@ -149,6 +163,71 @@ fn a_made_passphrase_stays_hidden_until_show() {
     assert_eq!(s.state()["shown"], false, "a new one starts hidden");
 }
 
+/// QA-2: a typed passphrase needs no tick; a made one does, and a new
+/// one asks again.
+#[test]
+fn only_a_made_passphrase_waits_for_the_tick() {
+    let (_d, mut s) = screen();
+    fill(&mut s, "ABCD-EFGH-JKLM-NPQR-STUV");
+    assert!(s.can_save_now());
+    s.make_one();
+    assert!(!s.can_save_now());
+    s.recorded = true;
+    assert!(s.can_save_now());
+    s.make_one();
+    assert!(!s.can_save_now(), "a new passphrase asks again");
+}
+
+/// QA-4: a save in another window (the data bus) or Refresh reads the
+/// check totals again; not while a result shows.
+#[test]
+fn books_changed_elsewhere_read_the_totals_again() {
+    let (_d, mut s) = screen();
+    assert!(s.preview_job.is_none() && s.preflight_job.is_none());
+    assert!(s.command(CommandId::new("dev.transfer_demo_payroll_draft")));
+    assert_eq!(s.state()["unposted_payroll"], 1);
+    s.link.demo_state().expect("demo").transfer.payroll_drafts = 0;
+    s.link
+        .bus()
+        .publish(crate::data_bus::Change::ledger(Vec::new()));
+    s.refresh_if_changed(true);
+    s.poll();
+    assert_eq!(s.state()["unposted_payroll"], 0, "read again");
+    // The app window got the focus back.
+    s.link.demo_state().expect("demo").transfer.payroll_drafts = 2;
+    s.refresh_if_changed(false);
+    s.refresh_if_changed(true);
+    s.poll();
+    assert_eq!(s.state()["unposted_payroll"], 2);
+    // Refresh, and nothing while a result shows.
+    fill(&mut s, "ABCD-EFGH-JKLM-NPQR-STUV");
+    s.save(None);
+    s.answer_payroll(true, None);
+    assert_eq!(s.state()["done"], true, "{}", s.state());
+    s.poll();
+    s.link.demo_state().expect("demo").transfer.payroll_drafts = 4;
+    s.refresh();
+    s.poll();
+    assert_ne!(
+        s.state()["unposted_payroll"],
+        4,
+        "not while the result shows"
+    );
+}
+
+/// QA-14: discarding the waiting payroll imports tells other windows.
+#[test]
+fn a_discard_is_announced_on_the_data_bus() {
+    let (_d, mut s) = screen();
+    let mut other = s.link.bus().subscribe();
+    assert!(s.command(CommandId::new("dev.transfer_demo_payroll_draft")));
+    fill(&mut s, "ABCD-EFGH-JKLM-NPQR-STUV");
+    s.save(None);
+    s.answer_payroll(true, None);
+    assert_eq!(s.state()["done"], true);
+    assert!(s.link.bus().take(&mut other).payroll_discarded);
+}
+
 #[test]
 fn close_restore_and_delete_wait_for_a_running_transfer() {
     // The counter is shared by every window (and test): only "running
@@ -168,6 +247,14 @@ fn close_restore_and_delete_wait_for_a_running_transfer() {
         "send.missing.reason.FILE_SIZE_MISMATCH",
         "send.missing.reason.EXTERNAL_FILE",
         "error.transfer.missing_files",
+        "error.backup.missing_files",
+        "fix.backup.missing_files",
+        "backup.missing.body",
+        "send.recorded",
+        "send.recorded.first",
+        "send.done.passphrase",
+        "send.refresh",
+        "payroll.discarded_by_transfer",
         "picker.title.save_transfer",
     ] {
         assert!(crate::i18n::has(k), "{k}");

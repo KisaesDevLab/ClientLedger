@@ -161,6 +161,13 @@ pub struct SendScreen {
     /// The generated passphrase is shown (Q-P32w: hidden by default; Copy
     /// covers sharing).
     show_generated: bool,
+    /// QA-2: the owner copied the made passphrase or ticked "I've written
+    /// it down"; Save waits for it.
+    recorded: bool,
+    /// QA-2: the made passphrase, kept for the result panel only (hidden
+    /// until Show, wiped on the next Save and when the window closes).
+    result_pass: SecretText,
+    show_result_pass: bool,
     /// The result or the missing-file list just arrived: scroll to it.
     scroll_result: bool,
     /// A demo transfer held open by `dev.transfer_demo_hold` (scenarios
@@ -178,6 +185,11 @@ pub struct SendScreen {
     error: Option<TransferError>,
     message: Option<&'static str>,
     history: Vec<TransferRecord>,
+    /// QA-4: saves in other windows (the data bus) read the totals again.
+    bus: crate::data_bus::Subscription,
+    /// The app window had the focus last frame (QA-4: regaining it reads
+    /// the totals again).
+    focused: bool,
 }
 
 fn api_of(e: TransferError) -> ApiError {
@@ -198,6 +210,7 @@ impl SendScreen {
     ) -> SendScreen {
         let group = link.group().and_then(Result::ok);
         let backup_needed = crate::widgets::passphrase::needed(&link);
+        let bus = link.bus().subscribe();
         let file_name = suggested_file_name(
             tenant.as_ref().map_or("Company", |(_, n)| n.as_str()),
             today,
@@ -217,6 +230,9 @@ impl SendScreen {
             again: SecretText::default(),
             generated: false,
             show_generated: false,
+            recorded: false,
+            result_pass: SecretText::default(),
+            show_result_pass: false,
             scroll_result: false,
             held: None,
             hold_next: false,
@@ -231,6 +247,8 @@ impl SendScreen {
             error: None,
             message: None,
             history: Vec::new(),
+            bus,
+            focused: true,
         };
         s.reload();
         s
@@ -288,7 +306,10 @@ impl SendScreen {
     fn poll(&mut self) {
         if let Some(r) = engine::poll(&mut self.preview_job) {
             match r {
-                Ok(p) => self.preview = Some(p),
+                Ok(p) => {
+                    self.preview = Some(p);
+                    self.preview_error = None;
+                }
                 Err(e) => self.preview_error = Some(e),
             }
         }
@@ -316,8 +337,16 @@ impl SendScreen {
             match r {
                 Ok(o) => {
                     tracing::info!("transfer file saved");
+                    if o.discarded_payroll > 0 {
+                        self.announce_discard();
+                    }
                     self.outcome = Some(o);
                     self.scroll_result = true;
+                    // QA-2: a made passphrase is shown once more (hidden
+                    // until Show) so it can still be given to the accountant.
+                    if self.generated {
+                        self.result_pass = SecretText::from(self.passphrase.text());
+                    }
                     self.clear_secrets();
                     self.payroll_agreed = false;
                     self.load_history();
@@ -331,10 +360,47 @@ impl SendScreen {
                 }
                 Err(e) => {
                     tracing::warn!(detail = %cl_core::OwnerFacing::scrubbed_detail(&e), "transfer refused");
+                    if e.discarded().is_some() {
+                        self.announce_discard();
+                    }
                     self.scroll_result = matches!(e.kind(), TransferError::MissingFiles(_));
                     self.error = Some(e);
                 }
             }
+        }
+    }
+
+    /// QA-14: the unposted payroll imports are gone; an open Import
+    /// Payroll on one of them starts over.
+    fn announce_discard(&self) {
+        self.link
+            .bus()
+            .publish_from(&self.bus, crate::data_bus::Change::PayrollDiscarded);
+    }
+
+    /// QA-4: reads the check totals, What's included and Sent before
+    /// again. Not while a transfer runs or its result shows: the "books
+    /// changed" note compares the file with the preview shown before Save.
+    fn refresh(&mut self) {
+        if self.task.is_some()
+            || self.held.is_some()
+            || self.outcome.is_some()
+            || self.preview_job.is_some()
+            || self.preflight_job.is_some()
+        {
+            return;
+        }
+        self.reload();
+    }
+
+    /// QA-4: books changed in another window, or the app window got the
+    /// focus back: read again.
+    fn refresh_if_changed(&mut self, focused: bool) {
+        let changes = self.link.bus().take(&mut self.bus);
+        let back = focused && !self.focused;
+        self.focused = focused;
+        if back || changes.ledger_any() || changes.lists() || changes.items || changes.bank_feed {
+            self.refresh();
         }
     }
 
@@ -343,6 +409,19 @@ impl SendScreen {
         self.again.clear();
         self.generated = false;
         self.show_generated = false;
+        self.recorded = false;
+    }
+
+    fn clear_result_pass(&mut self) {
+        self.result_pass.clear();
+        self.result_pass = SecretText::default();
+        self.show_result_pass = false;
+    }
+
+    /// QA-2: a passphrase from Make one for me must be copied or written
+    /// down first.
+    fn can_save_now(&self) -> bool {
+        !self.generated || self.recorded
     }
 
     /// "Make one for me": both boxes filled.
@@ -353,6 +432,7 @@ impl SendScreen {
                 self.again = SecretText::from(p.expose());
                 self.generated = true;
                 self.show_generated = false;
+                self.recorded = false;
                 self.error = None;
             }
             Err(e) => self.error = Some(e),
@@ -362,10 +442,15 @@ impl SendScreen {
     /// Save transfer file…: the checks, then the questions, then the Save
     /// dialog.
     fn save(&mut self, ctx: Option<&eframe::egui::Context>) {
+        if self.task.is_some() {
+            return;
+        }
         self.error = None;
         self.message = None;
         self.outcome = None;
-        if self.task.is_some() {
+        self.clear_result_pass();
+        if !self.can_save_now() {
+            self.message = Some("send.recorded.first");
             return;
         }
         if !self.supported() {
@@ -397,7 +482,7 @@ impl SendScreen {
             self.save_rx = Some(crate::widgets::file_picker::save_file_as(
                 ctx,
                 crate::widgets::file_picker::PickUse::SaveTransfer,
-                Some(&self.link.backup_dir),
+                Some(&self.save_dir()),
                 &self.file_name,
                 ("picker.filter.clxfer", cl_company::transfer::EXTENSION),
             ));
@@ -407,6 +492,25 @@ impl SendScreen {
             self.ask = Ask::None;
             self.start(path);
         }
+    }
+
+    /// QA-10: where the Save dialog opens: the folder of the last transfer
+    /// file, else Documents, else the backup folder (transfer files kept
+    /// apart from backups, which retention prunes).
+    fn save_dir(&self) -> PathBuf {
+        let last = self
+            .history
+            .iter()
+            .max_by_key(|r| r.created_at)
+            .and_then(|r| r.path.parent().map(std::path::Path::to_path_buf))
+            .filter(|d| d.is_dir());
+        let documents = || {
+            std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+                .map(|h| PathBuf::from(h).join("Documents"))
+                .filter(|d| d.is_dir())
+        };
+        last.or_else(documents)
+            .unwrap_or_else(|| self.link.backup_dir.clone())
     }
 
     fn answer_payroll(&mut self, discard: bool, ctx: Option<&eframe::egui::Context>) {
@@ -490,19 +594,7 @@ impl SendScreen {
     }
 
     fn open_record(&self, record_type: Option<&str>, record_id: Option<&str>) {
-        let (Some(kind), Some(id)) = (record_type, record_id) else {
-            return;
-        };
-        let form = crate::screens::reports::drill::form_of(kind).or(match kind {
-            "expense" => Some(crate::screens::write_check::KIND),
-            _ => None,
-        });
-        if let (Some(form), Ok(id)) = (form, cl_core::ids::TransactionId::parse(id)) {
-            self.link.push(crate::company::CompanyEvent::OpenRecord(
-                CommandId::new(form),
-                id,
-            ));
-        }
+        crate::widgets::missing_files::open_record(&self.link, record_type, record_id);
     }
 
     fn open_iif(&self) {
@@ -523,6 +615,7 @@ impl Drop for SendScreen {
     fn drop(&mut self) {
         // Q-P32f: the buffers are wiped when the window closes.
         self.clear_secrets();
+        self.clear_result_pass();
     }
 }
 
@@ -540,6 +633,8 @@ impl Screen for SendScreen {
     }
 
     fn ui(&mut self, ui: &mut Ui) {
+        let focused = ui.ctx().input(|i| i.focused);
+        self.refresh_if_changed(focused);
         self.poll();
         if self.preview_job.is_some()
             || self.preflight_job.is_some()
@@ -618,6 +713,9 @@ impl Screen for SendScreen {
             "passphrase_filled": !self.passphrase.is_empty(),
             "generated": self.generated,
             "shown": self.show_generated,
+            "recorded": self.recorded,
+            "result_passphrase": !self.result_pass.is_empty(),
+            "result_passphrase_shown": self.show_result_pass,
             "running": self.task.is_some() || self.held.is_some(),
             "done": self.outcome.is_some(),
             "totals_differ": self.totals_differ(),

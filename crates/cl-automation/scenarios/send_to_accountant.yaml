@@ -24,6 +24,10 @@ steps:
   - assert_exists: {label_contains: "Hidden accounts"}
   - assert_exists: {label_contains: "Never passwords"}
   - assert_exists: {role: button, label: "Save transfer file…"}
+  # QA-4: Refresh reads the check totals again.
+  - click: {role: button, label: Refresh}
+  - wait: {ms: 300}
+  - assert_state: {key: screen.preview_loaded, equals: true}
   - assert_no_clipping: {}
   - screenshot: send-to-accountant
   # One column at the minimum window and at 200% (B1).
@@ -74,6 +78,14 @@ steps:
   - click: {role: check_box, label: Show}
   - wait: {ms: 100}
   - assert_state: {key: screen.shown, equals: false}
+  # QA-2: Save waits until the made passphrase is copied or written down.
+  - assert_disabled: {role: button, label: "Save transfer file…"}
+  - assert_state: {key: screen.recorded, equals: false}
+  - click: {role: check_box, label: "I've written it down or copied it"}
+  - wait: {ms: 100}
+  - assert_state: {key: screen.recorded, equals: true}
+  - assert_enabled: {role: button, label: "Save transfer file…"}
+  - screenshot: passphrase-recorded
   # No backup passphrase yet: it is asked here, before anything is sent.
   - command: dev.transfer_demo_ask_backup_passphrase
   - wait: {ms: 200}
@@ -113,11 +125,21 @@ steps:
   - assert_exists: {role: button, label: Open folder}
   - assert_exists: {label: Transfer file, index: 0}
   - assert_state: {key: screen.passphrase_filled, equals: false}
+  # QA-2: the made passphrase is shown once more, hidden until Show.
+  - assert_state: {key: screen.result_passphrase, equals: true}
+  - assert_state: {key: screen.result_passphrase_shown, equals: false}
+  - assert_exists: {label_contains: "Give your accountant this passphrase"}
+  - click: {role: check_box, label: Show}
+  - wait: {ms: 100}
+  - assert_state: {key: screen.result_passphrase_shown, equals: true}
+  - click: {role: check_box, label: Show}
+  - wait: {ms: 100}
   - assert_no_clipping: {}
   - screenshot: saved
   # A transfer in flight blocks every way out of the company (Q-P32u).
   - command: dev.transfer_demo_hold
   - click: {role: button, label: Make one for me}
+  - click: {role: check_box, label: "I've written it down or copied it"}
   - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/send_to_accountant/held-{theme}.clxfer"]}
   - click: {role: button, label: "Save transfer file…"}
   - wait: {ms: 300}
@@ -145,6 +167,7 @@ steps:
   # Missing files are all listed with Open record, in view.
   - command: dev.transfer_demo_missing_files
   - click: {role: button, label: Make one for me}
+  - click: {role: check_box, label: "I've written it down or copied it"}
   - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/send_to_accountant/missing-{theme}.clxfer"]}
   - click: {role: button, label: "Save transfer file…"}
   - wait: {ms: 400}
@@ -157,6 +180,7 @@ steps:
   # Another backup or restore is running.
   - command: dev.transfer_demo_busy
   - click: {role: button, label: Make one for me}
+  - click: {role: check_box, label: "I've written it down or copied it"}
   - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/send_to_accountant/busy-{theme}.clxfer"]}
   - click: {role: button, label: "Save transfer file…"}
   - wait: {ms: 400}

@@ -659,6 +659,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("fix.company.not_a_transfer", "Ask for a transfer file (it ends in .clxfer). A backup can only be restored on the desktop."),
     ("error.company.busy", "A backup, transfer or restore is already running."),
     ("error.transfer.unsupported", "This version can't make transfer files yet."),
+    ("error.transfer.passphrase_mismatch", "The two transfer passphrase entries are not the same."),
     ("error.transfer.passphrase_short", "The transfer passphrase needs at least 12 characters."),
     ("fix.transfer.passphrase_short", "Pick a longer one, or use Make one for me."),
     ("error.transfer.same_as_backup", "Use a different passphrase from your backup passphrase."),
