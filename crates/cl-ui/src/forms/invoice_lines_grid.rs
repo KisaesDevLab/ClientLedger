@@ -692,6 +692,13 @@ impl InvoiceGrid {
         self.form.dirty()
     }
 
+    /// The lines as loaded or last saved (P33: the conflict dialog's "as
+    /// opened").
+    #[must_use]
+    pub fn original(&self) -> &InvoiceForm {
+        self.form.form().original()
+    }
+
     /// A save starts (edits wait until it ends).
     pub fn begin_save(&mut self, intent: cl_model::forms::SaveIntent) -> bool {
         let lists = self.row_lookups();

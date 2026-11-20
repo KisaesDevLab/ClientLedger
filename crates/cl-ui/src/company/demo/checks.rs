@@ -412,6 +412,32 @@ pub fn update(
     save(state, d, Some((id, old)), password)
 }
 
+/// `PUT /checks/{id}` with the check's version (`expectedUpdatedAt`, P33):
+/// someone else's save since `expected` is refused as stale, nothing sent.
+///
+/// # Errors
+/// `Conflict { Stale }`; as [`update`].
+pub fn update_guarded(
+    state: &mut DemoState,
+    id: TransactionId,
+    expected: &RecordVersion,
+    d: &CheckDraft,
+    password: Option<&Secret>,
+    printed: Option<cl_api::PrintedCheckChange>,
+) -> Result<TransactionId, ApiError> {
+    let now = get(state, id).ok_or(ApiError::NotFound { code: None })?.version;
+    if &now != expected {
+        return Err(ApiError::Conflict {
+            reason: ConflictReason::Stale,
+            current_version: Some(now),
+            code: None,
+            message: UserText::default(),
+            details: cl_api::ConflictDetails::default(),
+        });
+    }
+    update(state, id, d, password, printed)
+}
+
 /// `PUT /transactions/{id}` for a check (an engine without
 /// `check-edit-v1`): guarded by the plain transaction's version (nothing
 /// is sent when it changed), and the check's own fields (number, print

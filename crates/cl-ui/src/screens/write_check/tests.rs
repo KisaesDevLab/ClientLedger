@@ -1529,6 +1529,10 @@ fn without_check_edit_an_edit_goes_through_the_ledger_record_and_saves_again() {
     s.header.edit_step(|h| h.memo = "mine".into());
     let before = writes(&link);
     assert!(!s.start_save(SaveIntent::Save, None));
+    // P33: both changed the memo: the conflict dialog asks; Back keeps mine.
+    assert_eq!(s.state()["save"]["conflict"]["fields"], 1);
+    let open = s.conflict.open.take().expect("dialog");
+    s.run_choice(open, crate::screens::conflict_dialog::ConflictChoice::Back);
     assert_eq!(s.state()["save"]["stale"], true);
     assert_eq!(writes(&link), before, "nothing sent");
 }
@@ -2465,4 +2469,167 @@ fn a_matched_checks_amount_or_bank_change_says_the_line_waits() {
     let savings = account(&s, "1020");
     s.header.edit_step(|h| h.bank = Some(savings));
     assert_eq!(s.state()["feed_notice"], true, "another bank account");
+}
+
+// --- P33: someone else saved the check first --------------------------------
+
+use crate::screens::conflict_dialog::ConflictChoice;
+
+/// A 10.00 check on 5110, saved, then open here and in `other`.
+fn two_windows(link: &Arc<CompanyLink>) -> (WriteCheckScreen, WriteCheckScreen, TransactionId) {
+    let mut s = screen(link);
+    fill(&mut s, "10.00", &[("5110", "10.00")]);
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    s.navigate(true);
+    s.poll();
+    let id = s.editing.as_ref().map(|e| e.id).expect("saved");
+    let mut other = screen(link);
+    assert!(other.open_record(id));
+    other.poll();
+    assert!(other.editing.is_some());
+    (s, other, id)
+}
+
+fn stored(link: &Arc<CompanyLink>, id: TransactionId) -> cl_api::CheckRecord {
+    let mut demo = link.demo_state().expect("demo");
+    crate::company::demo::checks::get(&mut demo, id)
+        .expect("check")
+        .record
+}
+
+/// Each debit line's amount, in order.
+fn debits(r: &cl_api::CheckRecord) -> Vec<Money> {
+    r.txn
+        .lines
+        .iter()
+        .filter(|l| l.debit.is_positive())
+        .map(|l| l.debit)
+        .collect()
+}
+
+/// The check's lines are `lines` and its amount their total.
+fn set_lines(s: &mut WriteCheckScreen, amount: &str, lines: &[(&str, &str)]) {
+    let seeds: Vec<FormLine> = lines
+        .iter()
+        .map(|(a, m)| {
+            let account = account(s, a);
+            let key = s.lines.form_mut().adapter_mut().keys.next_key();
+            FormLine {
+                account: Some(account),
+                amount: Some(money(m)),
+                ..FormLine::blank(key)
+            }
+        })
+        .collect();
+    let amount = money(amount);
+    s.header.edit_step(|h| h.amount = Some(amount));
+    s.lines.form_mut().edit_step(|v| v.lines = seeds);
+    s.sync_inputs();
+}
+
+#[test]
+fn p33_keep_mine_takes_their_memo_and_keeps_my_address() {
+    let (_d, link) = link();
+    let (mut s, mut other, id) = two_windows(&link);
+    other.header.edit_step(|h| h.memo = "theirs".into());
+    assert!(other.start_save(SaveIntent::Save, None));
+    s.header.edit_step(|h| h.address = "1 Mine Rd".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let st = s.state();
+    assert_eq!(st["save"]["conflict"]["fields"], 2, "{st}");
+    assert_eq!(st["save"]["conflict"]["undoes"], 0);
+    let open = s.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    assert_eq!(s.state()["save"]["error"], false);
+    let r = stored(&link, id);
+    assert_eq!(r.txn.memo.as_deref(), Some("theirs"));
+    assert_eq!(r.payee_address.as_deref(), Some("1 Mine Rd"));
+    assert!(!s.is_dirty());
+}
+
+#[test]
+fn p33_keep_mine_takes_their_lines_whole_with_their_amount() {
+    let (_d, link) = link();
+    let (mut s, mut other, id) = two_windows(&link);
+    set_lines(&mut other, "12.00", &[("5110", "8.00"), ("5110", "4.00")]);
+    assert!(other.start_save(SaveIntent::Save, None), "{:?}", other.save.problems);
+    s.header.edit_step(|h| h.memo = "mine".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(!merge.lines_from_mine);
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    let r = stored(&link, id);
+    assert_eq!(r.txn.memo.as_deref(), Some("mine"));
+    assert_eq!(debits(&r), vec![money("8.00"), money("4.00")]);
+    assert_eq!(bank_credit(&r), vec![money("12.00")], "the amount came with them");
+}
+
+#[test]
+fn p33_my_re_split_lines_keep_my_amount_so_the_check_adds_up() {
+    let (_d, link) = link();
+    let (mut s, mut other, id) = two_windows(&link);
+    set_lines(&mut other, "12.00", &[("5110", "12.00")]);
+    assert!(other.start_save(SaveIntent::Save, None));
+    // Mine: the same 10.00, split in two.
+    set_lines(&mut s, "10.00", &[("5110", "7.00"), ("5110", "3.00")]);
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(merge.lines_from_mine);
+    assert_eq!(merge.undone.len(), 1, "their lines are undone, and said so");
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    assert_eq!(s.state()["save"]["problems"], 0);
+    let r = stored(&link, id);
+    assert_eq!(debits(&r), vec![money("7.00"), money("3.00")]);
+    assert_eq!(bank_credit(&r), vec![money("10.00")]);
+}
+
+#[test]
+fn p33_use_theirs_shows_their_check_and_back_keeps_mine() {
+    let (_d, link) = link();
+    let (mut s, mut other, id) = two_windows(&link);
+    other.header.edit_step(|h| h.memo = "theirs".into());
+    assert!(other.start_save(SaveIntent::Save, None));
+    s.header.edit_step(|h| h.memo = "mine".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    // Esc is Back: my memo stays; saving again asks again.
+    assert!(s.form_command(CommandId::new("form.revert")));
+    assert_eq!(s.state()["save"]["stale"], true);
+    assert_eq!(s.header.current().memo, "mine");
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.open.take().expect("dialog again");
+    s.run_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(s.header.current().memo, "theirs");
+    assert!(!s.is_dirty());
+    assert_eq!(stored(&link, id).txn.memo.as_deref(), Some("theirs"));
+}
+
+#[test]
+fn p33_a_new_stamp_with_nothing_editable_changed_saves_without_asking() {
+    let (_d, link) = link();
+    let (mut s, _other, id) = two_windows(&link);
+    // Their save moved the stamp and changed nothing this form shows.
+    if let Some(e) = s.editing.as_mut() {
+        e.version = RecordVersion::Fingerprint([0; 32]);
+    }
+    s.header.edit_step(|h| h.memo = "mine".into());
+    let before = s.save.count;
+    assert!(s.start_save(SaveIntent::Save, None) || s.save.count > before);
+    assert!(!s.conflict.is_open());
+    assert_eq!(s.save.count, before + 1);
+    assert_eq!(stored(&link, id).txn.memo.as_deref(), Some("mine"));
+}
+
+#[test]
+fn p33_a_check_deleted_elsewhere_is_never_saved_again() {
+    let (_d, link) = link();
+    let (mut s, _other, _id) = two_windows(&link);
+    s.conflict_read(
+        Err(ApiError::NotFound { code: None }),
+        SaveIntent::Save,
+    );
+    assert_eq!(s.save.notice, Some(crate::forms::conflict::GONE));
+    assert!(!s.conflict.is_open());
 }

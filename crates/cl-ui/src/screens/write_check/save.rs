@@ -689,7 +689,9 @@ impl WriteCheckScreen {
             .ok_or(ApiError::Local(LocalValidation::InvalidValue))?;
         let id = match existing {
             None => checks::create(&mut demo, draft, password)?,
-            Some((id, _)) if check_edit => checks::update(&mut demo, id, draft, password, printed)?,
+            Some((id, version)) if check_edit => {
+                checks::update_guarded(&mut demo, id, &version, draft, password, printed)?
+            }
             Some((id, version)) => {
                 checks::update_expense(&mut demo, id, &version, draft, password)?
             }
@@ -714,6 +716,7 @@ impl WriteCheckScreen {
     /// Polls the save, the record being read, the checks list, Void and
     /// History.
     pub(crate) fn poll_save(&mut self) {
+        self.poll_conflict();
         if let Some(r) = self.save.task.as_mut().and_then(Task::try_take) {
             self.save.task = None;
             match r {
@@ -883,6 +886,7 @@ impl WriteCheckScreen {
         self.items.tab = crate::forms::items_tab::LinesTab::Expenses;
         self.save.inventory = None;
         self.editing = None;
+        self.conflict.clear();
         self.template.forget();
         self.nav.at = None;
         self.void = super::VoidPrompt::default();
@@ -960,10 +964,20 @@ impl WriteCheckScreen {
             return;
         }
         match &e {
+            // P33: someone else saved it first: their version, then the
+            // conflict dialog (or a silent re-save).
+            ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                ..
+            } if self.editing.is_some() => self.conflict_start(intent),
             ApiError::Conflict {
                 reason: ConflictReason::Stale,
                 ..
             } => self.save.stale = true,
+            // P33: deleted elsewhere: never saved again.
+            ApiError::NotFound { .. } if self.editing.is_some() => {
+                self.save.notice = Some(crate::forms::conflict::GONE);
+            }
             // A line already billed to a customer can't change.
             _ if is_line_billed(&e) => self.save.notice = Some("check.line_billed"),
             // Only the engine's code-less 409 is a used check number.
@@ -1321,23 +1335,8 @@ impl WriteCheckScreen {
         let lists = Arc::clone(&self.lists);
         let (form, lines, items, exact) =
             form_of(r, bank, &mut self.lines.form_mut().adapter_mut().keys);
-        // Line customers the engine can't take yet (Q-P13x): changing the
-        // check would drop them, so it is shown as it is.
-        let line_customers = !self.line_billable()
-            && r.txn
-                .lines
-                .iter()
-                .any(|l| l.contact_id.is_some() || l.is_billable);
-        let read_only_note =
-            if r.txn.status == TxnStatus::Void || r.txn.txn_type == TxnType::BillPayment {
-                Some("check.read_only")
-            } else if !exact {
-                Some("check.read_only.shape")
-            } else if line_customers {
-                Some("check.read_only.line_customers")
-            } else {
-                None
-            };
+        let read_only_note = self.read_only_note_of(r, exact);
+        self.conflict.clear();
         self.header.load(form);
         self.lines.load(lines, &*lists);
         let has_items = items.used().next().is_some();
@@ -1377,6 +1376,27 @@ impl WriteCheckScreen {
         self.reset_suggestions();
         self.load_attachments();
         self.sync_inputs();
+    }
+
+    /// Why a saved check is shown read-only (i18n key), or `None` when the
+    /// form can change it. `exact`: [`form_of`] shows it exactly.
+    pub(crate) fn read_only_note_of(&self, r: &CheckRecord, exact: bool) -> Option<&'static str> {
+        // Line customers the engine can't take yet (Q-P13x): changing the
+        // check would drop them, so it is shown as it is.
+        let line_customers = !self.line_billable()
+            && r.txn
+                .lines
+                .iter()
+                .any(|l| l.contact_id.is_some() || l.is_billable);
+        if r.txn.status == TxnStatus::Void || r.txn.txn_type == TxnType::BillPayment {
+            Some("check.read_only")
+        } else if !exact {
+            Some("check.read_only.shape")
+        } else if line_customers {
+            Some("check.read_only.line_customers")
+        } else {
+            None
+        }
     }
 
     /// The edited check was changed elsewhere: read it again.
