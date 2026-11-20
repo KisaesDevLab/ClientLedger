@@ -630,6 +630,28 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
     );
     assert_eq!(debits(&last.record), m("25.00"), "B's amount kept");
 
+    // --- 428 STALE_REQUIRED (U-292): a save without its stamp is refused
+    // before any handler runs (a client bug; nothing changes) -------------
+    let read = a.run(sa.transactions().get(id)).expect("read");
+    let RecordVersion::Stamped { fingerprint, .. } = read.version else {
+        panic!("a LAN read carries the stamp: {:?}", read.version);
+    };
+    let e = a
+        .run(sa.transactions().update_journal_entry(
+            id,
+            &RecordVersion::Fingerprint(fingerprint),
+            &je2(on(), &a_memo, supplies, cash, "99.00"),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect_err("a save without its stamp");
+    assert!(
+        matches!(e, ApiError::Lan(LanRefusal::StaleRequired)),
+        "428 STALE_REQUIRED: {e:?}"
+    );
+    let same = a.run(sa.transactions().get(id)).expect("read");
+    assert_eq!(debits(&same.record), m("25.00"), "nothing changed");
+
     // --- Engine restart: reconnects, data intact (AC2) -------------------
     let before = a.generation().expect("generation");
     let pid = host.sup().status().engine_pid.expect("engine pid");
@@ -673,6 +695,12 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
     host.sup()
         .wait_ready(Duration::from_mins(3))
         .expect("host ready again");
+    // As after a file-level restore: clear any restored hold before the
+    // proxy reopens (U-293, launch token). None is held here.
+    assert_eq!(
+        host.sup().maintenance_reset().expect("maintenance reset"),
+        0
+    );
     host.start_proxy();
     b.wait_connected("workstation B after the host restart");
     let sb2 = b.sign_in(&host.password);

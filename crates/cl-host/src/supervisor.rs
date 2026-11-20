@@ -589,6 +589,17 @@ impl Supervisor {
         Ok(desktop::info(port, &token)?)
     }
 
+    /// Clears a maintenance hold restored with the database (U-293); call
+    /// after any file-level restore, before the LAN proxy reopens.
+    ///
+    /// # Errors
+    /// [`HostError::NotRunning`] while the engine is down;
+    /// [`HostError::Desktop`] otherwise.
+    pub fn maintenance_reset(&self) -> Result<u64> {
+        let (port, token) = self.checked_engine()?;
+        Ok(desktop::maintenance_reset(port, &token)?)
+    }
+
     /// First-run setup: create the owner (and optionally the first company)
     /// through `POST /api/v1/desktop/initialize`. Builds no UI.
     ///

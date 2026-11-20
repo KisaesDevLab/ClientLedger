@@ -10,9 +10,10 @@
 //!   idempotency key, Q-P33al), and the owner saves the rest when ready;
 //! - the maintenance and "update needed" banners;
 //! - host-only actions (Q-P33y) disabled on workstations, with plain words;
-//! - live refresh: until the engine's change feed (U-294, `changes-v1`)
-//!   exists, a 2 s ledger-version poll tells every window that
-//!   transactions changed elsewhere (Q-P33i).
+//! - live refresh: every 2 s the engine's change feed (U-294,
+//!   `changes-v1`) tells the windows which lists to read again (`reset`:
+//!   all of them); an engine without it gets the ledger-version poll
+//!   (Q-P33i, Q-P33an).
 //!
 //! The `--demo` office network drives it through `dev.lan_host_down`,
 //! `dev.lan_host_up`, `dev.lan_maintenance` and `dev.lan_maintenance_off`.
@@ -196,6 +197,37 @@ pub fn host_only(workstation: bool, id: &str) -> bool {
     workstation && HOST_ONLY.contains(&id)
 }
 
+/// Runs `work` under maintenance when this computer is a LAN host (`on`)
+/// and the engine has `maintenance-v1` (U-293): restore, import commit and
+/// undo, payroll post and reverse. The engine drains writes in flight and
+/// ends the workstations' sessions first, then refuses them with 503
+/// `MAINTENANCE` (never retried) until the hold ends. The hold always ends,
+/// whatever `work` answered; a refused start (`MAINTENANCE_BUSY` or
+/// `MAINTENANCE_HELD`) runs nothing.
+///
+/// # Errors
+/// The start's refusal, or `work`'s own error.
+pub async fn with_maintenance<T, E, F>(session: &cl_api::Session, on: bool, work: F) -> Result<T, E>
+where
+    E: From<cl_api::ApiError>,
+    F: std::future::Future<Output = Result<T, E>>,
+{
+    if !on
+        || !session
+            .client()
+            .capabilities()
+            .has(cl_api::Capabilities::MAINTENANCE)
+    {
+        return work.await;
+    }
+    session.start_maintenance().await?;
+    let r = work.await;
+    if let Err(e) = session.end_maintenance().await {
+        tracing::warn!(error = %e, "maintenance could not be ended; it ends when this sign-in does");
+    }
+    r
+}
+
 /// What the host-down overlay did this frame.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Overlay {
@@ -217,9 +249,68 @@ pub struct LanShell {
     /// "Connected again" shows until dismissed.
     back_note: bool,
     group: Option<(usize, RequestGroup)>,
-    poll: Option<Task<LedgerStamp>>,
+    poll: Option<Task<Answer>>,
     last: Option<LedgerStamp>,
+    /// The change feed's cursor (`changes-v1`); `None` before the first
+    /// read, which answers `reset` and only primes it.
+    cursor: Option<String>,
     next_poll: Option<Instant>,
+}
+
+/// One refresh read: the change feed when the host has it (U-294), else
+/// the ledger-version stamp (Q-P33an fallback).
+#[derive(Debug)]
+enum Answer {
+    Feed(cl_api::ChangePage),
+    Ledger(LedgerStamp),
+}
+
+/// Every list a window may show: what a feed `reset` reloads.
+fn everything() -> Vec<Change> {
+    vec![
+        Change::Ledger(None),
+        Change::Contacts,
+        Change::Accounts,
+        Change::Tags,
+        Change::Items,
+        Change::Templates,
+    ]
+}
+
+/// What the windows must read again for one feed page (ids and kinds
+/// only). `reset` reloads everything; `upsert`, `delete` and `left`
+/// all re-read the list the record is in, which drops a deleted or
+/// no-longer-visible (`left`) record and shows an upserted one. Unknown
+/// kinds are skipped. Each notice once.
+#[must_use]
+pub fn changes_of(page: &cl_api::ChangePage) -> Vec<Change> {
+    if page.reset {
+        return everything();
+    }
+    let mut out: Vec<Change> = Vec::new();
+    for item in &page.changes {
+        let change = match item.kind.as_str() {
+            "transactions"
+            | "journal_lines"
+            | "deposit_lines"
+            | "payment_applications"
+            | "bill_payment_applications"
+            | "vendor_credit_applications"
+            | "transaction_tags"
+            | "daily_sales_entries"
+            | "attachments" => Change::Ledger(None),
+            "contacts" | "contact_tax_exemptions" => Change::Contacts,
+            "accounts" => Change::Accounts,
+            "tags" | "tag_groups" => Change::Tags,
+            "items" | "unit_sets" | "price_levels" | "sales_tax_items" => Change::Items,
+            "je_templates" | "recurring_schedules" | "daily_sales_templates" => Change::Templates,
+            _ => continue,
+        };
+        if !out.contains(&change) {
+            out.push(change);
+        }
+    }
+    out
 }
 
 impl std::fmt::Debug for LanShell {
@@ -255,6 +346,7 @@ impl LanShell {
         } else {
             self.poll = None;
             self.last = None;
+            self.cursor = None;
         }
     }
 
@@ -268,11 +360,20 @@ impl LanShell {
         if let Some(task) = self.poll.as_mut() {
             match task.try_take() {
                 None => return,
-                Some(Ok(stamp)) => {
+                Some(Ok(Answer::Ledger(stamp))) => {
                     if self.last.is_some_and(|l| l != stamp) {
                         link.bus().publish(Change::Ledger(None));
                     }
                     self.last = Some(stamp);
+                }
+                Some(Ok(Answer::Feed(page))) => {
+                    // The first read only primes the cursor.
+                    if self.cursor.is_some() {
+                        for change in changes_of(&page) {
+                            link.bus().publish(change);
+                        }
+                    }
+                    self.cursor = page.cursor.or_else(|| self.cursor.take());
                 }
                 Some(Err(e)) => {
                     tracing::debug!(error = %e, "ledger version not read");
@@ -288,14 +389,22 @@ impl LanShell {
         let key = Arc::as_ptr(link) as usize;
         if self.group.as_ref().is_none_or(|(k, _)| *k != key) {
             self.last = None;
+            self.cursor = None;
             self.group = link.group().and_then(Result::ok).map(|g| (key, g));
         }
         let (Some(session), Some((_, group))) = (link.session(), self.group.as_ref()) else {
             self.next_poll = Some(now + POLL);
             return;
         };
+        let cursor = self.cursor.clone();
         self.poll = group
-            .read(&session, |s| async move { s.ledger_version().await })
+            .read(&session, move |s| async move {
+                if s.client().capabilities().has(cl_api::Capabilities::CHANGES) {
+                    s.changes(cursor.as_deref()).await.map(Answer::Feed)
+                } else {
+                    s.ledger_version().await.map(Answer::Ledger)
+                }
+            })
             .ok()
             .map(Task::Pending);
         if self.poll.is_none() {
@@ -547,6 +656,45 @@ mod tests {
             assert!(host_only(true, id), "{id}");
         }
         assert!(!host_only(true, "file.export_all"));
+    }
+
+    #[test]
+    fn feed_pages_map_to_the_lists_to_read_again() {
+        use cl_api::{ChangeItem, ChangeOp, ChangePage};
+        let item = |kind: &str, op| ChangeItem {
+            kind: kind.into(),
+            id: "x".into(),
+            op,
+        };
+        let page = ChangePage {
+            cursor: Some("2".into()),
+            feed_epoch: Some("e".into()),
+            reset: false,
+            changes: vec![
+                item("transactions", ChangeOp::Upsert),
+                item("journal_lines", ChangeOp::Delete),
+                item("contacts", ChangeOp::Upsert),
+                item("accounts", ChangeOp::Left),
+                item("tag_groups", ChangeOp::Upsert),
+                item("something_new", ChangeOp::Upsert),
+            ],
+        };
+        assert_eq!(
+            changes_of(&page),
+            vec![
+                Change::Ledger(None),
+                Change::Contacts,
+                Change::Accounts,
+                Change::Tags
+            ],
+            "each list once; a hidden account (`left`) re-reads the chart; unknown kinds skipped"
+        );
+        let reset = ChangePage {
+            reset: true,
+            ..ChangePage::default()
+        };
+        assert_eq!(changes_of(&reset), everything());
+        assert!(changes_of(&ChangePage::default()).is_empty());
     }
 
     #[test]

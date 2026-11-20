@@ -398,14 +398,20 @@ impl OpenCompanyScreen {
         let secrets = self.link.secrets();
         let stats = self.link.statistics();
         self.busy = Some("open.restore.working");
+        // P33: on a LAN host the restore runs under maintenance (U-293).
+        let lan = crate::lan_link::host_running();
         self.restore_task = spawn_lifecycle(&self.link, group, move || async move {
-            cl_company::restore(
+            crate::lan_status::with_maintenance(
                 &session,
-                &store,
-                secrets.as_ref(),
-                &RestoreRequest { path, passphrase },
-                &cl_company::backup::silent(),
-                &stats,
+                lan,
+                cl_company::restore(
+                    &session,
+                    &store,
+                    secrets.as_ref(),
+                    &RestoreRequest { path, passphrase },
+                    &cl_company::backup::silent(),
+                    &stats,
+                ),
             )
             .await
         })

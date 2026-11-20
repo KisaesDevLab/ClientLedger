@@ -542,17 +542,23 @@ impl ImportScreen {
             },
             move |s| async move {
                 let auth = password.map(ClosedPeriodAuthorization::with_password);
-                match what {
-                    Running::Commit => {
-                        let req = CommitRequest {
-                            backup_ref: backup,
-                            closed_period: auth,
-                            confirm_closed_period: confirm,
-                        };
-                        s.imports().commit(id, &req, key).await
+                // P33: on a LAN host, under maintenance (U-293; the engine
+                // refuses it otherwise with MAINTENANCE_REQUIRED).
+                let lan = crate::lan_link::host_running();
+                crate::lan_status::with_maintenance(&s, lan, async {
+                    match what {
+                        Running::Commit => {
+                            let req = CommitRequest {
+                                backup_ref: backup,
+                                closed_period: auth,
+                                confirm_closed_period: confirm,
+                            };
+                            s.imports().commit(id, &req, key).await
+                        }
+                        Running::Undo => s.imports().undo(id, &backup, auth, key).await,
                     }
-                    Running::Undo => s.imports().undo(id, &backup, auth, key).await,
-                }
+                })
+                .await
             },
         ));
     }

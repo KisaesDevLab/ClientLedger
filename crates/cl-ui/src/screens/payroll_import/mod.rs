@@ -2387,7 +2387,14 @@ impl PayrollImportScreen {
             },
             move |s| async move {
                 let auth = pw2.map(cl_api::ClosedPeriodAuthorization::with_password);
-                s.payroll().reverse(id, &reason, auth, k3).await
+                // P33: on a LAN host, under maintenance (U-293).
+                let lan = crate::lan_link::host_running();
+                crate::lan_status::with_maintenance(
+                    &s,
+                    lan,
+                    s.payroll().reverse(id, &reason, auth, k3),
+                )
+                .await
             },
         ));
     }
