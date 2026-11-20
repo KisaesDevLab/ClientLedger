@@ -232,6 +232,18 @@ impl HostLink {
     /// "starting" until both programs are healthy.
     #[must_use]
     pub fn start(config: HostConfig, guard: InstanceGuard) -> HostLink {
+        Self::start_tagged(config, guard, None)
+    }
+
+    /// Like [`HostLink::start`]; `tag` starts every `status` reply (the
+    /// background LAN host says [`cl_host::service::BACKGROUND_TAG`] so the
+    /// app can take over from it, Q-P33w).
+    #[must_use]
+    pub fn start_tagged(
+        config: HostConfig,
+        guard: InstanceGuard,
+        tag: Option<&'static str>,
+    ) -> HostLink {
         let supervisor = Arc::new(Supervisor::spawn(config, guard));
         let endpoint = Arc::new(VerifiedEndpoint::new(
             Arc::clone(&supervisor) as Arc<dyn SnapshotSource>
@@ -252,7 +264,11 @@ impl HostLink {
                     if guard.stop_requested() {
                         s.store(true, Ordering::SeqCst);
                     }
-                    guard.set_status(&sup.status().summary());
+                    let summary = sup.status().summary();
+                    match tag {
+                        Some(t) => guard.set_status(&format!("{t} {summary}")),
+                        None => guard.set_status(&summary),
+                    }
                     drop(sup);
                     std::thread::sleep(Duration::from_millis(250));
                 }

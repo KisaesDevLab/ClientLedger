@@ -57,8 +57,10 @@ pub struct WorkstationConfig {
     pub host_fingerprint: Fingerprint,
     /// This app's version; must equal the host's.
     pub app_version: String,
-    /// This app's bundled engine commit; must equal the host's.
-    pub engine_commit: String,
+    /// This app's bundled engine commit; must equal the host's. `None`
+    /// when the build does not know it (development builds): then only the
+    /// app version is compared (Q-P33ah).
+    pub engine_commit: Option<String>,
 }
 
 /// The link to the host.
@@ -127,7 +129,11 @@ pub fn judge_hello(h: &Hello, cfg: &WorkstationConfig, sent_ms: i64, recv_ms: i6
         Some("maintenance") => return LinkState::HostMaintenance,
         _ => return LinkState::HostEngineDown,
     }
-    if h.engine_commit.as_deref() != Some(cfg.engine_commit.as_str()) {
+    if cfg
+        .engine_commit
+        .as_deref()
+        .is_some_and(|want| h.engine_commit.as_deref() != Some(want))
+    {
         return LinkState::UpdateNeeded {
             host_app_version: host_app,
         };
@@ -577,7 +583,7 @@ mod tests {
             host: "192.168.1.2:47615".parse().expect("addr"),
             host_fingerprint: Fingerprint::of_der(b"h"),
             app_version: "1.0.0".into(),
-            engine_commit: "abc".into(),
+            engine_commit: Some("abc".into()),
         }
     }
 

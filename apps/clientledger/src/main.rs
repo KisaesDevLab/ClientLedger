@@ -15,7 +15,8 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use cl_api::{ApiQueue, Client, ClientConfig, QueueConfig};
-use cl_host::{AppPaths, HostConfig, acquire_or_focus, find_engine_exe};
+use cl_host::{AppPaths, HostConfig, acquire_or_take_over, find_engine_exe};
+use cl_lan::settings::{LanSettings, Mode};
 use cl_settings::{KeyringSecrets, RecentStore};
 use cl_ui::app::{LaunchOptions, run};
 use cl_ui::company::CompanyLink;
@@ -50,6 +51,62 @@ fn start_control(path: Option<&std::path::Path>) -> Result<Option<cl_automation:
     .transpose()
 }
 
+/// The host process's LAN parts, stopped before the engine (field order).
+struct Running {
+    _lan: Option<cl_ui::lan_link::LanHost>,
+    _link: HostLink,
+}
+
+/// Starts LAN host mode over a running supervisor when `lan.json` says so.
+fn start_lan_host(
+    link: &HostLink,
+    paths: &AppPaths,
+    lan: &LanSettings,
+) -> Option<cl_ui::lan_link::LanHost> {
+    let host = lan.host.as_ref().filter(|_| lan.mode == Mode::Host)?;
+    let started = cl_ui::lan_link::LanHost::start(
+        Arc::clone(link.supervisor()) as Arc<dyn cl_ui::engine_link::SnapshotSource>,
+        host,
+        paths.root(),
+        &KeyringSecrets::for_root(paths.root()),
+        Arc::new(cl_lan::policy::OsInterfaces),
+        Arc::new(cl_lan::discovery::MdnsDiscovery::default()),
+    );
+    match started {
+        Ok(h) => Some(h),
+        Err(e) => {
+            tracing::error!(error = %e, "LAN host mode could not start");
+            None
+        }
+    }
+}
+
+/// `--lan-serve`: the headless background host (Q-P33f). Runs until
+/// `instance.ctl` asks it to stop (the app taking over, or the CLI).
+fn lan_serve(paths: &AppPaths, args: &args::Args, lan: &LanSettings) -> Result<()> {
+    if lan.mode != Mode::Host || lan.host.is_none() {
+        anyhow::bail!("LAN host mode is off on this computer");
+    }
+    let cl_host::Acquired::First(guard) =
+        cl_host::acquire(paths).context("could not check for a running copy")?
+    else {
+        // Something else already serves these books.
+        return Ok(());
+    };
+    let exe = find_engine_exe(args.engine_exe.as_deref())
+        .context("the books engine program was not found")?;
+    let mut cfg = HostConfig::new(paths.clone(), exe);
+    cfg.lan_host = true;
+    let link = HostLink::start_tagged(cfg, guard, Some(cl_host::service::BACKGROUND_TAG));
+    let lan_host = start_lan_host(&link, paths, lan);
+    while !link.stop.load(std::sync::atomic::Ordering::SeqCst) {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    drop(lan_host);
+    drop(link);
+    Ok(())
+}
+
 fn main() -> Result<()> {
     let args = match args::parse(std::env::args().skip(1)) {
         Ok(a) => a,
@@ -76,6 +133,11 @@ fn main() -> Result<()> {
     // first "Read document", demo included.
     cl_ui::reading::install(cl_ui::reading::ReadingService::for_app(&paths));
 
+    let lan = LanSettings::load(&cl_ui::lan_link::settings_path(paths.root()));
+    if args.lan_serve {
+        return lan_serve(&paths, &args, &lan);
+    }
+
     let mut shell = ShellOptions {
         store: Some(UiStore::new(paths.root().join("ui"))),
         log_path: Some(paths.host_log()),
@@ -90,8 +152,10 @@ fn main() -> Result<()> {
     }
 
     if !args.demo && !args.no_engine {
-        // Another running copy gets a focus request and we are done.
-        let Some(guard) = acquire_or_focus(&paths).context("could not check for a running copy")?
+        // Another running copy gets a focus request and we are done; a
+        // background LAN host hands over to this window (Q-P33w).
+        let Some(guard) =
+            acquire_or_take_over(&paths).context("could not check for a running copy")?
         else {
             return Ok(());
         };
@@ -99,14 +163,20 @@ fn main() -> Result<()> {
             .ensure_dirs()
             .context("could not create app folders")?;
         if let Some(exe) = find_engine_exe(args.engine_exe.as_deref()) {
-            let link = HostLink::start(HostConfig::new(paths.clone(), exe), guard);
+            let mut cfg = HostConfig::new(paths.clone(), exe);
+            cfg.lan_host = lan.mode == Mode::Host && lan.host.is_some();
+            let link = HostLink::start(cfg, guard);
+            let lan_host = start_lan_host(&link, &paths, &lan);
             shell.host = Some(link.probe());
             shell.company = Some(company_link(&link, &paths)?);
             options.focus_request = Some(Arc::clone(&link.focus));
             options.stop_request = Some(Arc::clone(&link.stop));
             // Dropped when the window closes, which stops the engine and the
             // database.
-            options.keep_alive = Some(Box::new(link));
+            options.keep_alive = Some(Box::new(Running {
+                _lan: lan_host,
+                _link: link,
+            }));
         } else {
             // Still hold the single-instance lock for this run.
             options.keep_alive = Some(Box::new(guard));

@@ -209,7 +209,7 @@ async fn workstation(lab: &Lab, device: &Identity) -> Workstation {
             host: lab.addr,
             host_fingerprint: lab.host_id.fingerprint(),
             app_version: VERSION.into(),
-            engine_commit: COMMIT.into(),
+            engine_commit: Some(COMMIT.into()),
         },
         device,
     )
@@ -635,7 +635,7 @@ async fn version_mismatch_blocks_the_link() {
             host: lab.addr,
             host_fingerprint: lab.host_id.fingerprint(),
             app_version: "9.9.8".into(),
-            engine_commit: COMMIT.into(),
+            engine_commit: Some(COMMIT.into()),
         },
         &device,
     )

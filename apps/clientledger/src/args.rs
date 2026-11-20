@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 use cl_ui::theme::ThemeChoice;
 
-/// Parsed options.
+/// Parsed options. Each flag is an independent switch, so plain bools.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Default, PartialEq)]
 pub struct Args {
     /// Show the synthetic Ozark Ridge sample and do not start the engine.
@@ -25,6 +26,8 @@ pub struct Args {
     /// Start the control channel and write its port and token here (tests and
     /// scripts only; absent means no listener at all).
     pub control: Option<PathBuf>,
+    /// Run as the background LAN host: no window (P33, Q-P33f).
+    pub lan_serve: bool,
     /// Print usage and exit.
     pub help: bool,
 }
@@ -42,6 +45,8 @@ usage: clientledger [options]
   --size <WxH>         window size in points, for example 1280x820
   --control <path>     start the local control channel for scripts and tests; writes a
                        private file at <path> (off unless given)
+  --lan-serve          share the books with the office network without a window
+                       (started at sign-in when keep serving is on)
   -h, --help           show this help";
 
 /// Parse the arguments after the program name.
@@ -56,6 +61,7 @@ pub fn parse<I: IntoIterator<Item = String>>(args: I) -> Result<Args, String> {
         match a.as_str() {
             "--demo" => out.demo = true,
             "--no-engine" => out.no_engine = true,
+            "--lan-serve" => out.lan_serve = true,
             "-h" | "--help" => out.help = true,
             "--control" => out.control = Some(PathBuf::from(value("--control")?)),
             "--engine-exe" => out.engine_exe = Some(PathBuf::from(value("--engine-exe")?)),
