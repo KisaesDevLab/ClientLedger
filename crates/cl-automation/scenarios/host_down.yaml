@@ -1,0 +1,70 @@
+# The host computer stops answering (P33 D4 step 12, Q-P33n) against
+# `clientledger --demo`. The demo office network is synthetic: no socket.
+# A journal entry with an unsaved memo is open on this workstation when the
+# host goes quiet (dev.lan_host_down): the overlay covers the app, says how
+# many windows keep unsaved changes and that nothing is sent on its own, and
+# the form can't be saved underneath. The host answers again
+# (dev.lan_host_up): the overlay goes, the "Connected to the host again"
+# banner counts the unsaved window, and the memo is still there. OK hides the
+# banner; the entry is cleared and the demo goes back to "just this
+# computer", so light and dark run the same steps.
+#
+# All data is synthetic.
+name: host_down
+description: The host stops answering with an unsaved form open; the overlay covers the app, the form is kept, and the banner counts it when the host is back.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+J
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.mode, equals: new}
+
+  # --- 1. An unsaved entry on a connected workstation --------------------------
+  - click: {role: text_input, label: Memo}
+  - type: {text: "Host down scenario"}
+  - key: Tab
+  - assert_state: {key: screen.dirty, equals: true}
+  - command: dev.lan_host_up
+  - assert_state: {key: lan.state, equals: connected}
+  - assert_state: {key: lan.covered, equals: false}
+  - assert_exists: {role: label, label: "Connected to the host"}
+
+  # --- 2. The host stops answering ---------------------------------------------
+  - command: dev.lan_host_down
+  - assert_state: {key: lan.state, equals: host_down}
+  - assert_state: {key: lan.covered, equals: true}
+  - assert_exists: {role: label, label: "ClientLedger is waiting for the host computer. Check that it is on and connected to the office network."}
+  - assert_exists: {role: label, label: "1 window has unsaved changes. It stays open on this computer, as you left it."}
+  - assert_exists: {role: label, label: "Nothing is sent on its own. If a save was on its way when the connection dropped, its window asks you to check it once the host answers."}
+  - assert_exists: {role: button, label: Check again}
+  - assert_exists: {role: button, label: "Office Network…"}
+  - assert_no_clipping: {}
+  - screenshot: overlay
+  # Nothing underneath is saved while the overlay is up.
+  - key: Alt+N
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_state: {key: screen.last_action, equals: null}
+  - click: {role: button, label: Check again}
+  - assert_state: {key: lan.covered, equals: true}
+
+  # --- 3. The host answers again -------------------------------------------------
+  - command: dev.lan_host_up
+  - assert_state: {key: lan.state, equals: connected}
+  - assert_state: {key: lan.covered, equals: false}
+  - assert_state: {key: lan.back_note, equals: true}
+  - assert_exists: {role: label, label: "Connected to the host again. 1 window has unsaved changes, kept as you left it. Save it when you're ready."}
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_no_clipping: {}
+  - screenshot: back
+  - click: {role: button, label: OK}
+  - assert_state: {key: lan.back_note, equals: false}
+
+  # --- 4. Back where it began ------------------------------------------------------
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
+  - command: dev.lan_demo_off
+  - assert_state: {key: lan.state, equals: null}
+  - command: file.close_window

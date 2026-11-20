@@ -1,0 +1,47 @@
+# The host computer is in maintenance (P33 D4 step 12, U-293) against
+# `clientledger --demo`. The demo office network is synthetic: no socket.
+# On a workstation (dev.lan_maintenance) the banner under the menu says the
+# host is restoring or importing and that saving waits; the app is not
+# covered, so the owner can still look around. Host-only actions (Back Up,
+# Restore, the imports) say "Do this on the host computer" on a workstation
+# whatever the link state. Maintenance ends (dev.lan_maintenance_off): the
+# banner goes. The demo then goes back to "just this computer", where Back
+# Up is no longer refused, so light and dark run the same steps.
+#
+# All data is synthetic.
+name: maintenance
+description: The host is in maintenance; the workstation shows the banner, stays usable for reading, and host-only actions point to the host.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+J
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - assert_state: {key: screen.loaded, equals: true}
+
+  # --- 1. Maintenance on the host ------------------------------------------------
+  - command: dev.lan_maintenance
+  - assert_state: {key: lan.state, equals: maintenance}
+  - assert_state: {key: lan.covered, equals: false}
+  - assert_exists: {role: label, label: "The host computer is restoring or importing books. You can look around; saving waits until it's done."}
+  - assert_no_clipping: {}
+  - screenshot: banner
+  # Reading still works: the window answers under the banner.
+  - click: {role: text_input, label: Memo}
+  - assert_state: {key: screen.mode, equals: new}
+
+  # --- 2. Host-only actions point to the host ------------------------------------
+  - command: file.backup
+  - assert_state: {key: toast, equals: "Do this on the host computer."}
+  - screenshot: host-only
+  - command: file.restore
+  - assert_state: {key: toast, equals: "Do this on the host computer."}
+
+  # --- 3. Maintenance ends -----------------------------------------------------------
+  - command: dev.lan_maintenance_off
+  - assert_state: {key: lan.state, equals: connected}
+  - assert_not_exists: {role: label, label: "The host computer is restoring or importing books. You can look around; saving waits until it's done."}
+
+  # --- 4. Back where it began --------------------------------------------------------
+  - command: dev.lan_demo_off
+  - assert_state: {key: lan.state, equals: null}
+  - command: file.close_window

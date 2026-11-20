@@ -20,8 +20,8 @@
 │                                                                                            │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 
-LAN multi-user (P33):
-  workstation clientledger ──TLS (pinned self-signed cert)──► host PC clientledger-engine
+LAN multi-user (P33, "Office network" below):
+  workstation clientledger ─► loopback forwarder ══TLS 1.3, pinned both ways══► host proxy ─► host engine (loopback)
   (workstations run no Postgres or engine of their own)
 ```
 
@@ -73,7 +73,7 @@ Automatic backups: on company close (configurable), before every migration, comp
 
 ### What the client sees
 
-**Transport.** Plain HTTP to the constant host `127.0.0.1` on the port the supervisor reports. reqwest is built with `default-features = false`: no TLS, no system proxy (`no_proxy()` is set), no HTTP/2, no redirects, no cookie jar. TLS and certificate pinning arrive with LAN mode (P33), which supplies its own endpoint source (Q-P05d). Nothing in `cl-api` can reach another host.
+**Transport.** Plain HTTP to the constant host `127.0.0.1` on the port the supervisor reports. reqwest is built with `default-features = false`: no TLS, no system proxy (`no_proxy()` is set), no HTTP/2, no redirects, no cookie jar. On a LAN workstation (P33) the endpoint is `cl-lan`'s loopback forwarder (its own `EndpointSource`, Q-P05d), which carries the request to the host over pinned TLS; `cl-api` itself still speaks plain HTTP to loopback only. Nothing in `cl-api` can reach another host.
 
 **Two layers of credentials.**
 
@@ -170,7 +170,7 @@ The queue adds `StaleScope`, `Cancelled` and `Internal`; a failed local check is
 
 ### Sessions and refresh
 
-- The access token is a JWT. `cl-api` reads its `exp` by base64url-decoding the payload without verifying the signature (only the engine verifies; Q-P05p), and uses it only to refresh early and to decide whether a mutation's 401 came from our own expired token. This relies on the client and engine sharing a clock, which is true on one machine; LAN mode (P33) revisits it.
+- The access token is a JWT. `cl-api` reads its `exp` by base64url-decoding the payload without verifying the signature (only the engine verifies; Q-P05p), and uses it only to refresh early and to decide whether a mutation's 401 came from our own expired token. On one machine the client and engine share a clock; on a LAN workstation (P33) `cl-api` reads `exp` against the engine's clock (`EngineEndpoint.clock_offset_ms`, from the heartbeat, Q-P33o).
 - The refresh token exists only as the `kb_refresh` cookie. `cl-api` parses `Set-Cookie` itself: only that cookie, value `[A-Za-z0-9_-]{16,512}`, and an empty value or `Max-Age=0` clears it. It keeps the value in a zeroized `Secret`, never persists it (restarting the app means signing in again), and sends it by hand only on the three routes in the table above. There is no cookie jar and no change to the engine's `Secure` flag, because the engine reads the cookie by hand and `/auth/switch-tenant` reads the old token only from the cookie (Q-P05c).
 - **Refresh rotates on every call and a reused token is rejected, so refresh is single-flight.** One async mutex guards every call that rotates the token. Each session has an `auth_epoch`; a waiter that sees the epoch has moved uses the token someone else just fetched instead of calling refresh again. A refresh happens (a) proactively, when under 60 s remain on the access token, and (b) reactively, on a 401 that is provably from the engine's `authenticate`.
 - **A reactive refresh needs all of:** the body is the engine JSON shape with code `UNAUTHORIZED`; the endpoint generation is still the one the 401 came from; and the request is a GET, or our own clock says the token had expired (so a mutation is replayed only when `authenticate` refused it before any handler ran). The request is then replayed once. A second 401 is `Unauthorized(SessionExpired)`. A 401 after a generation change re-reads the endpoint and replays once without refreshing.
@@ -185,8 +185,8 @@ Until the engine carries record versions (U-17, capability `record-version-v1`),
 - Every `get(id)` returns `Versioned<T> { record, version }`. The version is `RecordVersion::Server(n)` if the engine sent a `version`, otherwise `RecordVersion::Fingerprint`, a SHA-256 of the canonical JSON (sorted keys, no whitespace) of the **editable fields** the record's edit form writes. The field list is a `const` next to each model and unit-tested.
 - Left out of every fingerprint: server-maintained values (account `balance`, `updatedAt`, `createdAt`), joined display names, and journal-line ids (the engine deletes and recreates every line on update, so a save with identical lines must give an identical fingerprint). Journal-line `lineOrder`, account, amounts, description, tag and contact are in, and lines are hashed in `lineOrder` order. So a posting to an account does not conflict with a rename of that account.
 - `update(id, expected, body)` with a `Fingerprint` re-reads the record first. A different fingerprint returns `Conflict { Stale, current_version: Fingerprint(new) }` and **no PUT is sent**; an equal one sends the PUT without `If-Match`. With a `Server(n)` version it sends `If-Match: "n"` and maps 409 `STALE` to `Conflict { Stale, Server(current) }`.
-- **Limits of the interim check.** It costs two round trips (GET then PUT) per update. It has a residual race of milliseconds between the GET and the PUT, acceptable for one desktop user. It cannot see a change that is outside the editable fields, for example a line cleared in an in-progress reconciliation (the engine protects lines cleared in a completed one). LAN mode (P33) is blocked until U-17 merges.
-- The UI keeps the `Versioned` with its form. On `Conflict { Stale }` it shows "changed by another window or user" with Reload or Overwrite; Overwrite is an explicit re-save with the new version. The engine takes a row lock inside `PUT /transactions/:id`, so concurrent writers are serialized and the last one wins unless the client check above stops it.
+- **Limits of the interim check.** It costs two round trips (GET then PUT) per update. It has a residual race of milliseconds between the GET and the PUT, acceptable for one desktop user. It cannot see a change that is outside the editable fields, for example a line cleared in an in-progress reconciliation (the engine protects lines cleared in a completed one). With `stale-all-v1` (U-291, P33) a stamped version replaces it: the engine checks `expectedUpdatedAt` under the row lock and there is no pre-read (see "Office network").
+- The UI keeps the `Versioned` with its form. On `Conflict { Stale }` it reads their record and re-saves silently when nothing editable changed, otherwise it opens the conflict dialog (Keep mine, Use theirs, Back; P33, "Office network"). The engine takes a row lock inside `PUT /transactions/:id`, so concurrent writers are serialized and the last one wins unless the client check above stops it.
 - `GET /api/v1/ledger-version` returns a stamp that moves when the ledger changes. Registers poll it to know when to refetch. It is never a per-record version.
 
 ### Idempotency and outcome reconciliation
@@ -216,7 +216,7 @@ One `IdempotencyKey` (a UUIDv4) is made per logical user action, so the form's s
   - *Void or deactivate:* the status or `isActive` field has the new value is `Committed`. *Delete:* a 404 is `Committed`.
   - Not settled with nothing found keeps polling until the budget ends, then `Unresolved`.
 - `Committed` returns the found record as the call's success. `NotCommitted` allows **one** automatic retry with the same key (with a fresh wait window); a second ambiguous failure is never retried again. `Unresolved` returns `OutcomeUnknown { request_id, idempotency_key }`. The tracing output carries only the outcome class.
-- If the stamp read fails, the write still goes out and only the matcher can resolve it. A keyed save never runs reconciliation; the probe still reads the stamp, since a route outside the engine's set or an old key is reconciled as before. The `createdAt` window compares the local clock with the engine's, which is sound on one machine; LAN mode (P33) uses U-18 instead.
+- If the stamp read fails, the write still goes out and only the matcher can resolve it. A keyed save never runs reconciliation; the probe still reads the stamp, since a route outside the engine's set or an old key is reconciled as before. The `createdAt` window compares against the engine's clock: the local clock on one machine, the local clock plus `clock_offset_ms` on a LAN workstation (P33).
 
 **`OutcomeUnknown` UX contract (for P06 and the forms).** Say, in plain words, that the save could not be confirmed and to check the register before trying again (Q-P05f). The register is refreshed through the ledger-version stamp. The dialog offers **Check again**, which re-runs reconciliation with the stored pre-image, and enables **Try again** (same key) only when that returns `NotCommitted`. Never offer a blind re-send. `cl-api` returns the request id and key for this, but it does not yet expose a standalone "check again" call; the owner-facing keys `error.api.outcome_unknown` and `fix.api.check_again` exist. Once U-18 is advertised, a same-key retry is safe by itself and the restriction lifts. A case that stays unresolved on the same generation is a candidate for an engine-side request deadline (noted under U-18).
 
@@ -422,6 +422,45 @@ Documents that arrive in intake folders wait in **Vendors > Review Documents** a
 
 **The demo drafts backend.** `--demo` has no engine, so `company::demo::drafts` (`DemoDrafts` on `DemoState`) plays the engine's draft rules: the content-hash claim, stale and closed answers, the duplicate rule, the closing date, keyed replay, convert through the demo's own bills, checks and card charges, attach, and the live-draft file guard. `fixtures/docs/draft-cases.json` runs against both the demo and the live engine, so they can't drift apart. The demo doesn't model permissions, concurrency, a file company or the delete guard.
 
+## Office network (LAN multi-user, cl-lan, P33)
+
+One computer, the **host**, keeps the books: its own Postgres and engine, exactly as in single-user mode. Other computers on the office network, the **workstations**, run no Postgres or engine; they use the host's. The engine is unchanged in shape and still binds loopback only; `cl-lan` is the only crate that binds a non-loopback address (xtask `bind_check`).
+
+```
+workstation PC                                      host PC
+clientledger                                        clientledger (or --lan-serve, headless)
+ cl-api ─► loopback forwarder ══ TLS 1.3, pinned ══► host proxy ─► engine on 127.0.0.1 ─► postgres
+           (cl-lan client.rs)    both directions     (cl-lan host.rs)
+```
+
+**Topology.**
+- **Host proxy** (`host.rs`): TLS on the one private interface the owner picked (re-checked every 30 s; it rebinds on a change and stops if the address is no longer private). It parses each request head itself before hyper and refuses `Origin`, `Upgrade`, `CONNECT`, absolute-form targets, HTTP/2 prior knowledge, `Content-Length` with `Transfer-Encoding`, and duplicate `Content-Length`. It strips hop-by-hop, `X-CL-*`, `X-Forwarded-*`, `Forwarded` and `X-Real-IP` headers, then injects the LAN token, `X-CL-Device` and `X-Forwarded-For`. Only `/api/` paths and GET `/health`, `/ping` and `/openapi.json` are forwarded; `/lan/hello` and `/lan/pair` are the proxy's own. One request per connection with keep-alive off (Q-P33ad), streamed with no buffering. Caps: 64 handshakes in total and 16 per address; 8 unpaired connections and 2 per IP; 64 connections and 4 streams per device. The proxy doesn't classify routes (Q-P33ai): that is the engine's job.
+- **Workstation forwarder** (`client.rs`): `cl-api` talks to a loopback listener exactly as it talks to a local engine (`LanEndpoint` implements `EndpointSource`). The listener checks Origin, Host and a constant-time local token, then opens a fresh pinned TLS connection per request with no retry. If nothing could be sent it answers 503 `LAN_NOT_SENT`; if the link drops after sending, 502 `LAN_LINK_LOST`. `cl-api` never resends a save after `LAN_LINK_LOST` (Q-P33al). A 2 s heartbeat checks the app version, the engine commit and the clock offset (`EngineEndpoint.clock_offset_ms`, used for JWT `exp` and the `createdAt` window); a mismatch shows "Update needed" and blocks writes.
+- **Background host** (`cl-host/src/service.rs`): `clientledger --lan-serve` runs the host headless at sign-in (Windows scheduled task, launchd LaunchAgent, `systemd --user`). Opening the app on the host stops it over `instance.ctl` and takes over.
+
+**Two tokens.** The host app's own requests carry the launch token (`CL_TOKEN`, host class). The proxy injects `CL_LAN_TOKEN` on every forwarded request. That token is fresh per launch, kept in a scrubbed `Secret`, and is never known to a workstation; any copy a workstation sends is stripped first. The engine (`CL_LAN=1`, U-289) gives a request the class of the token it carries, so a workstation can never reach a host-only route, whatever it sends.
+
+**Pairing and pinning.** Each side has a P-256 identity: the key is in the OS keychain (`lan-host-key`, `lan-device-key`) and the certificate is in the data dir (Q-P33af). Both sides pin the SHA-256 fingerprint of the peer's DER certificate and verify the TLS 1.3 handshake signature. Client certificates are mandatory, and resumption, tickets and 0-RTT are off. To pair, the host shows a 20-character code: 60 bits of its fingerprint plus a 40-bit secret, valid 10 minutes, 5 tries in total. The workstation checks the fingerprint part, proves the secret (which spends the code, Q-P33ag), and the host owner clicks **Allow**. The device is registered from its TLS client certificate, never from the request body, and checked again on every request; Remove closes its connections. Discovery (mDNS) announces only on the chosen interface, with a generic name and a TXT record that holds just the protocol version; the owner can always type the address instead.
+
+**Route classes.** The engine marks every route `x-lan: workstation|host` (default deny: anything not listed is host-only) and every write `x-stale` (U-288). `cl-api` keeps fixtures of both (`tests/fixtures/stale_routes.txt`, `host_only_routes.txt`), and `route_classes.rs` checks them against the pinned spec. On a workstation the app greys out the host-only actions (`lan_status::HOST_ONLY`: back up, restore, new and delete company, the imports, payroll import, send to accountant) with "Do this on the host computer" (Q-P33am). `HOST_ONLY` and `MAINTENANCE_REQUIRED` refusals are shown as plain messages.
+
+**Stamps and conflicts.** Records carry their `updatedAt` as a `RecordStamp` (`RecordVersion::Stamped`). With `stale-all-v1` an edit sends it as `expectedUpdatedAt` and the engine compares it under the row lock, with no pre-read. In LAN mode `stale-required-v1` refuses a stale-checked write that has no stamp (428 `STALE_REQUIRED`, which is a client bug). List rows (accounts, contacts, tags) take their version from the row (`Account::version()` and the others). A 409 `STALE` brings their stamp; the form reads their record and then does one of two things:
+- **Re-saves silently**, when nothing editable changed on their side.
+- **Opens the conflict dialog** (`screens/conflict_dialog.rs`, `cl-model::lan::Conflict`), with three choices:
+  - **Keep mine**: their record, plus the header fields I changed, with lines taken whole from one side so a journal entry stays balanced. The dialog lists any of their changes this would undo.
+  - **Use theirs.**
+  - **Back.**
+
+A write on something a record owns (an attachment upload, link or delete) answers with the parent's new stamp (`parentUpdatedAt`). The open form takes it with `RecordVersion::adopt_stamp`, newer only, so its next save is never a conflict with itself.
+
+**Change feed.** On a live LAN link, `lan_status` reads `GET /changes?cursor=` every 2 s (`changes-v1`, U-294). The first read only primes the cursor. Each item `{kind, id, op}` with `op` `upsert`, `delete` or `left` re-reads that kind's lists on the data bus; `reset` re-reads every list; unknown kinds are skipped. Without the feed, the ledger-version poll is the fallback (Q-P33an).
+
+**Maintenance.** The host app holds maintenance (`POST`/`DELETE /desktop/maintenance`, `maintenance-v1`, U-293) around restore, QBD import commit and undo, and payroll post and reverse, and always ends the hold. While it is on, writes from other sessions get 503 `MAINTENANCE`, which `cl-api` never retries, KeyedOnce included. Workstations show a banner and stay readable. Import jobs are held only for the gated request, not the whole job (Q-P33ar). After an engine restart the host calls `Supervisor::maintenance_reset` (launch token) before the proxy reopens.
+
+**Host down.** When the host stops answering, a modal overlay covers the workstation. Open windows keep their unsaved changes, commands are dropped while covered, and nothing is resent on its own. When the host answers again, a banner counts the windows with unsaved changes. Session secrets (AI keys, SMTP) are never sent from a workstation; its AI and email panes are read-only (Q-P33l, Q-P33ao).
+
+**Checks.** Unit and e2e tests in `crates/cl-lan`. `crates/cl-ui/tests/lan_live.rs` runs a host and two paired workstations against the real engine. `cargo xtask lan-soak` runs five clients editing the same entries and fails on any lost update. The control-channel scenarios are `lan_setup`, `conflict_dialog`, `host_down` and `maintenance`.
+
 ## Online-only features and offline behavior
 
 | Feature | Offline behavior |
@@ -440,7 +479,7 @@ The engine reports connectivity on `/health` (`online: bool`, last check). The a
 - Engine API binds loopback only in single-user mode. Two layers guard it: a random launch token per launch (`X-CL-Token`, passed via env, never on the command line) that every request must carry, and the signed-in user's session token on every account route (see Engine contract). Refresh tokens and passwords stay in memory in zeroized `Secret` values and are never persisted or logged.
 - Postgres binds loopback only, scram-sha-256, superuser password in the OS keychain (Windows Credential Manager, macOS Keychain, Secret Service on Linux; fallback encrypted file with a user notice).
 - Control channel (automation) is off by default; when enabled it uses PdfCraft's safeguards: loopback only, random token in a control file the current user alone can read, refuse symlinked or foreign-owned control files. The server starts only from `--control <path>`; details and the Windows location rule are in Q-P07a to Q-P07d.
-- LAN mode: engine binds the chosen interface with TLS (self-signed cert generated on the host); workstations pin the fingerprint at first connect (shown on the host for verification); users authenticate with engine user accounts; brute-force lockout.
+- LAN mode (P33): the engine stays on loopback; `cl-lan`'s proxy faces the network with TLS 1.3 on one private interface, both sides pinned (P-256 self-signed certificates, keys in the keychain), pairing by a short-lived code plus an Allow click on the host, a per-launch LAN token the workstations never see, and the engine's own user sign-in and lockout. Details in "Office network".
 - Company data at rest: OS disk encryption is recommended in the setup guide; optional Postgres data-dir encryption is out of scope for v1 (Q-15).
 
 ## Crate responsibilities
@@ -460,7 +499,7 @@ The engine reports connectivity on `/health` (`online: bool`, last check). The a
 | cl-ui | screens, navigation, theme, i18n | talk to Postgres |
 | cl-print | check/form/report PDF layout, MICR font placement, print hand-off | depend on the UI |
 | cl-automation | control channel, tool table, scenarios | be enabled without explicit flag |
-| cl-lan | discovery (mDNS), TLS pinning, host/client mode switching | weaken loopback defaults |
+| cl-lan | host TLS proxy, workstation forwarder, pairing and pinning, discovery (mDNS), maintenance gate | weaken loopback defaults; classify engine routes (the engine does) |
 
 ## Licensing boundary
 
