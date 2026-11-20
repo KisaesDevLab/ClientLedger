@@ -838,12 +838,15 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
     stamped_removals(&a, &sa, &b, &sb, supplies, cash);
 
     // --- Engine restart: reconnects, data intact (AC2) -------------------
+    // What a workstation sees is `epoch << 32 | generation` (review S2);
+    // the supervisor's own generation is the raw count.
     let before = a.generation().expect("generation");
+    let raw_before = host.sup().status().generation;
     let pid = host.sup().status().engine_pid.expect("engine pid");
     kill_pid(pid);
     assert!(
         host.sup().wait_for(Duration::from_mins(3), |s| {
-            s.generation > before && s.state == HostState::Running
+            s.generation > raw_before && s.state == HostState::Running
         }),
         "the host's engine came back"
     );
