@@ -73,7 +73,7 @@ impl LanState {
     #[must_use]
     pub fn status_key(self) -> &'static str {
         match self {
-            LanState::Host => "lan.status.host",
+            LanState::Host => "lan.status.sharing",
             LanState::Connecting => "lan.link.connecting",
             LanState::Connected => "lan.link.connected",
             LanState::HostDown => "lan.link.host-down",
@@ -478,6 +478,12 @@ mod tests {
         ] {
             assert!(crate::i18n::has(k), "{k}");
         }
+        // One entry per key in the office network's words.
+        let mut keys: Vec<&str> = crate::i18n::lan::ENGLISH.iter().map(|(k, _)| *k).collect();
+        let n = keys.len();
+        keys.sort_unstable();
+        keys.dedup();
+        assert_eq!(keys.len(), n, "a key is listed twice");
         for id in HOST_ONLY {
             assert!(cl_model::commands::find(id).is_some(), "{id}");
         }

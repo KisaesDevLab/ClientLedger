@@ -68,9 +68,12 @@ steps:
   - assert_state: {key: screen.paired, equals: true}
   - assert_state: {key: screen.mode, equals: workstation}
   - assert_state: {key: screen.link, equals: connected}
-  - assert_exists: {role: label, label: "Connected to the host"}
+  # The window and the status bar both say so.
+  - assert_count: {target: {role: label, label: "Connected to the host"}, count: 2}
+  - assert_state: {key: lan.state, equals: connected}
   - screenshot: workstation-paired
   - click: {role: button, label: Stop using this host}
   - assert_state: {key: screen.mode, equals: "off"}
+  - assert_state: {key: lan.state, equals: null}
   - command: file.close_window
   - assert_not_exists: {role: tab, label_contains: "Office Network"}

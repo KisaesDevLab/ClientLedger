@@ -169,7 +169,7 @@ mod sensitive;
 // P32: Send to My Accountant and the IIF export.
 mod send_to_accountant;
 // P33: the office network.
-mod lan;
+pub(crate) mod lan;
 
 /// Every part of the English catalog.
 const TABLES: [&[(&str, &str)]; 63] = [

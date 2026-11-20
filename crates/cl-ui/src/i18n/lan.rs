@@ -5,7 +5,7 @@
 #[rustfmt::skip]
 pub const ENGLISH: &[(&str, &str)] = &[
     // Main window (status bar, host-down overlay, banners; P33 D4 step 12).
-    ("lan.status.host", "Sharing these books with the office"),
+    ("lan.status.sharing", "Sharing these books with the office"),
     ("lan.banner.maintenance", "The host computer is restoring or importing books. You can look around; saving waits until it's done."),
     ("lan.banner.update_needed", "This computer needs the same ClientLedger version as the host computer. Nothing can be saved until both match."),
     ("lan.banner.back", "Connected to the host again. {n} windows have unsaved changes, kept as you left them. Save each one when you're ready."),
