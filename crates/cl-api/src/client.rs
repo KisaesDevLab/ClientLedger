@@ -458,6 +458,7 @@ impl Transport {
         loop {
             match self.source.current_for(purpose) {
                 EndpointState::Ready(ep) => {
+                    crate::idempotency::set_clock_offset_ms(ep.clock_offset_ms);
                     let prev = self.last_generation.swap(ep.generation, Ordering::Relaxed);
                     if prev != 0 && prev != ep.generation {
                         tracing::info!(generation = ep.generation, "engine restarted");

@@ -100,15 +100,26 @@ impl MdnsDiscovery {
         if g.is_none() {
             let d = mdns_sd::ServiceDaemon::new()
                 .map_err(|e| DiscoveryError::Unavailable(e.to_string()))?;
-            // Queued before the daemon's first poll: nothing is sent on any
-            // interface except the chosen one.
-            if let Some(ip) = only {
-                d.disable_interface(mdns_sd::IfKind::All)
-                    .map_err(|e| DiscoveryError::Unavailable(e.to_string()))?;
-                d.enable_interface(mdns_sd::IfKind::Addr(ip))
-                    .map_err(|e| DiscoveryError::Unavailable(e.to_string()))?;
-            }
             *g = Some(d);
+        }
+        if let Some(d) = g.as_ref() {
+            // Queued before the daemon's next poll (its first, for a new
+            // daemon): only the chosen interface, or for browsing only the
+            // private ones (S11). Applied every time, so a daemon made for
+            // browsing is narrowed before it announces.
+            let err = |e: mdns_sd::Error| DiscoveryError::Unavailable(e.to_string());
+            d.disable_interface(mdns_sd::IfKind::All).map_err(err)?;
+            let allowed: Vec<IpAddr> = match only {
+                Some(ip) => vec![ip],
+                None => crate::policy::Interfaces::list(&crate::policy::OsInterfaces)
+                    .into_iter()
+                    .map(|a| a.ip)
+                    .filter(|ip| crate::policy::check_private(*ip).is_ok())
+                    .collect(),
+            };
+            for ip in allowed {
+                d.enable_interface(mdns_sd::IfKind::Addr(ip)).map_err(err)?;
+            }
         }
         match g.as_ref() {
             Some(d) => f(d),

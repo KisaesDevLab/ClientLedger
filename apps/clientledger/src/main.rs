@@ -57,6 +57,17 @@ struct Running {
     _link: HostLink,
 }
 
+/// Host mode turns automatic sign-in off and forgets the saved password:
+/// the books are open to the office network (plan D2 step 5).
+fn clear_auto_sign_in(paths: &AppPaths) {
+    let auto = cl_settings::AutoSignIn::in_dir(&paths.root().join("settings"));
+    if auto.is_on()
+        && let Err(e) = auto.clear(&KeyringSecrets::for_root(paths.root()))
+    {
+        tracing::warn!(error = %e, "automatic sign-in could not be cleared");
+    }
+}
+
 /// Starts LAN host mode over a running supervisor when `lan.json` says so.
 fn start_lan_host(
     link: &HostLink,
@@ -134,6 +145,9 @@ fn main() -> Result<()> {
     cl_ui::reading::install(cl_ui::reading::ReadingService::for_app(&paths));
 
     let lan = LanSettings::load(&cl_ui::lan_link::settings_path(paths.root()));
+    if lan.mode == Mode::Host {
+        clear_auto_sign_in(&paths);
+    }
     if args.lan_serve {
         return lan_serve(&paths, &args, &lan);
     }

@@ -190,17 +190,38 @@ pub(crate) struct AttemptCreds {
 }
 
 impl AttemptCreds {
-    /// Our own clock says the access token had expired (same machine as the
-    /// engine; P33 revisits for LAN).
+    /// The engine's clock (ours plus the LAN offset, Q-P33o) says the
+    /// access token had expired.
     pub(crate) fn expired_now(&self) -> bool {
         self.access_exp.is_some_and(|exp| exp <= unix_now())
     }
 }
 
-pub(crate) fn unix_now() -> u64 {
-    SystemTime::now()
+/// The engine clock minus this computer's, in ms: zero for the local
+/// engine, measured by the LAN heartbeat on a workstation (Q-P33o). Set on
+/// every ready endpoint; one app talks to one engine at a time.
+static CLOCK_OFFSET_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Records the current endpoint's clock offset.
+pub(crate) fn set_clock_offset_ms(ms: i64) {
+    CLOCK_OFFSET_MS.store(ms, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Now on the engine's clock, in ms since the Unix epoch.
+pub(crate) fn engine_now_ms() -> i64 {
+    now_with_offset_ms(CLOCK_OFFSET_MS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+fn now_with_offset_ms(offset: i64) -> i64 {
+    let local = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    local.saturating_add(offset)
+}
+
+/// Now on the engine's clock, in seconds (JWT `exp` comparisons).
+pub(crate) fn unix_now() -> u64 {
+    u64::try_from(engine_now_ms() / 1000).unwrap_or(0)
 }
 
 /// Supplies credentials per attempt and handles the session refresh.
@@ -2759,6 +2780,14 @@ pub(crate) mod tests {
             reqs[0].headers.get("idempotency-key"),
             reqs[1].headers.get("idempotency-key")
         );
+    }
+
+    #[test]
+    fn engine_now_follows_the_lan_clock_offset() {
+        // The pure form: the shared offset is left alone (other tests read it).
+        let base = now_with_offset_ms(0);
+        let ahead = now_with_offset_ms(120_000);
+        assert!((ahead - base - 120_000).abs() < 5_000, "{base} {ahead}");
     }
 
     /// P33 review S4: a LAN refusal (maintenance, host engine down, not

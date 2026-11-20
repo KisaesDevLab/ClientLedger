@@ -136,17 +136,6 @@ impl LanHost {
         let pairing = Arc::new(Pairing::default());
         let gate = Arc::new(Gate::default());
         let pump_stop = Arc::new(AtomicBool::new(false));
-        {
-            let (gate, stop) = (Arc::clone(&gate), Arc::clone(&pump_stop));
-            let _ = std::thread::Builder::new()
-                .name("cl-lan-gate".into())
-                .spawn(move || {
-                    while !stop.load(Ordering::SeqCst) {
-                        gate.set_upstream(upstream_of(&snapshots.snapshot()));
-                        std::thread::sleep(Duration::from_millis(250));
-                    }
-                });
-        }
         let proxy = rt
             .block_on(HostProxy::start(
                 ProxyConfig {

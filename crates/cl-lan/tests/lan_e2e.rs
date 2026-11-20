@@ -652,3 +652,35 @@ async fn version_mismatch_blocks_the_link() {
         cl_api::EndpointState::Down { permanent: true }
     ));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn event_stream_flows_through_both_hops_without_buffering() {
+    let lab = lab().await;
+    let device = pair(&lab).await;
+    let ws = workstation(&lab, &device).await;
+    let mut s = TcpStream::connect(("127.0.0.1", ws.port()))
+        .await
+        .expect("c");
+    let req = format!(
+        "GET /api/v1/stream HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nX-CL-Token: {}\r\nAccept: text/event-stream\r\n\r\n",
+        ws.port(),
+        ws.local_token().expose()
+    );
+    s.write_all(req.as_bytes()).await.expect("w");
+    // The engine sends one event, then holds the stream for 30 s: the event
+    // must arrive long before that.
+    let mut got = String::new();
+    let mut buf = vec![0u8; 4096];
+    let ok = tokio::time::timeout(Duration::from_secs(5), async {
+        while !got.contains("data: one") {
+            let n = s.read(&mut buf).await.expect("read");
+            if n == 0 {
+                break;
+            }
+            got.push_str(&String::from_utf8_lossy(&buf[..n]));
+        }
+    })
+    .await;
+    assert!(ok.is_ok() && got.contains("data: one"), "{got}");
+    assert!(got.starts_with("HTTP/1.1 200"), "{got}");
+}

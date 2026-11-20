@@ -47,6 +47,10 @@ pub const DEFAULT_PORT: u16 = 47615;
 pub const MAX_UNPAIRED: usize = 8;
 /// Unpaired connections at once from one address (M2).
 pub const MAX_UNPAIRED_PER_IP: usize = 2;
+/// TLS handshakes in progress at once, in total (before anyone is known).
+pub const MAX_HANDSHAKES: usize = 64;
+/// TLS handshakes in progress at once from one address.
+pub const MAX_HANDSHAKES_PER_IP: usize = 16;
 /// Connections (one request each) at once per paired device.
 pub const MAX_DEVICE_CONNECTIONS: usize = 64;
 /// Long-lived event streams at once per paired device.
@@ -177,6 +181,8 @@ pub struct PairOk {
 
 #[derive(Default)]
 struct Counters {
+    handshakes_total: usize,
+    handshakes_by_ip: HashMap<IpAddr, usize>,
     unpaired_total: usize,
     unpaired_by_ip: HashMap<IpAddr, usize>,
     device_conns: HashMap<Fingerprint, usize>,
@@ -184,6 +190,7 @@ struct Counters {
 }
 
 enum Slot {
+    Handshake(IpAddr),
     Unpaired(IpAddr),
     DeviceConn(Fingerprint),
     DeviceStream(Fingerprint),
@@ -198,6 +205,15 @@ impl Drop for SlotGuard {
     fn drop(&mut self) {
         let mut c = self.counters.lock().unwrap_or_else(PoisonError::into_inner);
         match &self.slot {
+            Slot::Handshake(ip) => {
+                c.handshakes_total = c.handshakes_total.saturating_sub(1);
+                if let Some(n) = c.handshakes_by_ip.get_mut(ip) {
+                    *n = n.saturating_sub(1);
+                    if *n == 0 {
+                        c.handshakes_by_ip.remove(ip);
+                    }
+                }
+            }
             Slot::Unpaired(ip) => {
                 c.unpaired_total = c.unpaired_total.saturating_sub(1);
                 if let Some(n) = c.unpaired_by_ip.get_mut(ip) {
@@ -225,6 +241,16 @@ fn dec(m: &mut HashMap<Fingerprint, usize>, fp: &Fingerprint) {
 fn take_slot(counters: &Arc<Mutex<Counters>>, slot: Slot) -> Option<SlotGuard> {
     let mut c = counters.lock().unwrap_or_else(PoisonError::into_inner);
     let ok = match &slot {
+        Slot::Handshake(ip) => {
+            let per = c.handshakes_by_ip.get(ip).copied().unwrap_or(0);
+            if c.handshakes_total >= MAX_HANDSHAKES || per >= MAX_HANDSHAKES_PER_IP {
+                false
+            } else {
+                c.handshakes_total += 1;
+                *c.handshakes_by_ip.entry(*ip).or_default() += 1;
+                true
+            }
+        }
         Slot::Unpaired(ip) => {
             let per = c.unpaired_by_ip.get(ip).copied().unwrap_or(0);
             if c.unpaired_total >= MAX_UNPAIRED || per >= MAX_UNPAIRED_PER_IP {
@@ -340,6 +366,12 @@ impl HostProxy {
         self.status.borrow().clone()
     }
 
+    /// A receiver of status changes (re-announce on rebind, withdraw on stop).
+    #[must_use]
+    pub fn subscribe(&self) -> watch::Receiver<ProxyStatus> {
+        self.status.clone()
+    }
+
     /// Waits for the status to change.
     pub async fn changed(&mut self) -> ProxyStatus {
         let _ = self.status.changed().await;
@@ -428,9 +460,14 @@ async fn accept(l: Option<&TcpListener>) -> std::io::Result<(TcpStream, SocketAd
 
 async fn serve_conn(sh: Arc<Shared>, tcp: TcpStream, peer_ip: IpAddr) {
     let _ = tcp.set_nodelay(true);
+    // Capped before the handshake: nobody is known yet (review M2).
+    let Some(handshake) = take_slot(&sh.counters, Slot::Handshake(peer_ip)) else {
+        return;
+    };
     let Ok(Ok(mut tls)) = tokio::time::timeout(TLS_TIMEOUT, sh.acceptor.accept(tcp)).await else {
         return;
     };
+    drop(handshake);
     let (_, conn) = tls.get_ref();
     if conn.alpn_protocol() != Some(tls::ALPN) {
         return;
@@ -801,5 +838,12 @@ mod tests {
         assert!(take_slot(&c, Slot::DeviceStream(fp)).is_none());
         drop(s);
         assert!(take_slot(&c, Slot::DeviceStream(fp)).is_some());
+        let hip: IpAddr = "192.168.9.9".parse().expect("ip");
+        let hs: Vec<_> = (0..MAX_HANDSHAKES_PER_IP)
+            .map(|_| take_slot(&c, Slot::Handshake(hip)).expect("handshake"))
+            .collect();
+        assert!(take_slot(&c, Slot::Handshake(hip)).is_none());
+        drop(hs);
+        assert!(take_slot(&c, Slot::Handshake(hip)).is_some());
     }
 }
