@@ -744,7 +744,11 @@ fn p33_an_edit_is_guarded_by_the_account_as_opened_not_the_reloaded_chart() {
     r.form().form.edit(F_NAME, |d| d.name = "Mine".into());
     r.s.save_form(SaveIntent::Save);
     assert!(r.s.acct_conflict.is_open(), "their change is never hidden");
-    assert_eq!(demo_account(&r, id).fields.name, before, "nothing saved yet");
+    assert_eq!(
+        demo_account(&r, id).fields.name,
+        before,
+        "nothing saved yet"
+    );
     assert!(r.s.state()["conflict"].is_object());
     assert!(!r.s.save_form(SaveIntent::Save), "no save while it is open");
 }
@@ -773,16 +777,26 @@ fn p33_use_theirs_shows_their_account_and_esc_is_back() {
         .edit(super::F_DESCRIPTION, |d| d.description = "mine".into());
     r.s.save_form(SaveIntent::Save);
     assert!(r.s.acct_conflict.is_open());
-    assert!(r.s.command(cl_model::CommandId::new("form.revert")), "Esc is Back");
+    assert!(
+        r.s.command(cl_model::CommandId::new("form.revert")),
+        "Esc is Back"
+    );
     assert!(!r.s.acct_conflict.is_open());
-    assert_eq!(r.form().form.current().description, "mine", "Back keeps mine");
+    assert_eq!(
+        r.form().form.current().description,
+        "mine",
+        "Back keeps mine"
+    );
     assert_eq!(r.s.state()["warning"], "changed_elsewhere");
     r.s.save_form(SaveIntent::Save);
     let open = r.s.acct_conflict.open.take().expect("dialog again");
     r.s.run_account_choice(open, ConflictChoice::UseTheirs);
     assert_eq!(r.form().form.current().description, "theirs");
     assert!(!r.form().form.is_dirty());
-    assert_eq!(demo_account(&r, id).fields.description.as_deref(), Some("theirs"));
+    assert_eq!(
+        demo_account(&r, id).fields.description.as_deref(),
+        Some("theirs")
+    );
 }
 
 #[test]
@@ -853,13 +867,12 @@ fn p33_the_dialog_names_the_parent_account_never_its_id() {
     r.s.command(cl_model::CommandId::new("edit.edit_transaction"));
     r.frames(2);
     let parent = demo_account(&r, id).fields.parent_id;
-    let other = r
-        .s
-        .accounts
-        .iter()
-        .map(|a| a.id)
-        .find(|a| *a != id && Some(*a) != parent)
-        .expect("another account");
+    let other =
+        r.s.accounts
+            .iter()
+            .map(|a| a.id)
+            .find(|a| *a != id && Some(*a) != parent)
+            .expect("another account");
     change_in_books(&r, id, |a| a.fields.parent_id = Some(other));
     r.form().form.edit(F_NAME, |d| d.name = "Mine".into());
     r.s.save_form(SaveIntent::Save);
