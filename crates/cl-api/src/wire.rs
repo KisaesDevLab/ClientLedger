@@ -698,6 +698,20 @@ impl Capabilities {
     /// Equity by Account shows posted balances only (no computed earnings).
     /// No desktop screen calls these routes yet.
     pub const REPORTS_BY_ACCOUNT_BALANCE: &'static str = "reports-by-account-balance-v1";
+    /// U-290 (P33): sessions bound to a device and a `sid`; the host lists
+    /// and ends them (`/desktop/sessions`).
+    pub const LAN_SESSIONS: &'static str = "lan-sessions-v1";
+    /// U-291 (P33): every covered edit takes `expectedUpdatedAt` and answers
+    /// 409 `STALE` `{updatedAt}`; saves return the record's new stamp.
+    pub const STALE_ALL: &'static str = "stale-all-v1";
+    /// U-292 (P33): in LAN mode a covered edit without its stamp is 428
+    /// `STALE_REQUIRED`.
+    pub const STALE_REQUIRED: &'static str = "stale-required-v1";
+    /// U-293 (P33): single-user maintenance (`/desktop/maintenance`).
+    pub const MAINTENANCE: &'static str = "maintenance-v1";
+    /// U-294 (P33): the change feed (`GET /changes`). Without it the app
+    /// polls the ledger-version stamp (Q-P33i).
+    pub const CHANGES: &'static str = "changes-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]
@@ -733,6 +747,9 @@ pub struct DesktopInfo {
     /// The hidden owner workspace tenant (Q-P02h); `null` on older engines.
     #[serde(default)]
     pub workspace_tenant_id: Option<TenantId>,
+    /// The engine runs in LAN mode (`CL_LAN=1`, U-289).
+    #[serde(default)]
+    pub lan: bool,
     /// Advertised capabilities.
     #[serde(default)]
     pub capabilities: Capabilities,

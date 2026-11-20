@@ -393,6 +393,8 @@ pub(crate) struct Transport {
     write: reqwest::Client,
     cfg: ClientConfig,
     last_generation: AtomicU64,
+    /// The generation moved since the last `desktop_info` (P33 S12).
+    generation_moved: std::sync::atomic::AtomicBool,
     /// Test-only request observer (feature `test-support`).
     #[cfg(feature = "test-support")]
     pub(crate) observer: crate::testing::ObserverSlot,
@@ -426,6 +428,7 @@ impl Transport {
             write,
             cfg,
             last_generation: AtomicU64::new(0),
+            generation_moved: std::sync::atomic::AtomicBool::new(false),
             #[cfg(feature = "test-support")]
             observer: crate::testing::ObserverSlot::default(),
             #[cfg(test)]
@@ -438,6 +441,18 @@ impl Transport {
     pub(crate) fn with_connect_stub(mut self, stub: Arc<tests::ConnectStub>) -> Transport {
         self.connect_stub = Some(stub);
         self
+    }
+
+    /// True (once) when the engine's generation moved since the last call:
+    /// the engine restarted, or a LAN workstation now talks to a restarted
+    /// host engine, so `desktop_info` runs again (P33 S12).
+    pub(crate) fn take_generation_moved(&self) -> bool {
+        self.generation_moved.swap(false, Ordering::SeqCst)
+    }
+
+    /// Marks the generation as moved again (a `desktop_info` re-run failed).
+    pub(crate) fn mark_generation_moved(&self) {
+        self.generation_moved.store(true, Ordering::SeqCst);
     }
 
     pub(crate) fn config(&self) -> &ClientConfig {
@@ -462,6 +477,7 @@ impl Transport {
                     let prev = self.last_generation.swap(ep.generation, Ordering::Relaxed);
                     if prev != 0 && prev != ep.generation {
                         tracing::info!(generation = ep.generation, "engine restarted");
+                        self.generation_moved.store(true, Ordering::SeqCst);
                     }
                     return Ok(ep);
                 }

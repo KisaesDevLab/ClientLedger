@@ -1339,6 +1339,12 @@ fn conflict(body: &EngineErrorBody) -> ApiError {
         body.pointer("/error/details/currentVersion")
             .and_then(Value::as_u64)
             .map(RecordVersion::Server)
+            // U-291: `details.updatedAt`, the record's stamp now.
+            .or_else(|| {
+                body.pointer("/error/details")
+                    .and_then(crate::resources::versioning::RecordStamp::of_record)
+                    .map(RecordVersion::Stamp)
+            })
     } else {
         None
     };

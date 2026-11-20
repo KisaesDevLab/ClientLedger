@@ -117,6 +117,10 @@ fn computed(spec: &Value) -> (String, String, Vec<String>) {
             // `GET /desktop/info` and `GET /desktop/session-secrets`.
             if route == "/openapi.json" {
                 // The spec itself (a probe), not an engine operation.
+            } else if route == "/api/v1/changes" {
+                // PENDING(U-294): the change feed is typed ahead of the
+                // engine (gated on `changes-v1`); a workstation read.
+                eprintln!("PENDING(U-294): GET /api/v1/changes is not in the spec yet");
             } else if route.starts_with("/api/v1/tenants/{id}/") {
                 // U-288: every route below a tenant id is host-only (some,
                 // like the delete job, are desktop-only and not in the spec).

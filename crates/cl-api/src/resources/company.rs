@@ -1159,7 +1159,12 @@ mod tests {
             v.record.profile.entity_type,
             Some(EntityType::SingleMemberLlc)
         );
-        assert!(matches!(v.version, RecordVersion::Fingerprint(_)));
+        // A fingerprint version (the company row's `updatedAt` rides along,
+        // P33 U-291).
+        assert!(matches!(
+            v.version,
+            RecordVersion::Fingerprint(_) | RecordVersion::Stamped { .. }
+        ));
 
         let mut update = v.record.profile.clone();
         update.business_name = "New Name".into();

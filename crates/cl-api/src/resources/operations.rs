@@ -669,6 +669,49 @@ pub(crate) const SESSION_SECRETS_DELETE: Operation = workspace_write(
     TimeoutClass::Auth,
 );
 
+// ---- P33 LAN: sessions (U-290), maintenance (U-293), change feed (U-294) ----
+
+/// Signed-in sessions (super admin, host only).
+pub(crate) const LAN_SESSIONS: Operation = session_read("/api/v1/desktop/sessions");
+/// End one session chain.
+pub(crate) const LAN_SESSION_END: Operation = workspace_write(
+    Method::Delete,
+    "/api/v1/desktop/sessions/{id}",
+    TimeoutClass::Auth,
+);
+/// End every session of one device (`?device=<64 hex>`).
+pub(crate) const LAN_SESSIONS_END_DEVICE: Operation = workspace_write(
+    Method::Delete,
+    "/api/v1/desktop/sessions",
+    TimeoutClass::Auth,
+);
+/// Pairing, Remove, Regenerate and host mode on or off in the audit trail
+/// (launch token only, no session; never retried: one row per event).
+pub(crate) const LAN_AUDIT_EVENT: Operation = op(
+    Method::Post,
+    "/api/v1/desktop/audit-events",
+    RetryClass::Never,
+    RouteKind::Public,
+    TimeoutClass::Auth,
+    false,
+);
+/// Maintenance state (U-293, provisional shape).
+pub(crate) const MAINTENANCE_STATUS: Operation = session_read("/api/v1/desktop/maintenance");
+/// Take maintenance (drains, then ends the other sessions). Never retried.
+pub(crate) const MAINTENANCE_START: Operation = workspace_once(
+    "/api/v1/desktop/maintenance/start",
+    RouteKind::Session,
+    TimeoutClass::Auth,
+);
+/// Give maintenance back. Never retried.
+pub(crate) const MAINTENANCE_END: Operation = workspace_once(
+    "/api/v1/desktop/maintenance/end",
+    RouteKind::Session,
+    TimeoutClass::Auth,
+);
+/// The change feed of the open company (U-294, provisional shape).
+pub(crate) const CHANGES: Operation = read("/api/v1/changes");
+
 // ---- P11 contacts and centers -----------------------------------------------
 
 /// Merge two contacts (moves their transactions, deactivates the source).
@@ -2116,7 +2159,11 @@ const QUERY_POSTS: [(&str, &str); 2] = [
 #[cfg(test)]
 /// Mutations outside `/api/v1/auth/` that are never retried: each creates
 /// or destroys a company, or changes a credential.
-const NEVER_RETRIED: [(&str, &str); 7] = [
+const NEVER_RETRIED: [(&str, &str); 10] = [
+    // P33: one audit row per event; maintenance is never retried (S4).
+    ("POST", "/api/v1/desktop/audit-events"),
+    ("POST", "/api/v1/desktop/maintenance/start"),
+    ("POST", "/api/v1/desktop/maintenance/end"),
     ("POST", "/api/v1/tenants"),
     ("POST", "/api/v1/tenants/{id}/delete"),
     ("POST", "/api/v1/desktop/recover-password"),
@@ -2127,7 +2174,7 @@ const NEVER_RETRIED: [(&str, &str); 7] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 471] = [
+pub const OPERATIONS: [Operation; 479] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2213,6 +2260,14 @@ pub const OPERATIONS: [Operation; 471] = [
     SESSION_SECRETS_PUT,
     SESSION_SECRETS_GET,
     SESSION_SECRETS_DELETE,
+    LAN_SESSIONS,
+    LAN_SESSION_END,
+    LAN_SESSIONS_END_DEVICE,
+    LAN_AUDIT_EVENT,
+    MAINTENANCE_STATUS,
+    MAINTENANCE_START,
+    MAINTENANCE_END,
+    CHANGES,
     CONTACTS_MERGE,
     CONTACT_TRANSACTIONS,
     REPORT_CUSTOMER_BALANCE,

@@ -178,7 +178,9 @@ pub use resources::transactions::{
 };
 pub use resources::transactions::{INVENTORY_DERIVED_ROLES, InventoryLine, is_inventory_derived};
 pub use resources::unit_sets::{NewUnitSet, Unit, UnitRefusal, UnitSet, UnitSets, unit_refusal};
-pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
+pub use resources::versioning::{
+    EditableFields, RecordStamp, RecordVersion, Versioned, with_expected_stamp,
+};
 pub use session::{
     Client, CompanySummary, CreatedCompany, LoginOutcome, NewCompany, OpenCompany, Scope, Session,
     TfaChallenge, TfaMethod,
