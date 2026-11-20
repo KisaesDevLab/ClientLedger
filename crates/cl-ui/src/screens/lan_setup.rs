@@ -112,6 +112,9 @@ pub struct LanView {
     pub link: &'static str,
     /// The change waits for a restart.
     pub restart_needed: bool,
+    /// Why sharing could not start, when the owner can fix it here (an
+    /// i18n key; review M2: the host certificate file is missing).
+    pub host_problem: Option<&'static str>,
 }
 
 /// The office network the window drives.
@@ -131,6 +134,9 @@ pub trait LanControl: Send {
     fn decide(&mut self, allow: bool);
     /// Removes paired computer `i` (and ends its sign-ins).
     fn remove(&mut self, i: usize);
+    /// Makes a new host certificate: every paired computer is removed
+    /// (sign-ins ended) and pairs again (review M2, S7).
+    fn regenerate(&mut self);
     /// Let other computers find this one.
     fn set_announce(&mut self, on: bool);
     /// Keep sharing after closing and start at sign-in.
@@ -205,6 +211,7 @@ impl LanControl for DemoControl {
                 DemoLink::Maintenance => "host-maintenance",
             },
             restart_needed: false,
+            host_problem: None,
         })
         .unwrap_or_else(|| LanView {
             mode: Mode::Off,
@@ -220,6 +227,7 @@ impl LanControl for DemoControl {
             paired_host: None,
             link: "connecting",
             restart_needed: false,
+            host_problem: None,
         })
     }
 
@@ -257,6 +265,10 @@ impl LanControl for DemoControl {
 
     fn remove(&mut self, i: usize) {
         self.with(|l| l.remove(i));
+    }
+
+    fn regenerate(&mut self) {
+        self.with(|l| l.devices.clear());
     }
 
     fn set_announce(&mut self, on: bool) {
@@ -307,6 +319,8 @@ pub struct LanSetupScreen {
     code: String,
     error: Option<&'static str>,
     paired_note: bool,
+    /// The events being sent (sign-ins ended, audit rows).
+    sending: Option<crate::company::Task<Result<(), &'static str>>>,
 }
 
 impl LanSetupScreen {
@@ -339,11 +353,23 @@ impl LanSetupScreen {
             code: String::new(),
             error: None,
             paired_note: false,
+            sending: None,
             control,
         }
     }
 
+    /// Sends the control's events: a removed computer's sign-ins end on
+    /// the engine (review S7), then the audit rows. A computer whose
+    /// sign-ins could not be ended is reported in the window.
     fn send_events(&mut self) {
+        if let Some(task) = self.sending.as_mut()
+            && let Some(r) = task.try_take()
+        {
+            self.sending = None;
+            if let Ok(Err(k)) = r {
+                self.error = Some(k);
+            }
+        }
         let events = self.control.take_events();
         if events.is_empty() || self.link.is_demo() {
             return;
@@ -351,25 +377,36 @@ impl LanSetupScreen {
         let Some(client) = self.link.client().cloned() else {
             return;
         };
+        let session = self.link.session();
         let Some(Ok(group)) = self.link.group() else {
+            self.error = Some("lan.remove.sessions_failed");
             return;
         };
-        // The audit trail row is best effort: the change itself is made.
-        let _ = spawn_lifecycle(&self.link, &group, move || async move {
-            for (e, device, label) in events {
-                if let Err(err) = client
-                    .lan_audit_event(e, device.as_deref(), label.as_deref())
-                    .await
-                {
-                    tracing::warn!(error = %err, "office network audit event not recorded");
-                }
-            }
-            Ok::<(), cl_api::ApiError>(())
-        });
+        match spawn_lifecycle(&self.link, &group, move || {
+            crate::lan_link::record_events(client, session, events)
+        }) {
+            Ok(task) => self.sending = Some(task),
+            Err(_) => self.error = Some("lan.remove.sessions_failed"),
+        }
     }
 
     fn host_card(&mut self, ui: &mut Ui, tokens: &Tokens, v: &LanView) {
         let sharing = v.mode == Mode::Host;
+        if let Some(k) = v.host_problem {
+            // Review M2: plain words and the way out, never a silent new
+            // certificate.
+            form::card(ui, tokens, |ui| {
+                form::inline_warning(ui, tokens, &t(k));
+                if ui
+                    .button(t("lan.host.regenerate"))
+                    .on_hover_text(t("lan.host.regenerate.tip"))
+                    .clicked()
+                {
+                    self.control.regenerate();
+                }
+            });
+            ui.add_space(6.0);
+        }
         form::card(ui, tokens, |ui| {
             ui.label(RichText::new(t("lan.host.iface")).strong());
             form::hint(ui, tokens, &t("lan.host.iface_hint"));
@@ -719,6 +756,7 @@ impl Screen for LanSetupScreen {
             "link": v.link,
             "error": self.error,
             "restart_needed": v.restart_needed,
+            "host_problem": v.host_problem,
         })
     }
 }

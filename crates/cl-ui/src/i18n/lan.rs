@@ -85,7 +85,12 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lan.pair.refused.busy", "Another computer is pairing right now. Try again in a minute."),
     ("lan.pair.refused.denied", "The host computer said no."),
     ("lan.pair.refused.timed_out", "Nobody clicked Allow on the host computer in time. Try again."),
-    ("lan.pair.refused.throttled", "This computer typed a wrong code too many times. Show a new code on the host computer and type that one."),
+    ("lan.host.cert_missing", "Sharing didn't start: this computer's office network certificate file is missing (the file \u{201c}lan-host.crt\u{201d} in the app's data folder). If you have a backup of that folder, put the file back and restart ClientLedger. Otherwise make a new certificate; every other computer then pairs again with a new code."),
+    ("lan.host.regenerate", "Make a new certificate"),
+    ("lan.host.regenerate.tip", "Every paired computer is removed and signed out, and pairs again with a new code after ClientLedger restarts."),
+    ("lan.host.regenerate_failed", "A new certificate couldn't be made. Check that the app's data folder can be written to and that the system keychain is unlocked, then try again."),
+    ("lan.remove.sessions_failed", "The computer was removed and can no longer reach these books, but its earlier sign-ins couldn't be ended. If you pair it again, have its users sign out and sign in again."),
+    ("lan.pair.refused.throttled","This computer typed a wrong code too many times. Show a new code on the host computer and type that one."),
     // Link states (status bar and overlay).
     ("lan.link.connected", "Connected to the host"),
     ("lan.link.connecting", "Connecting to the host\u{2026}"),

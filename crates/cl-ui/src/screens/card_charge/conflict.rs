@@ -23,9 +23,13 @@ use crate::company::Task;
 use crate::forms::conflict::{GONE, OpenConflict, Read, Words, lines_value, read_of};
 use crate::screens::conflict_dialog::{ConflictChoice, fields_from_theirs};
 
-/// The editable fields of a charge or credit as this form holds them (the
-/// header tags are not read back from a saved charge, so they are left
-/// out: they would always look changed).
+/// The editable fields of a charge or credit as this form holds them.
+/// A charge has no header tags on the wire: the form's header tags only
+/// fill the tag of each line without one when it is saved, so another
+/// user's header-tag change arrives as line tags and is compared with the
+/// lines (review S5; `p33_their_header_tags_are_never_lost_to_my_save`).
+/// The form's own header tags never come back from a saved charge and are
+/// left out here, or they would always look changed.
 #[must_use]
 pub fn card_value(f: &CardForm, lines: &FormLines, items: &ItemLines) -> Value {
     json!({
@@ -168,7 +172,8 @@ impl CardChargeScreen {
     /// on their version.
     fn adopt(&mut self, theirs: &Versioned<Transaction>, their: Sides, mine: Sides) {
         let lists = Arc::clone(&self.books.lists);
-        // Header tags are not compared; mine stay as they are.
+        // The form's header tags are only defaults for untagged lines (the
+        // lines carry what was saved, theirs included); mine stay.
         let mut their_form = their.form;
         their_form
             .header_tags

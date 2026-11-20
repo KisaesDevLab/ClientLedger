@@ -68,6 +68,18 @@ pub enum LanStartError {
     /// `lan.json` has no pinned host.
     #[error("this computer is not paired with a host")]
     NotPaired,
+    /// The host's certificate file is gone while its key is still in the
+    /// keychain (review M2). Shown in the Office Network window with the
+    /// way out ("Make a new certificate"); never a silent new identity.
+    #[error("the office network certificate file is missing")]
+    CertificateMissing,
+}
+
+fn identity_error(e: cl_lan::tls::TlsSetupError) -> LanStartError {
+    match e {
+        cl_lan::tls::TlsSetupError::HostCertificateMissing => LanStartError::CertificateMissing,
+        other => LanStartError::Identity(other.to_string()),
+    }
 }
 
 fn runtime() -> Result<tokio::runtime::Runtime, LanStartError> {
@@ -133,8 +145,8 @@ impl LanHost {
     ) -> Result<LanHost, LanStartError> {
         let rt = runtime()?;
         let dir = lan_dir(root);
-        let (identity, _) = Identity::load_or_create(store, &dir, Role::Host)
-            .map_err(|e| LanStartError::Identity(e.to_string()))?;
+        let (identity, _) =
+            Identity::load_or_create(store, &dir, Role::Host).map_err(identity_error)?;
         let registry = Arc::new(Registry::load(dir.join("lan-devices.json")));
         let pairing = Arc::new(Pairing::default());
         let gate = Arc::new(Gate::default());
@@ -442,6 +454,9 @@ struct LiveContext {
     root: PathBuf,
     store: Arc<dyn SecretStore>,
     host: std::sync::Mutex<std::sync::Weak<LanHost>>,
+    /// Why host mode could not start, when the owner can act on it (an
+    /// i18n key; review M2).
+    problem: std::sync::Mutex<Option<&'static str>>,
 }
 
 static LIVE: std::sync::OnceLock<LiveContext> = std::sync::OnceLock::new();
@@ -452,7 +467,76 @@ pub fn install(root: PathBuf, store: Arc<dyn SecretStore>) {
         root,
         store,
         host: std::sync::Mutex::new(std::sync::Weak::new()),
+        problem: std::sync::Mutex::new(None),
     });
+}
+
+/// Records why host mode did not start (the Office Network window shows
+/// it). Only the certificate problem has a fix there; anything else is in
+/// the log.
+pub fn host_start_failed(e: &LanStartError) {
+    let key = match e {
+        LanStartError::CertificateMissing => Some("lan.host.cert_missing"),
+        _ => None,
+    };
+    if let Some(l) = LIVE.get() {
+        *l.problem
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = key;
+    }
+}
+
+fn host_problem() -> Option<&'static str> {
+    LIVE.get().and_then(|l| {
+        *l.problem
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    })
+}
+
+/// Sends the Office Network window's events: Remove (and Regenerate, which
+/// removes every computer) first ends that computer's sign-ins on the
+/// engine (`DELETE /desktop/sessions?device=`, review S7), so its refresh
+/// tokens stop working at once and no longer count toward the session
+/// limit; then each event goes to the audit trail (best effort).
+///
+/// # Errors
+/// `lan.remove.sessions_failed` when any computer's sign-ins could not be
+/// ended (nobody signed in here, or the engine refused): the owner is told
+/// so, since that computer's sign-ins would otherwise live on.
+pub async fn record_events(
+    client: cl_api::Client,
+    session: Option<cl_api::Session>,
+    events: Vec<Event>,
+) -> Result<(), &'static str> {
+    let mut ended_all = true;
+    for (e, device, label) in events {
+        if e == cl_api::LanAuditEvent::LanDeviceRemoved
+            && let Some(d) = device.as_deref()
+        {
+            let ended = match &session {
+                Some(s) => s.end_device_sessions(d).await,
+                None => Err(cl_api::ApiError::Local(
+                    cl_api::LocalValidation::Unsupported,
+                )),
+            };
+            if let Err(err) = ended {
+                tracing::warn!(error = %err, "a removed computer's sign-ins could not be ended");
+                ended_all = false;
+            }
+        }
+        if let Err(err) = client
+            .lan_audit_event(e, device.as_deref(), label.as_deref())
+            .await
+        {
+            tracing::warn!(error = %err, "office network audit event not recorded");
+        }
+    }
+    if ended_all {
+        Ok(())
+    } else {
+        Err("lan.remove.sessions_failed")
+    }
 }
 
 /// The host running in this process (the setup window's code, Allow and
@@ -480,7 +564,9 @@ pub fn host_running() -> bool {
     running_host().is_some()
 }
 
-type Event = (cl_api::LanAuditEvent, Option<String>, Option<String>);
+/// An audit event from the Office Network window: what, the computer's
+/// fingerprint (hex), its name.
+pub type Event = (cl_api::LanAuditEvent, Option<String>, Option<String>);
 
 /// The live office network behind the setup window. Settings changes are
 /// written to `lan.json` and take effect at the next start ("Restart
@@ -592,6 +678,11 @@ impl crate::screens::lan_setup::LanControl for LiveLan {
             // bar too); "connecting" before one runs.
             link: crate::lan_status::workstation_link_key().unwrap_or("connecting"),
             restart_needed: self.restart,
+            host_problem: if host.is_none() && !self.restart {
+                host_problem()
+            } else {
+                None
+            },
         }
     }
 
@@ -670,6 +761,40 @@ impl crate::screens::lan_setup::LanControl for LiveLan {
                 Some(d.label),
             ));
         }
+    }
+
+    /// Makes a new host certificate (review M2's way out). Every paired
+    /// computer is removed, with its sign-ins ended (review S7), since
+    /// none of them trusts the new certificate; they pair again. Takes
+    /// effect at the next start.
+    fn regenerate(&mut self) {
+        let Some(l) = LIVE.get() else {
+            return;
+        };
+        let dir = lan_dir(&l.root);
+        if let Err(e) = Identity::regenerate(&*l.store, &dir, Role::Host) {
+            tracing::warn!(error = %e, "a new office network certificate could not be made");
+            self.answer = Some(Err("lan.host.regenerate_failed"));
+            return;
+        }
+        let registry = Registry::load(dir.join("lan-devices.json"));
+        for d in registry.list() {
+            self.events.push((
+                cl_api::LanAuditEvent::LanDeviceRemoved,
+                Some(d.fingerprint),
+                Some(d.label),
+            ));
+        }
+        if let Err(e) = registry.clear() {
+            tracing::warn!(error = %e, "the paired computer list could not be cleared");
+        }
+        self.events
+            .push((cl_api::LanAuditEvent::LanHostKeyRegenerated, None, None));
+        *l.problem
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        self.restart = true;
+        tracing::info!("office network certificate made again; computers pair again");
     }
 
     fn set_announce(&mut self, on: bool) {
@@ -841,6 +966,65 @@ mod tests {
             generation: 3,
             boot_epoch: 0,
         }
+    }
+
+    /// Review S7: a Remove ends that computer's sign-ins on the engine
+    /// (by its fingerprint) before the audit row; when they can't be ended
+    /// the window is told, and the audit row still goes.
+    #[tokio::test]
+    async fn removing_a_computer_ends_its_sign_ins_then_audits() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        const DEV: &str = "ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12ab12";
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/desktop/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "mode": "desktop", "initialized": true,
+                "capabilities": [cl_api::Capabilities::LAN_SESSIONS]
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/v1/desktop/sessions"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"revoked": 2})),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/desktop/audit-events"))
+            .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({})))
+            .mount(&server)
+            .await;
+        let s = cl_api::testing::stub_session(server.address().port());
+        s.client().desktop_info().await.expect("desktop info");
+        let removed = vec![(
+            cl_api::LanAuditEvent::LanDeviceRemoved,
+            Some(DEV.to_string()),
+            Some("Front desk".to_string()),
+        )];
+        record_events(s.client().clone(), Some(s.clone()), removed.clone())
+            .await
+            .expect("sign-ins ended");
+        let seen = server.received_requests().await.expect("recorded");
+        let order: Vec<String> = seen
+            .iter()
+            .filter(|r| r.url.path() != "/api/v1/desktop/info")
+            .map(|r| format!("{} {}", r.method, r.url.path()))
+            .collect();
+        assert_eq!(order[0], "DELETE /api/v1/desktop/sessions", "{order:?}");
+        let del = seen
+            .iter()
+            .find(|r| r.method.as_str() == "DELETE")
+            .expect("delete");
+        assert_eq!(del.url.query(), Some(format!("device={DEV}").as_str()));
+        assert!(order.iter().any(|o| o.starts_with("POST ")), "{order:?}");
+        // Nobody signed in here: the window says the sign-ins live on.
+        assert_eq!(
+            record_events(s.client().clone(), None, removed).await,
+            Err("lan.remove.sessions_failed")
+        );
     }
 
     #[test]

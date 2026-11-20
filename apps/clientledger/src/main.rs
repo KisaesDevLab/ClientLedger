@@ -89,6 +89,9 @@ fn start_lan_host(
         Ok(h) => Some(h),
         Err(e) => {
             tracing::error!(error = %e, "LAN host mode could not start");
+            // The Office Network window explains it and offers the fix
+            // (review M2: a lost certificate is never silently replaced).
+            cl_ui::lan_link::host_start_failed(&e);
             None
         }
     }

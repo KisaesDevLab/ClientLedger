@@ -60,6 +60,12 @@ pub enum TlsSetupError {
     /// Reading or writing the certificate file failed.
     #[error("certificate file: {0}")]
     Io(String),
+    /// The host's key is in the keychain but its certificate file is gone
+    /// (review M2). The paired workstations trust that certificate, so a
+    /// new one would silently unpair them all: the owner decides (restore
+    /// the file, or make a new certificate and pair every computer again).
+    #[error("the office network certificate file is missing")]
+    HostCertificateMissing,
 }
 
 /// Which identity: the host's server certificate or a workstation's
@@ -166,7 +172,10 @@ impl Identity {
     /// Returns the identity and whether it is new.
     ///
     /// # Errors
-    /// `Keychain`, `Io`, `Cert`.
+    /// `Keychain`, `Io`, `Cert`; `HostCertificateMissing` when the host's
+    /// key is saved but its certificate file is gone (review M2: never a
+    /// silent new host identity; [`Identity::regenerate`] is the owner's
+    /// explicit way out).
     pub fn load_or_create(
         store: &dyn SecretStore,
         dir: &Path,
@@ -174,6 +183,17 @@ impl Identity {
     ) -> Result<(Identity, bool), TlsSetupError> {
         if let Some(id) = Self::load(store, dir, role)? {
             return Ok((id, false));
+        }
+        // `save` writes the certificate before the key, so a saved key
+        // with no certificate file means the file was lost or removed.
+        if role == Role::Host
+            && !cert_path(dir, role).exists()
+            && store
+                .get(role.secret_name())
+                .map_err(|e| TlsSetupError::Keychain(e.to_string()))?
+                .is_some()
+        {
+            return Err(TlsSetupError::HostCertificateMissing);
         }
         let id = Self::generate()?;
         id.save(store, dir, role)?;
@@ -561,6 +581,34 @@ mod tests {
         let key_hex = store.get("lan-host-key").expect("get").expect("some");
         assert!(!to_hex(&on_disk).contains(key_hex.expose()));
         assert!(!format!("{c:?}").contains(key_hex.expose()));
+    }
+
+    /// Review M2: a host whose certificate file is gone (key still in the
+    /// keychain) does not quietly become a new host; regenerate is the
+    /// explicit way out. A workstation's own device identity is remade.
+    #[test]
+    fn a_lost_host_certificate_is_an_error_not_a_new_identity() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let store = MemStore::default();
+        let (a, _) = Identity::load_or_create(&store, dir.path(), Role::Host).expect("a");
+        fs::remove_file(dir.path().join("lan-host.crt")).expect("rm");
+        assert!(matches!(
+            Identity::load_or_create(&store, dir.path(), Role::Host),
+            Err(TlsSetupError::HostCertificateMissing)
+        ));
+        assert!(!dir.path().join("lan-host.crt").exists(), "nothing made");
+        let b = Identity::regenerate(&store, dir.path(), Role::Host).expect("regenerate");
+        assert_ne!(a.fingerprint(), b.fingerprint());
+        let (c, new) = Identity::load_or_create(&store, dir.path(), Role::Host).expect("c");
+        assert!(!new);
+        assert_eq!(c.fingerprint(), b.fingerprint());
+        // Device: no pairing rests on a lost device file's old identity
+        // (the host no longer knows it either way), so it is remade.
+        let (d, _) = Identity::load_or_create(&store, dir.path(), Role::Device).expect("d");
+        fs::remove_file(dir.path().join(Role::Device.file_name())).expect("rm");
+        let (e, new) = Identity::load_or_create(&store, dir.path(), Role::Device).expect("e");
+        assert!(new);
+        assert_ne!(d.fingerprint(), e.fingerprint());
     }
 
     #[test]

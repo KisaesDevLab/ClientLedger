@@ -1045,6 +1045,57 @@ fn p33_a_new_stamp_with_nothing_editable_changed_saves_without_asking() {
     assert_eq!(stored_memo(&link, id).as_deref(), Some("mine"));
 }
 
+/// The stored charge's expense-line tags (the card's own line left out).
+fn expense_tags(link: &Arc<CompanyLink>, id: TransactionId) -> Vec<Option<cl_core::ids::TagId>> {
+    let mut demo = link.demo_state().expect("demo");
+    let chart = demo
+        .chart
+        .get_or_insert_with(crate::company::demo::chart)
+        .clone();
+    let contacts = demo.contacts_mut().clone();
+    let t = demo.ledger.get(&chart, &contacts, id).expect("txn").record;
+    t.lines
+        .iter()
+        .filter(|l| l.account_number.as_deref() != Some("2050"))
+        .map(|l| l.tag_id)
+        .collect()
+}
+
+/// Review S5: a charge has no header tags of its own on the wire; the
+/// header tags fill the tag of every line without one. So another user's
+/// header-tag change reaches the books as line tags, and those are
+/// compared: my save after it is never a silent re-save, and Keep mine
+/// (with only my memo changed) keeps their tags.
+#[test]
+fn p33_their_header_tags_are_never_lost_to_my_save() {
+    let (_d, link) = link();
+    let (mut a, mut b, id) = two_windows(&link);
+    assert_eq!(expense_tags(&link, id), vec![None], "saved untagged");
+    let tag = b.books.tags.iter().find(|t| t.is_active).expect("tag").id;
+    let tags = b.books.tags.clone();
+    b.header.edit_step(|h| {
+        kit::apply_tag_edit(&tags, &mut h.header_tags, kit::TagEdit::Add(tag));
+    });
+    assert!(b.start_save(SaveIntent::Save, None), "{}", b.state());
+    assert_eq!(expense_tags(&link, id), vec![Some(tag)], "b's tag stored");
+    a.header.edit_step(|h| h.memo = "mine".into());
+    let saves = a.flow.count;
+    assert!(!a.start_save(SaveIntent::Save, None));
+    assert_eq!(a.flow.count, saves, "no silent re-save over their tags");
+    let open = a
+        .conflict
+        .open
+        .take()
+        .expect("the dialog shows their change");
+    assert!(open.dialog.conflict().theirs_changed_lines());
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(!merge.lines_from_mine, "only their lines changed");
+    a.run_choice(open, ConflictChoice::KeepMine(merge));
+    assert_eq!(a.state()["error"], false, "{}", a.state());
+    assert_eq!(stored_memo(&link, id).as_deref(), Some("mine"));
+    assert_eq!(expense_tags(&link, id), vec![Some(tag)], "their tag kept");
+}
+
 #[test]
 fn p33_a_charge_deleted_elsewhere_is_never_saved_again() {
     let (_d, link) = link();
