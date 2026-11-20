@@ -419,7 +419,7 @@
   {"method":"GET","path":"/api/v1/budgets","inSpec":true,"fragmentHash":null},
   {"method":"POST","path":"/api/v1/budgets","inSpec":true,"fragmentHash":"2a511f6959e66d2c342a85ee23006054e684fa4550643b75398345b639a81ada"},
   {"method":"PUT","path":"/api/v1/budgets/{id}","inSpec":true,"fragmentHash":"05302d204229287850af1b1afde60b32dfac98c48ded522530f595e8c78b7191"},
-  {"method":"DELETE","path":"/api/v1/budgets/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
+  {"method":"DELETE","path":"/api/v1/budgets/{id}","inSpec":true,"fragmentHash":"aaca9441d5b6928d120bc68f1ad9517ed93840935a92874ab6f819962232a567"},
   {"method":"GET","path":"/api/v1/budgets/{id}/lines","inSpec":true,"fragmentHash":"1a17c8566cc82a56e7d283ea1e568658125a8fb7c9196ab15c682e56b1ba5518"},
   {"method":"PUT","path":"/api/v1/budgets/{id}/lines","inSpec":true,"fragmentHash":"4e5181af962fc66ee05c6a94b6fd98eecc1981b7b91268a2601db600cbea2585"},
   {"method":"POST","path":"/api/v1/budgets/{id}/fill-from-actuals","inSpec":true,"fragmentHash":"c0422fa2caa638e9104c10080b17c3cbcf750e5ad535f6a2e617986ae95ae9de"},
