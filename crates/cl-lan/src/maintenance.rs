@@ -1,79 +1,41 @@
-//! The proxy's gate while the host is busy (plan D1 step 3, review S4).
+//! The proxy's view of the engine (plan D1 step 3, review S4, M9).
 //!
-//! Engine-level maintenance (U-293) is answered by the engine itself. This
-//! gate covers what the engine cannot answer: a file-level restore, a
-//! restart, or the engine being down. While it is closed the proxy answers
-//! 503 `MAINTENANCE` or `HOST_ENGINE_DOWN` in the engine's error shape and
-//! sends nothing to the engine. cl-api never retries a 503 mutation.
+//! The host app publishes the running engine here from its supervisor;
+//! while none is published (starting, restarting, stopped) the proxy
+//! answers 503 `HOST_ENGINE_DOWN` in the engine's error shape and sends
+//! nothing on. cl-api never retries a 503 mutation.
+//!
+//! Maintenance is the engine's own (U-293, `maintenance-v1`): during a
+//! hold it answers 503 `MAINTENANCE` itself. Review M9: the proxy-side
+//! maintenance gate this module used to have had no caller (the app never
+//! restores at the file level; restores go through the engine's archive
+//! import under the engine's hold), so it was removed rather than kept as
+//! untested surface. A stale hold is cleared by the supervisor at every
+//! engine start (review B1).
 
 use std::sync::{Mutex, PoisonError};
 
 use crate::host::{HostUpstream, Upstream, UpstreamState};
 
-/// Why the gate is closed.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Closed {
-    /// A restore or another backup-first operation is running on the host.
-    Maintenance,
-    /// The engine is starting, restarting or stopped.
-    EngineDown,
-}
-
-#[derive(Debug, Default)]
-struct Inner {
-    upstream: Option<Upstream>,
-    closed: Option<Closed>,
-}
-
 /// A settable [`HostUpstream`]: the host app publishes the engine here
-/// (from its supervisor) and closes the gate around restores.
+/// (from its supervisor).
 #[derive(Debug, Default)]
 pub struct Gate {
-    inner: Mutex<Inner>,
+    upstream: Mutex<Option<Upstream>>,
 }
 
 impl Gate {
     /// Publishes the running engine (or `None` while it is down).
     pub fn set_upstream(&self, up: Option<Upstream>) {
-        self.inner
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .upstream = up;
-    }
-
-    /// Closes the gate.
-    pub fn close(&self, why: Closed) {
-        self.inner
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .closed = Some(why);
-    }
-
-    /// Opens the gate.
-    pub fn open(&self) {
-        self.inner
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .closed = None;
-    }
-
-    /// The reason it is closed, if it is.
-    #[must_use]
-    pub fn closed(&self) -> Option<Closed> {
-        self.inner
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .closed
+        *self.upstream.lock().unwrap_or_else(PoisonError::into_inner) = up;
     }
 }
 
 impl HostUpstream for Gate {
     fn state(&self) -> UpstreamState {
-        let g = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
-        match (g.closed, &g.upstream) {
-            (Some(Closed::Maintenance), _) => UpstreamState::Maintenance,
-            (Some(Closed::EngineDown), _) | (None, None) => UpstreamState::EngineDown,
-            (None, Some(u)) => UpstreamState::Ready(u.clone()),
+        match &*self.upstream.lock().unwrap_or_else(PoisonError::into_inner) {
+            Some(u) => UpstreamState::Ready(u.clone()),
+            None => UpstreamState::EngineDown,
         }
     }
 }
@@ -94,10 +56,7 @@ mod tests {
             engine_commit: "c".into(),
         }));
         assert!(matches!(g.state(), UpstreamState::Ready(_)));
-        g.close(Closed::Maintenance);
-        assert!(matches!(g.state(), UpstreamState::Maintenance));
-        assert_eq!(g.closed(), Some(Closed::Maintenance));
-        g.open();
-        assert!(matches!(g.state(), UpstreamState::Ready(_)));
+        g.set_upstream(None);
+        assert!(matches!(g.state(), UpstreamState::EngineDown));
     }
 }

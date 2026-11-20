@@ -85,6 +85,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lan.pair.refused.busy", "Another computer is pairing right now. Try again in a minute."),
     ("lan.pair.refused.denied", "The host computer said no."),
     ("lan.pair.refused.timed_out", "Nobody clicked Allow on the host computer in time. Try again."),
+    ("lan.pair.refused.throttled", "This computer typed a wrong code too many times. Show a new code on the host computer and type that one."),
     // Link states (status bar and overlay).
     ("lan.link.connected", "Connected to the host"),
     ("lan.link.connecting", "Connecting to the host\u{2026}"),

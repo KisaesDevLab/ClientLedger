@@ -36,7 +36,7 @@ use crate::PROTOCOL;
 use crate::head::{self, HostRule, Prefixed};
 use crate::pairing::{APPROVAL_WAIT, PairRefusal, Pairing};
 use crate::pinning::Fingerprint;
-use crate::policy::{self, Interfaces, Recheck, Refusal};
+use crate::policy::{self, Interfaces, Recheck, Refusal, net_key};
 use crate::registry::Registry;
 use crate::relay::{self, Body, UpstreamError};
 use crate::tls::{self, Identity};
@@ -47,17 +47,28 @@ pub const DEFAULT_PORT: u16 = 47615;
 pub const MAX_UNPAIRED: usize = 8;
 /// Unpaired connections at once from one address (M2).
 pub const MAX_UNPAIRED_PER_IP: usize = 2;
-/// TLS handshakes in progress at once, in total (before anyone is known).
+/// TLS handshakes in progress at once, in total (review S1).
 pub const MAX_HANDSHAKES: usize = 64;
-/// TLS handshakes in progress at once from one address.
-pub const MAX_HANDSHAKES_PER_IP: usize = 16;
+/// Of those, at most this many from addresses with no paired device seen
+/// lately: the rest is kept for the office's workstations, so unpaired
+/// peers holding half-open handshakes can never starve a paired save.
+pub const MAX_UNKNOWN_HANDSHAKES: usize = 32;
+/// Handshakes at once from one unknown address (an IPv6 address counts
+/// by its /64, so one machine can't spread over its many addresses).
+pub const MAX_HANDSHAKES_PER_IP: usize = 4;
+/// Handshakes at once from one address where a paired device was seen.
+pub const MAX_KNOWN_HANDSHAKES_PER_IP: usize = 16;
+/// How long an address stays "known" after a paired device's handshake.
+pub const KNOWN_FOR: Duration = Duration::from_mins(30);
 /// Connections (one request each) at once per paired device.
 pub const MAX_DEVICE_CONNECTIONS: usize = 64;
 /// Long-lived event streams at once per paired device.
 pub const MAX_DEVICE_STREAMS: usize = 4;
 /// How often the interface is re-checked (M4).
 pub const RECHECK_EVERY: Duration = Duration::from_secs(30);
-const TLS_TIMEOUT: Duration = Duration::from_secs(10);
+/// A TLS 1.3 handshake on a LAN takes milliseconds; a peer that has not
+/// finished in 3 seconds gives its slot back (review S1).
+const TLS_TIMEOUT: Duration = Duration::from_secs(3);
 const PAIR_BODY_MAX: usize = 1024;
 
 /// The engine as the proxy may use it: a loopback port and the
@@ -87,10 +98,8 @@ impl std::fmt::Debug for Upstream {
 /// What the supervisor says about the engine right now.
 #[derive(Clone, Debug)]
 pub enum UpstreamState {
-    /// Serving.
+    /// Serving. (Maintenance is answered by the engine itself, U-293.)
     Ready(Upstream),
-    /// A file-level restore or other host maintenance is running.
-    Maintenance,
     /// The engine is starting, restarting or stopped.
     EngineDown,
 }
@@ -182,18 +191,49 @@ pub struct PairOk {
 #[derive(Default)]
 struct Counters {
     handshakes_total: usize,
+    handshakes_unknown: usize,
     handshakes_by_ip: HashMap<IpAddr, usize>,
+    /// Addresses (by [`net_key`]) where a paired device finished a
+    /// handshake, and when.
+    known: HashMap<IpAddr, std::time::Instant>,
     unpaired_total: usize,
     unpaired_by_ip: HashMap<IpAddr, usize>,
     device_conns: HashMap<Fingerprint, usize>,
     device_streams: HashMap<Fingerprint, usize>,
 }
 
+impl Counters {
+    fn is_known(&self, key: &IpAddr) -> bool {
+        self.known.get(key).is_some_and(|t| t.elapsed() < KNOWN_FOR)
+    }
+
+    /// A paired device finished a handshake from `ip`.
+    fn mark_known(&mut self, ip: IpAddr) {
+        let now = std::time::Instant::now();
+        self.known.retain(|_, t| now.duration_since(*t) < KNOWN_FOR);
+        self.known.insert(net_key(ip), now);
+    }
+}
+
 enum Slot {
-    Handshake(IpAddr),
+    /// A handshake from this address ([`net_key`]); `known` is filled in
+    /// when the slot is taken.
+    Handshake {
+        key: IpAddr,
+        known: bool,
+    },
     Unpaired(IpAddr),
     DeviceConn(Fingerprint),
     DeviceStream(Fingerprint),
+}
+
+impl Slot {
+    fn handshake(ip: IpAddr) -> Slot {
+        Slot::Handshake {
+            key: net_key(ip),
+            known: false,
+        }
+    }
 }
 
 struct SlotGuard {
@@ -205,12 +245,15 @@ impl Drop for SlotGuard {
     fn drop(&mut self) {
         let mut c = self.counters.lock().unwrap_or_else(PoisonError::into_inner);
         match &self.slot {
-            Slot::Handshake(ip) => {
+            Slot::Handshake { key, known } => {
                 c.handshakes_total = c.handshakes_total.saturating_sub(1);
-                if let Some(n) = c.handshakes_by_ip.get_mut(ip) {
+                if !known {
+                    c.handshakes_unknown = c.handshakes_unknown.saturating_sub(1);
+                }
+                if let Some(n) = c.handshakes_by_ip.get_mut(key) {
                     *n = n.saturating_sub(1);
                     if *n == 0 {
-                        c.handshakes_by_ip.remove(ip);
+                        c.handshakes_by_ip.remove(key);
                     }
                 }
             }
@@ -238,16 +281,28 @@ fn dec(m: &mut HashMap<Fingerprint, usize>, fp: &Fingerprint) {
     }
 }
 
-fn take_slot(counters: &Arc<Mutex<Counters>>, slot: Slot) -> Option<SlotGuard> {
+fn take_slot(counters: &Arc<Mutex<Counters>>, mut slot: Slot) -> Option<SlotGuard> {
     let mut c = counters.lock().unwrap_or_else(PoisonError::into_inner);
-    let ok = match &slot {
-        Slot::Handshake(ip) => {
-            let per = c.handshakes_by_ip.get(ip).copied().unwrap_or(0);
-            if c.handshakes_total >= MAX_HANDSHAKES || per >= MAX_HANDSHAKES_PER_IP {
+    let ok = match &mut slot {
+        Slot::Handshake { key, known } => {
+            *known = c.is_known(key);
+            let per = c.handshakes_by_ip.get(key).copied().unwrap_or(0);
+            let (per_max, pool_full) = if *known {
+                (MAX_KNOWN_HANDSHAKES_PER_IP, false)
+            } else {
+                (
+                    MAX_HANDSHAKES_PER_IP,
+                    c.handshakes_unknown >= MAX_UNKNOWN_HANDSHAKES,
+                )
+            };
+            if c.handshakes_total >= MAX_HANDSHAKES || pool_full || per >= per_max {
                 false
             } else {
                 c.handshakes_total += 1;
-                *c.handshakes_by_ip.entry(*ip).or_default() += 1;
+                if !*known {
+                    c.handshakes_unknown += 1;
+                }
+                *c.handshakes_by_ip.entry(*key).or_default() += 1;
                 true
             }
         }
@@ -460,8 +515,10 @@ async fn accept(l: Option<&TcpListener>) -> std::io::Result<(TcpStream, SocketAd
 
 async fn serve_conn(sh: Arc<Shared>, tcp: TcpStream, peer_ip: IpAddr) {
     let _ = tcp.set_nodelay(true);
-    // Capped before the handshake: nobody is known yet (review M2).
-    let Some(handshake) = take_slot(&sh.counters, Slot::Handshake(peer_ip)) else {
+    // Capped before the handshake: nobody is known yet (review M2), but an
+    // address where a paired device was seen lately draws on its own
+    // share (review S1).
+    let Some(handshake) = take_slot(&sh.counters, Slot::handshake(peer_ip)) else {
         return;
     };
     let Ok(Ok(mut tls)) = tokio::time::timeout(TLS_TIMEOUT, sh.acceptor.accept(tcp)).await else {
@@ -476,6 +533,12 @@ async fn serve_conn(sh: Arc<Shared>, tcp: TcpStream, peer_ip: IpAddr) {
         return;
     };
     let paired = sh.registry.contains(&fp);
+    if paired {
+        sh.counters
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .mark_known(peer_ip);
+    }
     let _slot = if paired {
         let Some(g) = take_slot(&sh.counters, Slot::DeviceConn(fp)) else {
             head::write_refusal(
@@ -489,7 +552,7 @@ async fn serve_conn(sh: Arc<Shared>, tcp: TcpStream, peer_ip: IpAddr) {
         };
         g
     } else {
-        let Some(g) = take_slot(&sh.counters, Slot::Unpaired(peer_ip)) else {
+        let Some(g) = take_slot(&sh.counters, Slot::Unpaired(net_key(peer_ip))) else {
             return;
         };
         g
@@ -577,13 +640,6 @@ async fn handle(
     }
     let up = match sh.upstream.state() {
         UpstreamState::Ready(u) => u,
-        UpstreamState::Maintenance => {
-            return relay::error_response(
-                503,
-                "MAINTENANCE",
-                "The host is doing maintenance. Try again in a few minutes.",
-            );
-        }
         UpstreamState::EngineDown => {
             return relay::error_response(
                 503,
@@ -676,7 +732,6 @@ fn hello(sh: &Shared, paired: bool) -> Response<Body> {
     let h = if paired {
         let (engine, generation, commit) = match sh.upstream.state() {
             UpstreamState::Ready(u) => ("ready", Some(u.generation), Some(u.engine_commit)),
-            UpstreamState::Maintenance => ("maintenance", None, None),
             UpstreamState::EngineDown => ("down", None, None),
         };
         Hello {
@@ -718,6 +773,10 @@ fn pair_refused(r: PairRefusal) -> Response<Body> {
         ),
         PairRefusal::Denied => (403, "The host did not allow this computer."),
         PairRefusal::TimedOut => (408, "Nobody answered on the host. Try again."),
+        PairRefusal::Throttled => (
+            429,
+            "Too many wrong tries from this computer. Make a new code on the host.",
+        ),
     };
     relay::error_response(status, r.code(), msg)
 }
@@ -748,7 +807,8 @@ async fn pair(
     if paired {
         return ok();
     }
-    if let Err(r) = sh.pairing.try_secret(&pb.secret) {
+    if let Err(r) = sh.pairing.try_secret(peer, &pb.secret) {
+        tracing::info!(code = r.code(), "LAN pairing refused");
         return pair_refused(r);
     }
     // The device is the TLS client certificate of this connection (M2).
@@ -889,10 +949,57 @@ mod tests {
         assert!(take_slot(&c, Slot::DeviceStream(fp)).is_some());
         let hip: IpAddr = "192.168.9.9".parse().expect("ip");
         let hs: Vec<_> = (0..MAX_HANDSHAKES_PER_IP)
-            .map(|_| take_slot(&c, Slot::Handshake(hip)).expect("handshake"))
+            .map(|_| take_slot(&c, Slot::handshake(hip)).expect("handshake"))
             .collect();
-        assert!(take_slot(&c, Slot::Handshake(hip)).is_none());
+        assert!(take_slot(&c, Slot::handshake(hip)).is_none());
         drop(hs);
-        assert!(take_slot(&c, Slot::Handshake(hip)).is_some());
+        assert!(take_slot(&c, Slot::handshake(hip)).is_some());
+    }
+
+    /// Review S1: 64 stalled handshakes from unpaired peers (16 addresses,
+    /// 4 each, over and over) never take the share kept for the addresses
+    /// where paired workstations were seen; their saves still get in.
+    #[test]
+    fn stalled_unpaired_handshakes_never_starve_a_paired_workstation() {
+        let c = Arc::new(Mutex::new(Counters::default()));
+        let desk: IpAddr = "192.168.1.20".parse().expect("ip");
+        c.lock().expect("lock").mark_known(desk);
+        let mut stalled = Vec::new();
+        for i in 0..16 {
+            let ip: IpAddr = format!("192.168.1.{}", 100 + i).parse().expect("ip");
+            for _ in 0..4 {
+                if let Some(g) = take_slot(&c, Slot::handshake(ip)) {
+                    stalled.push(g);
+                }
+            }
+            // A fifth from the same address is refused at once.
+            assert!(take_slot(&c, Slot::handshake(ip)).is_none());
+        }
+        assert_eq!(stalled.len(), MAX_UNKNOWN_HANDSHAKES, "the unknown share");
+        // Another unknown address: refused (its share is full).
+        assert!(take_slot(&c, Slot::handshake("192.168.1.250".parse().expect("ip"))).is_none());
+        // The paired workstation: its handshakes still get slots.
+        let desk_slots: Vec<_> = (0..MAX_KNOWN_HANDSHAKES_PER_IP)
+            .map(|_| take_slot(&c, Slot::handshake(desk)).expect("a paired handshake"))
+            .collect();
+        drop(desk_slots);
+        drop(stalled);
+        let c = c.lock().expect("lock");
+        assert_eq!((c.handshakes_total, c.handshakes_unknown), (0, 0));
+        assert!(c.handshakes_by_ip.is_empty());
+    }
+
+    /// One machine's IPv6 addresses count as one (by /64).
+    #[test]
+    fn ipv6_addresses_count_by_their_slash_64() {
+        let c = Arc::new(Mutex::new(Counters::default()));
+        let held: Vec<_> = (1..=20)
+            .filter_map(|i| {
+                let ip: IpAddr = format!("fd00:1:2:3::{i:x}").parse().expect("ip");
+                take_slot(&c, Slot::handshake(ip))
+            })
+            .collect();
+        assert_eq!(held.len(), MAX_HANDSHAKES_PER_IP);
+        assert!(take_slot(&c, Slot::handshake("fd00:1:2:4::1".parse().expect("ip"))).is_some());
     }
 }

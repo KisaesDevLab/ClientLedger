@@ -52,6 +52,20 @@ pub fn canonical(ip: IpAddr) -> IpAddr {
     ip.to_canonical()
 }
 
+/// The address a per-address limit counts by (review S1, M3): an IPv4
+/// address itself, an IPv6 address by its /64, since one machine may use
+/// any address in its /64.
+#[must_use]
+pub fn net_key(ip: IpAddr) -> IpAddr {
+    match canonical(ip) {
+        IpAddr::V6(v6) => {
+            let s = v6.segments();
+            IpAddr::V6(std::net::Ipv6Addr::new(s[0], s[1], s[2], s[3], 0, 0, 0, 0))
+        }
+        v4 @ IpAddr::V4(_) => v4,
+    }
+}
+
 /// Ok when the host may listen on `ip` and serve peers from it.
 ///
 /// # Errors

@@ -228,7 +228,8 @@ impl LanHost {
         &self.registry
     }
 
-    /// The gate closed around restores.
+    /// Where the supervisor's engine is published for the proxy (no
+    /// maintenance gate here: the engine answers that itself, review M9).
     #[must_use]
     pub fn gate(&self) -> &Arc<Gate> {
         &self.gate
@@ -808,6 +809,7 @@ pub fn refusal_key(r: cl_lan::pairing::PairRefusal) -> &'static str {
         P::Busy => "lan.pair.refused.busy",
         P::Denied => "lan.pair.refused.denied",
         P::TimedOut => "lan.pair.refused.timed_out",
+        P::Throttled => "lan.pair.refused.throttled",
     }
 }
 #[cfg(test)]

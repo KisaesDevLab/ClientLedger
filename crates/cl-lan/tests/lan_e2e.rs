@@ -14,7 +14,7 @@ use bytes::Bytes;
 use cl_core::Secret;
 use cl_lan::client::{self, CallError, LinkState, Workstation, WorkstationConfig};
 use cl_lan::host::{HostProxy, ProxyConfig, ProxyStatus, Upstream};
-use cl_lan::maintenance::{Closed, Gate};
+use cl_lan::maintenance::Gate;
 use cl_lan::pairing::{PairRefusal, Pairing};
 use cl_lan::pinning::{Fingerprint, PairingCode};
 use cl_lan::policy::FakeInterfaces;
@@ -351,6 +351,33 @@ async fn wrong_code_and_denied_pairing_are_refused() {
     );
     assert!(clicker.await.expect("join"));
     assert!(!lab.registry.contains(&device.fingerprint()));
+
+    // Review M3: one machine's wrong guesses stop at its own budget; the
+    // code is not burned and still shows on the host.
+    let code = lab
+        .pairing
+        .new_code(&lab.host_id.fingerprint())
+        .expect("code");
+    let wrong = PairingCode {
+        pin: code.pin,
+        secret: code.secret ^ 7,
+    };
+    for _ in 0..cl_lan::pairing::PEER_TRIES {
+        assert_eq!(
+            client::pair(lab.addr, wrong, &device, "x").await,
+            Err(CallError::Pair(PairRefusal::WrongCode))
+        );
+    }
+    for _ in 0..5 {
+        assert_eq!(
+            client::pair(lab.addr, wrong, &device, "x").await,
+            Err(CallError::Pair(PairRefusal::Throttled))
+        );
+    }
+    assert!(matches!(
+        lab.pairing.view(),
+        cl_lan::pairing::CodeView::Active { .. }
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -579,11 +606,18 @@ async fn removed_device_is_refused_at_once_and_its_stream_closes() {
     assert!(r.contains("LAN_NOT_PAIRED"), "{r}");
 }
 
+/// The proxy answers for an engine that is down without sending anything
+/// on. (Review M9: there is no proxy-side maintenance gate any more; the
+/// engine's own `maintenance-v1` answers 503 `MAINTENANCE` during a hold.)
 #[tokio::test(flavor = "multi_thread")]
-async fn gate_answers_maintenance_and_engine_down() {
+async fn gate_answers_engine_down() {
+    use cl_lan::host::{HostUpstream, UpstreamState};
     let lab = lab().await;
     let device = pair(&lab).await;
-    lab.gate.close(Closed::Maintenance);
+    let UpstreamState::Ready(up) = lab.gate.state() else {
+        panic!("the lab's engine is published");
+    };
+    lab.gate.set_upstream(None);
     let mut s = tls_to_proxy(&lab, &device).await;
     let r = raw(
         &mut s,
@@ -591,15 +625,15 @@ async fn gate_answers_maintenance_and_engine_down() {
     )
     .await;
     assert!(
-        r.starts_with("HTTP/1.1 503") && r.contains("\"MAINTENANCE\""),
+        r.starts_with("HTTP/1.1 503") && r.contains("HOST_ENGINE_DOWN"),
         "{r}"
     );
-    lab.gate.close(Closed::EngineDown);
-    let mut s = tls_to_proxy(&lab, &device).await;
-    let r = raw(&mut s, b"GET /api/v1/x HTTP/1.1\r\nHost: x\r\n\r\n").await;
-    assert!(r.contains("HOST_ENGINE_DOWN"), "{r}");
+    let h = client::hello(lab.addr, HostPin::Full(lab.host_id.fingerprint()), &device)
+        .await
+        .expect("hello");
+    assert_eq!(h.engine.as_deref(), Some("down"));
     assert_eq!(lab.seen.lock().expect("lock").requests.len(), 0);
-    lab.gate.open();
+    lab.gate.set_upstream(Some(up));
     let h = client::hello(lab.addr, HostPin::Full(lab.host_id.fingerprint()), &device)
         .await
         .expect("hello");

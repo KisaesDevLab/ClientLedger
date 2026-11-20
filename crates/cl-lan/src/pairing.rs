@@ -16,6 +16,11 @@ use crate::pinning::{Fingerprint, PairingCode, constant_time_eq_u64};
 pub const CODE_LIFETIME: Duration = Duration::from_mins(10);
 /// Wrong secrets allowed for one code, in total, before it is burned.
 pub const CODE_TRIES: u8 = 5;
+/// Wrong secrets one address may spend on one code (review M3): fewer
+/// than [`CODE_TRIES`], so no single machine can burn the code the owner
+/// is reading out. An address over its budget is refused before the
+/// compare and spends nothing.
+pub const PEER_TRIES: u8 = 2;
 /// How long a workstation waits for the host owner's click.
 pub const APPROVAL_WAIT: Duration = Duration::from_secs(120);
 
@@ -34,6 +39,9 @@ pub enum PairRefusal {
     Denied,
     /// Nobody answered on the host in time.
     TimedOut,
+    /// This computer used up its tries on the code showing; the code
+    /// itself still works for others (review M3).
+    Throttled,
 }
 
 impl PairRefusal {
@@ -47,6 +55,7 @@ impl PairRefusal {
             PairRefusal::Busy => "LAN_PAIR_BUSY",
             PairRefusal::Denied => "LAN_PAIR_DENIED",
             PairRefusal::TimedOut => "LAN_PAIR_TIMED_OUT",
+            PairRefusal::Throttled => "LAN_PAIR_THROTTLED",
         }
     }
 
@@ -60,6 +69,7 @@ impl PairRefusal {
             PairRefusal::Busy,
             PairRefusal::Denied,
             PairRefusal::TimedOut,
+            PairRefusal::Throttled,
         ]
         .into_iter()
         .find(|r| r.code() == s)
@@ -102,6 +112,8 @@ struct Code {
     expires: Instant,
     tries_left: u8,
     burned: bool,
+    /// Wrong tries per address ([`crate::policy::net_key`]) on this code.
+    by_peer: std::collections::HashMap<IpAddr, u8>,
 }
 
 struct Pending {
@@ -135,6 +147,7 @@ impl Pairing {
             expires: Instant::now() + CODE_LIFETIME,
             tries_left: CODE_TRIES,
             burned: false,
+            by_peer: std::collections::HashMap::new(),
         });
         Ok(code)
     }
@@ -166,11 +179,12 @@ impl Pairing {
         }
     }
 
-    /// Checks a secret. A right one spends the code.
+    /// Checks a secret from `peer`. A right one spends the code.
     ///
     /// # Errors
-    /// `NoCode`, `WrongCode`, `Burned`.
-    pub fn try_secret(&self, secret_text: &str) -> Result<(), PairRefusal> {
+    /// `NoCode`, `WrongCode`, `Burned`; `Throttled` when `peer` already
+    /// spent its [`PEER_TRIES`] on this code (nothing more is spent).
+    pub fn try_secret(&self, peer: IpAddr, secret_text: &str) -> Result<(), PairRefusal> {
         let mut g = self.code.lock().unwrap_or_else(PoisonError::into_inner);
         let Some(c) = g.as_mut() else {
             return Err(PairRefusal::NoCode);
@@ -182,8 +196,14 @@ impl Pairing {
             *g = None;
             return Err(PairRefusal::NoCode);
         }
+        let key = crate::policy::net_key(peer);
+        let spent = c.by_peer.get(&key).copied().unwrap_or(0);
+        if spent >= PEER_TRIES {
+            return Err(PairRefusal::Throttled);
+        }
         // Every attempt costs a try, right or wrong, before the compare.
         c.tries_left = c.tries_left.saturating_sub(1);
+        c.by_peer.insert(key, spent + 1);
         let given = PairingCode::parse_secret(secret_text).unwrap_or(u64::MAX);
         if constant_time_eq_u64(given, c.value.secret) {
             *g = None;
@@ -267,37 +287,88 @@ mod tests {
         Fingerprint::of_der(b"host")
     }
 
+    fn peer(n: u8) -> IpAddr {
+        IpAddr::from([192, 168, 1, n])
+    }
+
+    fn wrong(code: &PairingCode) -> String {
+        PairingCode {
+            pin: code.pin,
+            secret: code.secret ^ 1,
+        }
+        .secret_text()
+    }
+
     #[test]
     fn right_secret_spends_the_code() {
         let p = Pairing::default();
         let code = p.new_code(&host()).expect("code");
         assert!(matches!(p.view(), CodeView::Active { tries_left: 5, .. }));
-        assert_eq!(p.try_secret(&code.secret_text()), Ok(()));
+        assert_eq!(p.try_secret(peer(9), &code.secret_text()), Ok(()));
         assert_eq!(p.view(), CodeView::None);
-        assert_eq!(p.try_secret(&code.secret_text()), Err(PairRefusal::NoCode));
+        assert_eq!(
+            p.try_secret(peer(9), &code.secret_text()),
+            Err(PairRefusal::NoCode)
+        );
     }
 
     #[test]
     fn five_wrong_tries_burn_the_code() {
         let p = Pairing::default();
         let code = p.new_code(&host()).expect("code");
-        let wrong = PairingCode {
-            pin: code.pin,
-            secret: code.secret ^ 1,
+        let bad = wrong(&code);
+        // Three machines between them (two tries each at most).
+        for n in [1, 1, 2, 2] {
+            assert_eq!(p.try_secret(peer(n), &bad), Err(PairRefusal::WrongCode));
         }
-        .secret_text();
-        for _ in 0..4 {
-            assert_eq!(p.try_secret(&wrong), Err(PairRefusal::WrongCode));
-        }
-        assert_eq!(p.try_secret(&wrong), Err(PairRefusal::Burned));
+        assert_eq!(p.try_secret(peer(3), &bad), Err(PairRefusal::Burned));
         assert_eq!(p.view(), CodeView::Burned);
         // Even the right secret no longer works.
-        assert_eq!(p.try_secret(&code.secret_text()), Err(PairRefusal::Burned));
+        assert_eq!(
+            p.try_secret(peer(4), &code.secret_text()),
+            Err(PairRefusal::Burned)
+        );
         // Garbage costs a try too.
         let p2 = Pairing::default();
         p2.new_code(&host()).expect("code");
-        assert_eq!(p2.try_secret("!!"), Err(PairRefusal::WrongCode));
+        assert_eq!(p2.try_secret(peer(1), "!!"), Err(PairRefusal::WrongCode));
         assert!(matches!(p2.view(), CodeView::Active { tries_left: 4, .. }));
+    }
+
+    /// Review M3: one unpaired machine can't burn the code: after its own
+    /// tries it is refused without spending any, and the right computer
+    /// still pairs with the same code.
+    #[test]
+    fn one_machine_cannot_burn_the_code() {
+        let p = Pairing::default();
+        let code = p.new_code(&host()).expect("code");
+        let bad = wrong(&code);
+        let attacker = peer(66);
+        for _ in 0..PEER_TRIES {
+            assert_eq!(p.try_secret(attacker, &bad), Err(PairRefusal::WrongCode));
+        }
+        for _ in 0..50 {
+            assert_eq!(p.try_secret(attacker, &bad), Err(PairRefusal::Throttled));
+        }
+        // Its right guess would be refused too: the budget is per code.
+        assert_eq!(
+            p.try_secret(attacker, &code.secret_text()),
+            Err(PairRefusal::Throttled)
+        );
+        assert!(matches!(p.view(), CodeView::Active { tries_left: 3, .. }));
+        // Another address of the same IPv6 /64 is the same machine.
+        let v6 = |s: &str| s.parse::<IpAddr>().expect("ip");
+        for _ in 0..PEER_TRIES {
+            let _ = p.try_secret(v6("fd00:1:2:3::1"), &bad);
+        }
+        assert_eq!(
+            p.try_secret(v6("fd00:1:2:3::99"), &bad),
+            Err(PairRefusal::Throttled)
+        );
+        assert_eq!(p.try_secret(peer(20), &code.secret_text()), Ok(()));
+        // A new code gives everyone fresh tries.
+        let code = p.new_code(&host()).expect("code");
+        assert_eq!(p.try_secret(attacker, &code.secret_text()), Ok(()));
     }
 
     #[tokio::test]
