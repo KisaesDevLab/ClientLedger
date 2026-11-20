@@ -140,7 +140,7 @@
   {"method":"PUT","path":"/api/v1/daily-sales/templates/{id}","inSpec":true,"fragmentHash":"a2ec6e53cd6dbe7ffe246623d756f11466450e0047ef33e2e63c76b8b0f38cb3"},
   {"method":"DELETE","path":"/api/v1/daily-sales/templates/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},
   {"method":"PUT","path":"/api/v1/daily-sales/templates/{id}/lines","inSpec":true,"fragmentHash":"efc3b014c0bad1b86541e6413ecc4985d07744d9d3e465675eda4575f14c58aa"},
-  {"method":"GET","path":"/api/v1/daily-sales/entries","inSpec":true,"fragmentHash":null},
+  {"method":"GET","path":"/api/v1/daily-sales/entries","inSpec":true,"fragmentHash":"ab16267ac00038bc5df07dc125adf76f3c9bf98481f4ef9904d92f1bbaf73eb7"},
   {"method":"POST","path":"/api/v1/daily-sales/entries","inSpec":true,"fragmentHash":"ee0178b2f5ea2087ac3382d0cfbd94d2dcd55d505da618f9901543dcdf04038a"},
   {"method":"POST","path":"/api/v1/daily-sales/entries/preview","inSpec":true,"fragmentHash":"0c05c12e8c536f30a996777f7392a49ded8fd99ce3922af89c9eb2f091c8ad21"},
   {"method":"GET","path":"/api/v1/daily-sales/entries/{id}","inSpec":true,"fragmentHash":"dfb56c014d73851a1060c98236b40896aad03713406104d5501b8d8ab094570d"},

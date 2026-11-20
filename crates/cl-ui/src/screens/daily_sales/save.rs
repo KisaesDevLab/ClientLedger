@@ -100,9 +100,13 @@ pub(crate) async fn flow<A: DailyApi>(api: &A, plan: Plan) -> Result<Outcome, Ap
                     .find(|d| !plan.known.contains(&d.id));
                 match found {
                     Some(d) => {
-                        // The list rows carry no stamp: the found draft
-                        // is read for it (U-291).
-                        let at = api.entry(d.id).await?.stamp;
+                        // The row's own stamp (engine #98); an older
+                        // engine's rows carry none, so the draft is read
+                        // for it (U-291, Q-P33at).
+                        let at = match d.stamp {
+                            Some(s) => Some(s),
+                            None => api.entry(d.id).await?.stamp,
+                        };
                         api.update_draft(d.id, at, &plan.body, IdempotencyKey::new())
                             .await?
                     }

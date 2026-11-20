@@ -297,6 +297,7 @@ impl DailyBooks for Fake {
                 transaction: e.transaction,
                 over_short: e.over_short,
                 sales: e.totals.sales,
+                stamp: e.stamp,
             })
             .collect())
     }

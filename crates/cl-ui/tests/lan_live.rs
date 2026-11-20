@@ -304,6 +304,41 @@ impl Host {
         }
     }
 
+    /// A runtime for the host's own sessions.
+    fn host_rt(&self) -> &'static tokio::runtime::Runtime {
+        static RT: std::sync::LazyLock<tokio::runtime::Runtime> = std::sync::LazyLock::new(rt);
+        &RT
+    }
+
+    /// The owner signed in on the host itself (the launch-token client
+    /// over the supervisor's endpoint, as the host window is), the shared
+    /// company open. Drop it before [`Host::stop`].
+    fn sign_in_here(&self) -> Session {
+        let src = cl_ui::engine_link::VerifiedEndpoint::new(
+            Arc::clone(self.sup()) as Arc<dyn SnapshotSource>
+        );
+        let client = Client::new(Arc::new(src), ClientConfig::default()).expect("host client");
+        self.host_rt().block_on(async {
+            client
+                .desktop_info()
+                .await
+                .expect("desktop info on the host");
+            let s = match client.login(OWNER, &self.password).await {
+                Ok(LoginOutcome::Session(s)) => s,
+                other => panic!("login on the host: {other:?}"),
+            };
+            let co = s
+                .companies()
+                .await
+                .expect("companies")
+                .into_iter()
+                .find(|c| c.tenant_name == BOOKS)
+                .expect("the company");
+            s.open_company(co.tenant_id).await.expect("open company");
+            s
+        })
+    }
+
     /// Stops everything (proxy first, then the engine and the database).
     fn stop(&mut self) {
         self.stop_proxy();
@@ -616,6 +651,47 @@ fn stamped_removals(
 }
 
 /// Boots a host, or says why it can't (missing engine or `PostgreSQL`).
+/// Review S7: Remove in the Office Network window ends the computer's
+/// engine sign-ins (through the window's own event path), so its refresh
+/// token stops working at once.
+fn removal_ends_sign_ins(host: &Host, hs: &Session, scratch: &Path) {
+    let root = scratch.join("ws-removed");
+    let store = MemorySecrets::new();
+    let cfg = host.pair(&root, &store, "Old laptop");
+    let (device, _) =
+        Identity::load_or_create(&store, &lan_dir(&root), Role::Device).expect("device");
+    let fp = device.fingerprint();
+    let e = Desk::start(&cfg, &root, &store);
+    e.wait_connected("the computer to remove");
+    let se = e.sign_in(&host.password);
+    let listed = |hs: &Session| {
+        host.host_rt()
+            .block_on(hs.lan_sessions())
+            .expect("sessions")
+            .into_iter()
+            .filter(|r| r.device_id.as_deref() == Some(fp.hex().as_str()))
+            .count()
+    };
+    assert!(listed(hs) > 0, "its sign-in is listed");
+    // What Remove does: the registry, then the window's events.
+    assert!(host.lan().registry().remove(&fp).expect("removed"));
+    host.host_rt()
+        .block_on(cl_ui::lan_link::record_events(
+            hs.client().clone(),
+            Some(hs.clone()),
+            vec![(
+                cl_api::LanAuditEvent::LanDeviceRemoved,
+                Some(fp.hex()),
+                Some("Old laptop".into()),
+            )],
+        ))
+        .expect("its sign-ins ended");
+    assert_eq!(listed(hs), 0, "no sign-in from the removed computer");
+    let gone = e.run(se.ledger_version());
+    assert!(gone.is_err(), "the removed computer gets nothing: {gone:?}");
+    drop(e);
+}
+
 fn host_or_skip(scratch: &Path) -> Option<Host> {
     let Some(exe) = engine_exe() else {
         skip("the engine executable is missing (run `cargo xtask engine`)");
@@ -795,7 +871,29 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
         .expect("read after a proxy restart");
     assert_eq!(debits(&after.record), m("25.00"));
 
+    // --- Remove ends the computer's sign-ins (review S7) ------------------
+    let hs = host.sign_in_here();
+    removal_ends_sign_ins(host, &hs, scratch);
+
+    // --- A crash while holding maintenance (review B1) --------------------
+    // The host holds maintenance (as during a restore, an import commit or
+    // a payroll post); workstations are refused; then the host app goes
+    // away without ending it, as a crash or a power cut would.
+    let held = host
+        .host_rt()
+        .block_on(hs.start_maintenance())
+        .expect("the host starts maintenance");
+    assert!(held.active, "{held:?}");
+    // Refused: 503 MAINTENANCE, or its sign-in already ended by the start.
+    let refused = b.run(sb.transactions().get(id));
+    assert!(
+        refused.is_err(),
+        "a workstation during the hold: {refused:?}"
+    );
+    drop(hs);
+
     // --- Host restart: sign in again, data intact ------------------------
+    let gen_before = b.generation().expect("generation before the restart");
     host.stop();
     wait_until("the link to notice", Duration::from_secs(30), || {
         !b.connected()
@@ -804,20 +902,50 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
     host.sup()
         .wait_ready(Duration::from_mins(3))
         .expect("host ready again");
-    // As after a file-level restore: clear any restored hold before the
-    // proxy reopens (U-293, launch token). None is held here.
-    assert_eq!(
-        host.sup().maintenance_reset().expect("maintenance reset"),
-        0
-    );
+    // B1: the supervisor cleared the stale hold before it published the
+    // engine (nothing here clears it): the owner signs in and can work.
+    let hs2 = host.sign_in_here();
+    let now = host
+        .host_rt()
+        .block_on(hs2.maintenance())
+        .expect("maintenance state");
+    assert!(!now.active, "the crashed host's hold is gone: {now:?}");
     host.start_proxy();
     b.wait_connected("workstation B after the host restart");
+    // S2: the generation a workstation sees keeps going up across a host
+    // app restart (the raw engine generation starts at 1 again).
+    let gen_after = b.generation().expect("generation after the restart");
+    assert!(
+        gen_after > gen_before,
+        "generation {gen_after} after the restart, {gen_before} before"
+    );
     let sb2 = b.sign_in(&host.password);
     let after = b
         .run(sb2.transactions().get(id))
         .expect("read after a host restart");
     assert_eq!(debits(&after.record), m("25.00"), "data intact");
     assert_eq!(after.record.memo.as_deref(), Some(a_memo.as_str()));
+    // And the books take writes again, from the host and a workstation.
+    b.run(sb2.transactions().create_journal_entry(
+        &je2(on(), &unique("after the crash"), supplies, cash, "3.00"),
+        &PostingOptions::default(),
+        key(),
+    ))
+    .expect("a workstation saves after the restart");
+    host.host_rt()
+        .block_on(hs2.transactions().create_journal_entry(
+            &je2(
+                on(),
+                &unique("host after the crash"),
+                supplies,
+                cash,
+                "4.00",
+            ),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect("the host saves after the restart");
+    drop(hs2);
 
     // --- A pin mismatch is refused ---------------------------------------
     let other = Identity::generate().expect("other host");
@@ -1000,13 +1128,24 @@ struct Tally {
     save_ms: Vec<u64>,
     /// 5xx answers or other failures (must stay 0).
     failures: Vec<String>,
+    /// Documents saved by kind (review S6): invoices, payments, bills,
+    /// bill payments, inventory sales.
+    docs: [u64; 5],
+    /// What this client left open on A/R and A/P (exact).
+    ar_open: Money,
+    ap_open: Money,
 }
 
 /// AC3: five workstations save for `CL_LAN_SOAK_SECS` seconds through the
-/// live proxy. 10% of saves hit shared records whose memo carries a counter
-/// each client bumps; a lost update shows up as a counter that went back.
-/// End checks: no failure, no unexplained conflict, every shared counter
-/// equals the bumps made, and the books balance.
+/// live proxy. The mix (review S6): journal entries; 10% bumps of shared
+/// records whose memo carries a counter (a lost update shows up as a
+/// counter that went back); invoices and payments on them, bills and bill
+/// payments, and inventory sales of one shared stocked part. End checks:
+/// no failure, every shared counter equals the bumps made, the trial
+/// balance balances, A/R and A/P equal what the clients left open (the
+/// aging reports and the control accounts alike), and, for runs of three
+/// minutes or more, the save round trip is within Q-P33q (p95 <= 250 ms,
+/// p99 <= 1 s; review B2).
 #[test]
 fn office_network_soak() {
     let Some(secs) = std::env::var("CL_LAN_SOAK_SECS")
@@ -1034,6 +1173,10 @@ static SEEN_READS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSe
 
 const CLIENTS: usize = 5;
 const SHARED: usize = 3;
+/// Q-P33q, for runs of at least [`BUDGET_FROM`].
+const P95_MS: u64 = 250;
+const P99_MS: u64 = 1000;
+const BUDGET_FROM: Duration = Duration::from_mins(3);
 
 fn ms(d: Duration) -> u64 {
     u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
@@ -1050,6 +1193,184 @@ fn counter_of(memo: Option<&str>) -> u64 {
         .unwrap_or(0)
 }
 
+fn qty(s: &str) -> cl_core::Quantity {
+    cl_core::Quantity::parse_wire(s).expect("qty")
+}
+
+/// A report figure as exact money.
+fn amount_of(a: &cl_api::ReportAmount) -> Money {
+    Money::parse_wire(&a.display(4).expect("a number")).expect("money")
+}
+
+/// The books the soak's documents use, made once on the host's company.
+struct SoakBooks {
+    cash: AccountId,
+    supplies: AccountId,
+    income: AccountId,
+    bank: AccountId,
+    clearing: AccountId,
+    ar: AccountId,
+    ap: AccountId,
+    part: cl_core::ids::ItemId,
+    /// One client and one vendor per soak client (their own documents).
+    customers: Vec<cl_core::ids::ContactId>,
+    vendors: Vec<cl_core::ids::ContactId>,
+    /// The stock bill's vendor and what it left open.
+    supplier: cl_core::ids::ContactId,
+    stock_ap: Money,
+}
+
+fn contact(d: &Desk, s: &Session, t: cl_api::ContactType, name: &str) -> cl_core::ids::ContactId {
+    d.run(s.contacts().create(
+        &cl_api::NewContact {
+            fields: cl_api::ContactFields::named(t, unique(name)),
+            opening_balance: Money::ZERO,
+            opening_balance_date: None,
+        },
+        key(),
+    ))
+    .expect("contact")
+    .record
+    .id
+}
+
+fn system_account(d: &Desk, s: &Session, tag: &str) -> AccountId {
+    d.run(s.accounts().list_all(&cl_api::AccountFilter::default()))
+        .expect("accounts")
+        .into_iter()
+        .find(|a| a.system_tag.as_deref() == Some(tag))
+        .unwrap_or_else(|| panic!("the {tag} account"))
+        .id
+}
+
+fn bill_draft(
+    vendor: cl_core::ids::ContactId,
+    lines: Vec<cl_api::BillLineDraft>,
+    amount: Money,
+) -> cl_api::BillDraft {
+    cl_api::BillDraft {
+        vendor,
+        date: on(),
+        vendor_invoice_number: Some(unique("INV").replace(' ', "-")),
+        terms: None,
+        due_date: Some(on()),
+        memo: None,
+        amount_due: amount,
+        lines,
+        received: true,
+        draft_attachment: None,
+    }
+}
+
+fn soak_books(d: &Desk, s: &Session) -> SoakBooks {
+    use cl_api::{AccountType as T, ContactType as C};
+    d.run(s.set_inventory_enabled(true, key()))
+        .expect("inventory on");
+    let cash = account(d, s, T::Asset, "Soak cash");
+    let supplies = account(d, s, T::Expense, "Soak supplies");
+    let income = account(d, s, T::Revenue, "Soak sales");
+    let bank = d
+        .run(s.accounts().create(
+            &AccountFields {
+                name: unique("Soak bank"),
+                account_number: None,
+                account_type: T::Asset,
+                detail_type: Some("bank".into()),
+                description: None,
+                parent_id: None,
+            },
+            key(),
+        ))
+        .expect("bank")
+        .record
+        .id;
+    let accounts = d
+        .run(s.accounts().list_all(&cl_api::AccountFilter::default()))
+        .expect("accounts");
+    let asset = accounts
+        .iter()
+        .find(|a| a.system_tag.as_deref() == Some("inventory_asset"))
+        .expect("Inventory Asset")
+        .id;
+    let cogs = accounts
+        .iter()
+        .find(|a| a.is_active && a.fields.account_type == T::Cogs)
+        .expect("a COGS account")
+        .id;
+    let part = d
+        .run(s.items().create(
+            &cl_api::ItemFields {
+                purchase: cl_api::ItemPurchase {
+                    asset_account_id: Some(asset),
+                    cogs_account_id: Some(cogs),
+                    ..cl_api::ItemPurchase::default()
+                },
+                name: unique("Soak part"),
+                description: None,
+                unit_price: Some(m("10.00")),
+                income_account_id: income,
+                is_taxable: false,
+                item_type: cl_api::ItemType::InventoryPart,
+                discount_percent: None,
+                tax_code_id: None,
+            },
+            key(),
+        ))
+        .expect("part")
+        .record
+        .id;
+    // Stock enough that no run can sell out: 100000 at 0.25.
+    let supplier = contact(d, s, C::Vendor, "Soak supplier");
+    let stock_ap = m("25000.00");
+    let stock = cl_api::BillLineDraft {
+        item: Some(part),
+        quantity: Some(qty("100000")),
+        unit_price: Some(m("0.25")),
+        unit: None,
+        ..cl_api::BillLineDraft::expense(asset, stock_ap)
+    };
+    d.run(s.bills().create(
+        &bill_draft(supplier, vec![stock], stock_ap),
+        &PostingOptions::default(),
+        key(),
+    ))
+    .expect("stock bill");
+    SoakBooks {
+        cash,
+        supplies,
+        income,
+        bank,
+        clearing: system_account(d, s, "payments_clearing"),
+        ar: system_account(d, s, "accounts_receivable"),
+        ap: system_account(d, s, "accounts_payable"),
+        part,
+        customers: (0..CLIENTS)
+            .map(|i| contact(d, s, C::Customer, &format!("Soak client {i}")))
+            .collect(),
+        vendors: (0..CLIENTS)
+            .map(|i| contact(d, s, C::Vendor, &format!("Soak vendor {i}")))
+            .collect(),
+        supplier,
+        stock_ap,
+    }
+}
+
+/// A report call, waiting out the engine's report limit once.
+fn report<T>(d: &Desk, mut call: impl FnMut() -> Result<T, ApiError>) -> T {
+    match call() {
+        Err(ApiError::RateLimited { retry_after }) => {
+            std::thread::sleep(
+                retry_after.unwrap_or(Duration::from_mins(1)) + Duration::from_secs(1),
+            );
+            call().unwrap_or_else(|e| panic!("report: {e}"))
+        }
+        r => {
+            let _ = d;
+            r.unwrap_or_else(|e| panic!("report: {e}"))
+        }
+    }
+}
+
 fn soak(host: &Host, scratch: &Path, run_for: Duration) {
     let started = Instant::now();
     let mut desks = Vec::new();
@@ -1062,8 +1383,8 @@ fn soak(host: &Host, scratch: &Path, run_for: Duration) {
         desks.push(desk);
     }
     let first = desks[0].sign_in(&host.password);
-    let cash = account(&desks[0], &first, AccountType::Asset, "Soak cash");
-    let supplies = account(&desks[0], &first, AccountType::Expense, "Soak supplies");
+    let books = soak_books(&desks[0], &first);
+    let (cash, supplies) = (books.cash, books.supplies);
     let shared: Vec<_> = (0..SHARED)
         .map(|i| {
             desks[0]
@@ -1090,10 +1411,8 @@ fn soak(host: &Host, scratch: &Path, run_for: Duration) {
             .iter()
             .enumerate()
             .map(|(i, desk)| {
-                let (shared, bumps, password) = (&shared, &bumps, &host.password);
-                scope.spawn(move || {
-                    soak_client(i, desk, password, cash, supplies, shared, bumps, deadline)
-                })
+                let (shared, bumps, password, books) = (&shared, &bumps, &host.password, &books);
+                scope.spawn(move || soak_client(i, desk, password, books, shared, bumps, deadline))
             })
             .collect();
         handles
@@ -1107,6 +1426,9 @@ fn soak(host: &Host, scratch: &Path, run_for: Duration) {
     let lost: u64 = tallies.iter().map(|t| t.lost).sum();
     let replays: u64 = tallies.iter().map(|t| t.deadlock_replays).sum();
     let limited: u64 = tallies.iter().map(|t| t.rate_limited).sum();
+    let docs: Vec<u64> = (0..5)
+        .map(|k| tallies.iter().map(|t| t.docs[k]).sum())
+        .collect();
     let mut lat: Vec<u64> = tallies
         .iter()
         .flat_map(|t| t.save_ms.iter().copied())
@@ -1115,9 +1437,10 @@ fn soak(host: &Host, scratch: &Path, run_for: Duration) {
     let pct = |p: usize| {
         lat.get((lat.len() * p / 100).min(lat.len().saturating_sub(1)))
             .copied()
+            .unwrap_or(0)
     };
     eprintln!(
-        "soak: save round trip through the proxy p50 {:?} ms, p95 {:?} ms, p99 {:?} ms, max {:?} ms ({} saves); {limited} 429s waited out",
+        "soak: save round trip through the proxy p50 {} ms, p95 {} ms, p99 {} ms, max {:?} ms ({} saves); {limited} 429s waited out",
         pct(50),
         pct(95),
         pct(99),
@@ -1126,8 +1449,13 @@ fn soak(host: &Host, scratch: &Path, run_for: Duration) {
     );
     let failures: Vec<&String> = tallies.iter().flat_map(|t| &t.failures).collect();
     eprintln!(
-        "soak: {CLIENTS} clients, {:?}: {saves} saves, {reads} reads, {conflicts} resolved conflicts, {replays} deadlock replays, {lost} lost, {} failures",
+        "soak: {CLIENTS} clients, {:?}: {saves} saves ({} invoices, {} payments, {} bills, {} bill payments, {} inventory sales), {reads} reads, {conflicts} resolved conflicts, {replays} deadlock replays, {lost} lost, {} failures",
         started.elapsed(),
+        docs[0],
+        docs[1],
+        docs[2],
+        docs[3],
+        docs[4],
         failures.len()
     );
     assert!(failures.is_empty(), "failures: {failures:?}");
@@ -1144,24 +1472,74 @@ fn soak(host: &Host, scratch: &Path, run_for: Duration) {
             "shared entry {i}: every bump kept"
         );
     }
-    // The books balance: cash and supplies move by the same amounts.
-    let cash_now = desks[0]
-        .run(first.accounts().get(cash))
-        .expect("cash")
-        .record
-        .balance
-        .unwrap_or_default();
-    let supplies_now = desks[0]
-        .run(first.accounts().get(supplies))
-        .expect("supplies")
-        .record
-        .balance
-        .unwrap_or_default();
+    let d0 = &desks[0];
+    // The trial balance balances (accrual, through the soak's date).
+    let tb = report(d0, || {
+        d0.run(first.reports().trial_balance(
+            CalendarDate::from_ymd(2026, 1, 1).expect("date"),
+            on(),
+            cl_api::ReportBasis::Accrual,
+        ))
+    });
     assert_eq!(
-        cash_now.abs(),
-        supplies_now.abs(),
-        "every entry posted both sides"
+        amount_of(&tb.total_debits),
+        amount_of(&tb.total_credits),
+        "the trial balance balances"
     );
+    // A/R: what the clients left open = the aging's exact total = the
+    // control account.
+    let ar_open = Money::sum(tallies.iter().map(|t| t.ar_open)).expect("sum");
+    let aging = report(d0, || d0.run(first.reports().ar_aging_summary(on())));
+    assert_eq!(aging.total_exact, ar_open, "A/R aging = open invoices");
+    let ar_gl = d0
+        .run(first.accounts().get(books.ar))
+        .expect("A/R")
+        .record
+        .balance
+        .unwrap_or_default();
+    assert_eq!(ar_gl, ar_open, "A/R account = open invoices");
+    // A/P: the same for bills (the stock bill stays open).
+    let ap_open =
+        Money::sum(tallies.iter().map(|t| t.ap_open).chain([books.stock_ap])).expect("sum");
+    let ap_aging = report(d0, || d0.run(first.reports().ap_aging_summary(on())));
+    let aged = Money::sum(
+        books
+            .vendors
+            .iter()
+            .chain([&books.supplier])
+            .filter_map(|v| ap_aging.total_of(*v).map(amount_of)),
+    )
+    .expect("sum");
+    assert_eq!(aged, ap_open, "A/P aging = open bills");
+    let ap_gl = d0
+        .run(first.accounts().get(books.ap))
+        .expect("A/P")
+        .record
+        .balance
+        .unwrap_or_default();
+    assert_eq!(ap_gl.abs(), ap_open, "A/P account = open bills");
+    // Review B2: the save budget (Q-P33q), measured through the proxy and
+    // the forwarder, on every save of a run of three minutes or more.
+    if run_for >= BUDGET_FROM {
+        assert!(pct(95) <= P95_MS, "p95 {} ms > {P95_MS} ms", pct(95));
+        assert!(pct(99) <= P99_MS, "p99 {} ms > {P99_MS} ms", pct(99));
+    }
+}
+
+/// Times one keyed save (each attempt's round trip goes into the tally).
+fn timed<T>(
+    t: &mut Tally,
+    mut save: impl FnMut(IdempotencyKey) -> Result<T, ApiError>,
+) -> Result<T, ApiError> {
+    let mut lat = Vec::new();
+    let r = keyed(t, |k| {
+        let at = Instant::now();
+        let r = save(k);
+        lat.push(at.elapsed());
+        r
+    });
+    t.save_ms.extend(lat.iter().map(|d| ms(*d)));
+    r
 }
 
 #[allow(
@@ -1173,113 +1551,297 @@ fn soak_client(
     i: usize,
     desk: &Desk,
     password: &Secret,
-    cash: AccountId,
-    supplies: AccountId,
+    books: &SoakBooks,
     shared: &[cl_core::ids::TransactionId],
     bumps: &[AtomicU64],
     deadline: Instant,
 ) -> Tally {
-    let mut t = Tally::default();
+    let (cash, supplies) = (books.cash, books.supplies);
+    let mut t = Tally {
+        ar_open: Money::ZERO,
+        ap_open: Money::ZERO,
+        ..Tally::default()
+    };
     let s = desk.sign_in(password);
+    let (customer, vendor) = (books.customers[i], books.vendors[i]);
+    // This client's open documents, oldest first (id, amount).
+    let mut invoices: std::collections::VecDeque<(cl_core::ids::TransactionId, Money)> =
+        std::collections::VecDeque::new();
+    let mut bills: std::collections::VecDeque<(cl_core::ids::TransactionId, Money)> =
+        std::collections::VecDeque::new();
     let mut n: u64 = 0;
     while Instant::now() < deadline {
         n += 1;
         std::thread::sleep(PACE);
         // Amounts from integer minor units: 1.00 to 9.99.
         let cents = 100 + (n * 37 + i as u64 * 11) % 900;
-        let amount = Money::from_cents(i64::try_from(cents).unwrap_or(100))
-            .expect("cents")
-            .to_wire();
-        if n.is_multiple_of(10) {
-            // 10%: bump a shared record's counter (read, then save on it).
-            let k = (usize::try_from(n).unwrap_or(0) + i) % shared.len();
-            loop {
-                let got = match read(&mut t, || desk.run(s.transactions().get(shared[k]))) {
-                    Ok(g) => g,
-                    Err(e) => {
-                        t.failures.push(format!("read shared: {e}"));
-                        break;
-                    }
+        let amount = Money::from_cents(i64::try_from(cents).unwrap_or(100)).expect("cents");
+        match n % 10 {
+            0 => bump_shared(i, n, desk, &s, &mut t, books, shared, bumps),
+            2 => {
+                let line = cl_api::InvoiceLine {
+                    is_taxable: Some(false),
+                    ..cl_api::InvoiceLine::account(books.income, qty("1"), amount)
                 };
-                t.reads += 1;
-                let now = counter_of(got.record.memo.as_deref());
-                // Each client's content is its own: two clients never ask
-                // for the same record, so a refused save can never be
-                // reconciled as "already saved" from the other's write.
-                let memo = format!("{} by {i}", counter_memo(&format!("shared {k}"), now + 1));
-                let entry = je2(on(), &memo, supplies, cash, "1.00");
-                let mut lat = Vec::new();
-                let saved = keyed(&mut t, |k2| {
-                    let at = Instant::now();
-                    let r = desk.run(s.transactions().update_journal_entry(
-                        shared[k],
-                        &got.version,
-                        &entry,
-                        &PostingOptions::default(),
-                        k2,
-                    ));
-                    lat.push(at.elapsed());
-                    r
-                });
-                t.save_ms.extend(lat.iter().map(|d| ms(*d)));
-                match saved {
-                    Ok(saved) => {
+                let new = cl_api::NewInvoice::new(customer, on(), vec![line]);
+                match timed(&mut t, |k| {
+                    desk.run(s.invoices().create(&new, &PostingOptions::default(), k))
+                }) {
+                    Ok(made) => {
                         t.saves += 1;
-                        // Two saves accepted from the same read of the same
-                        // record: one overwrote the other (a lost update).
-                        let read = got.version.stamp().map(|s| format!("{k}@{s:?}"));
-                        if let Some(r) = read
-                            && !SEEN_READS
-                                .lock()
-                                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .insert(r.clone())
-                        {
-                            t.lost += 1;
-                            t.failures.push(format!(
-                                "lost update: two saves accepted from read {r} (deadlock replays so far: {})",
-                                t.deadlock_replays
-                            ));
-                        }
-                        let prev = bumps[k].fetch_add(1, Ordering::SeqCst);
-                        if counter_of(saved.record.memo.as_deref()) != now + 1 || prev + 1 < now + 1
-                        {
-                            t.lost += 1;
-                        }
-                        break;
+                        t.docs[0] += 1;
+                        invoices.push_back((made.invoice.record.txn.id, amount));
+                        t.ar_open = t.ar_open.checked_add(amount).expect("sum");
                     }
-                    Err(e) if is_stale(&e) => t.conflicts += 1,
-                    Err(e) => {
-                        t.failures.push(format!("shared save: {e}"));
-                        break;
+                    Err(e) => t.failures.push(format!("invoice: {e}")),
+                }
+            }
+            4 => {
+                if let Some((inv, owed)) = invoices.pop_front() {
+                    receive(desk, &s, &mut t, books, customer, inv, owed);
+                }
+            }
+            5 => {
+                let draft = bill_draft(
+                    vendor,
+                    vec![cl_api::BillLineDraft::expense(supplies, amount)],
+                    amount,
+                );
+                match timed(&mut t, |k| {
+                    desk.run(s.bills().create(&draft, &PostingOptions::default(), k))
+                }) {
+                    Ok(made) => {
+                        t.saves += 1;
+                        t.docs[2] += 1;
+                        bills.push_back((made.record.txn.id, amount));
+                        t.ap_open = t.ap_open.checked_add(amount).expect("sum");
+                    }
+                    Err(e) => t.failures.push(format!("bill: {e}")),
+                }
+            }
+            7 => {
+                if let Some((bill, owed)) = bills.pop_front() {
+                    let req = cl_api::PayBillsRequest {
+                        bank_account: books.bank,
+                        date: on(),
+                        bills: vec![cl_api::BillToPay {
+                            bill,
+                            cash: owed,
+                            discount: Money::ZERO,
+                        }],
+                        credits: Vec::new(),
+                        discount_account: None,
+                        method: cl_api::PayMethod::Check(cl_api::CheckNumbering::PrintLater),
+                        memo: None,
+                    };
+                    match timed(&mut t, |k| {
+                        desk.run(s.bill_payments().pay(&req, &PostingOptions::default(), k))
+                    }) {
+                        Ok(_) => {
+                            t.saves += 1;
+                            t.docs[3] += 1;
+                            t.ap_open = t.ap_open.checked_sub(owed).expect("sub");
+                        }
+                        Err(e) => t.failures.push(format!("bill payment: {e}")),
                     }
                 }
             }
-        } else {
-            let entry = je2(on(), &unique(&format!("soak {i}")), supplies, cash, &amount);
-            let mut lat = Vec::new();
-            let made = keyed(&mut t, |k2| {
-                let at = Instant::now();
-                let r = desk.run(s.transactions().create_journal_entry(
-                    &entry,
-                    &PostingOptions::default(),
-                    k2,
-                ));
-                lat.push(at.elapsed());
-                r
-            });
-            t.save_ms.extend(lat.iter().map(|d| ms(*d)));
-            match made {
-                Ok(_) => t.saves += 1,
-                Err(e) => t.failures.push(format!("entry: {e}")),
+            8 => {
+                // An inventory sale: one of the shared part at its 10.00.
+                let line = cl_api::InvoiceLine {
+                    is_taxable: Some(false),
+                    ..cl_api::InvoiceLine::item(books.part, qty("1"))
+                };
+                let new = cl_api::NewInvoice::new(customer, on(), vec![line]);
+                match timed(&mut t, |k| {
+                    desk.run(s.invoices().create(&new, &PostingOptions::default(), k))
+                }) {
+                    Ok(made) => {
+                        t.saves += 1;
+                        t.docs[4] += 1;
+                        let price = m("10.00");
+                        invoices.push_back((made.invoice.record.txn.id, price));
+                        t.ar_open = t.ar_open.checked_add(price).expect("sum");
+                    }
+                    Err(e) => t.failures.push(format!("inventory sale: {e}")),
+                }
             }
-            // The UI's read pattern after a change: the entry list.
-            if n.is_multiple_of(3) {
-                match read(&mut t, || desk.run(s.ledger_version())) {
-                    Ok(_) => t.reads += 1,
-                    Err(e) => t.failures.push(format!("ledger version: {e}")),
+            _ => {
+                let entry = je2(
+                    on(),
+                    &unique(&format!("soak {i}")),
+                    supplies,
+                    cash,
+                    &amount.to_wire(),
+                );
+                match timed(&mut t, |k| {
+                    desk.run(s.transactions().create_journal_entry(
+                        &entry,
+                        &PostingOptions::default(),
+                        k,
+                    ))
+                }) {
+                    Ok(_) => t.saves += 1,
+                    Err(e) => t.failures.push(format!("entry: {e}")),
+                }
+                // The UI's read pattern after a change: the entry list.
+                if n.is_multiple_of(3) {
+                    match read(&mut t, || desk.run(s.ledger_version())) {
+                        Ok(_) => t.reads += 1,
+                        Err(e) => t.failures.push(format!("ledger version: {e}")),
+                    }
                 }
             }
         }
     }
     t
+}
+
+/// Receives `owed` on `inv` in full (preview, then the save copies its
+/// amounts and balance token, as the form does).
+fn receive(
+    desk: &Desk,
+    s: &Session,
+    t: &mut Tally,
+    books: &SoakBooks,
+    customer: cl_core::ids::ContactId,
+    inv: cl_core::ids::TransactionId,
+    owed: Money,
+) {
+    let req = cl_api::PaymentPreviewRequest {
+        customer_id: customer,
+        date: on(),
+        amount: Some(owed),
+        deposit_to: Some(books.clearing),
+        applications: Some(vec![cl_api::ApplicationRequest {
+            invoice_id: inv,
+            amount: Some(owed),
+            discount_amount: None,
+            write_off_amount: None,
+        }]),
+        credit_applications: Vec::new(),
+        hold_as_deposit: false,
+        editing_payment_id: None,
+    };
+    let p = match read(t, || desk.run(s.customer_payments().preview(&req))) {
+        Ok(p) => p,
+        Err(e) => {
+            t.failures.push(format!("payment preview: {e}"));
+            return;
+        }
+    };
+    t.reads += 1;
+    let save = cl_api::NewCustomerPayment {
+        customer_id: customer,
+        date: on(),
+        amount: p.amount,
+        deposit_to: books.clearing,
+        payment_method: Some("check".into()),
+        ref_no: None,
+        memo: None,
+        applications: p
+            .invoices
+            .iter()
+            .filter(|r| r.payment.is_positive())
+            .map(|r| cl_api::SaveApplication {
+                invoice_id: r.invoice_id,
+                amount: r.payment,
+                expected_balance_due: r.balance_due_exact.clone(),
+                discount_amount: None,
+                write_off_amount: None,
+            })
+            .collect(),
+        credit_applications: Vec::new(),
+        write_off_account_id: None,
+        discount_account_id: None,
+        hold_as_deposit: false,
+        bank_feed_item_id: None,
+    };
+    match timed(t, |k| {
+        desk.run(
+            s.customer_payments()
+                .receive(&save, &PostingOptions::default(), k),
+        )
+    }) {
+        Ok(_) => {
+            t.saves += 1;
+            t.docs[1] += 1;
+            t.ar_open = t.ar_open.checked_sub(owed).expect("sub");
+        }
+        Err(e) => t.failures.push(format!("payment: {e}")),
+    }
+}
+
+/// 10%: bump a shared record's counter (read, then save on it).
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the client loop's state, passed through"
+)]
+fn bump_shared(
+    i: usize,
+    n: u64,
+    desk: &Desk,
+    s: &Session,
+    t: &mut Tally,
+    books: &SoakBooks,
+    shared: &[cl_core::ids::TransactionId],
+    bumps: &[AtomicU64],
+) {
+    let (cash, supplies) = (books.cash, books.supplies);
+    let k = (usize::try_from(n / 10).unwrap_or(0) + i) % shared.len();
+    loop {
+        let got = match read(t, || desk.run(s.transactions().get(shared[k]))) {
+            Ok(g) => g,
+            Err(e) => {
+                t.failures.push(format!("read shared: {e}"));
+                return;
+            }
+        };
+        t.reads += 1;
+        let now = counter_of(got.record.memo.as_deref());
+        // Each client's content is its own: two clients never ask for the
+        // same record, so a refused save can never be reconciled as
+        // "already saved" from the other's write.
+        let memo = format!("{} by {i}", counter_memo(&format!("shared {k}"), now + 1));
+        let entry = je2(on(), &memo, supplies, cash, "1.00");
+        let saved = timed(t, |k2| {
+            desk.run(s.transactions().update_journal_entry(
+                shared[k],
+                &got.version,
+                &entry,
+                &PostingOptions::default(),
+                k2,
+            ))
+        });
+        match saved {
+            Ok(saved) => {
+                t.saves += 1;
+                // Two saves accepted from the same read of the same
+                // record: one overwrote the other (a lost update).
+                let read = got.version.stamp().map(|s| format!("{k}@{s:?}"));
+                if let Some(r) = read
+                    && !SEEN_READS
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .insert(r.clone())
+                {
+                    t.lost += 1;
+                    t.failures.push(format!(
+                        "lost update: two saves accepted from read {r} (deadlock replays so far: {})",
+                        t.deadlock_replays
+                    ));
+                }
+                let prev = bumps[k].fetch_add(1, Ordering::SeqCst);
+                if counter_of(saved.record.memo.as_deref()) != now + 1 || prev + 1 < now + 1 {
+                    t.lost += 1;
+                }
+                return;
+            }
+            Err(e) if is_stale(&e) => t.conflicts += 1,
+            Err(e) => {
+                t.failures.push(format!("shared save: {e}"));
+                return;
+            }
+        }
+    }
 }

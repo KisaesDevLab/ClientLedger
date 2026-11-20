@@ -1093,6 +1093,7 @@ impl crate::screens::daily_sales::DailyBooks for DemoDailyBooks {
                     transaction: d.transaction,
                     over_short: d.over_short.unwrap_or(Money::ZERO),
                     sales,
+                    stamp: None,
                 });
             }
             Ok(out)

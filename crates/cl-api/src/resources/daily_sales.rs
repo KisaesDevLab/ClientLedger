@@ -565,6 +565,11 @@ pub struct DailyEntrySummary {
     /// Sales as posted.
     #[serde(rename = "totalSales", default, deserialize_with = "money_or_zero")]
     pub sales: Money,
+    /// The stamp the row was read at (`updatedAt`; engine #98, U-292
+    /// follow-up): a delete or the outcome probe can use it without
+    /// reading the day again (Q-P33at). `None` from an older engine.
+    #[serde(rename = "updatedAt", default, deserialize_with = "stamp_de")]
+    pub stamp: Option<RecordStamp>,
 }
 
 /// Hides the layout name and amounts.

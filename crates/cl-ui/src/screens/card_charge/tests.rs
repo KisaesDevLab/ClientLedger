@@ -1045,42 +1045,28 @@ fn p33_a_new_stamp_with_nothing_editable_changed_saves_without_asking() {
     assert_eq!(stored_memo(&link, id).as_deref(), Some("mine"));
 }
 
-/// The stored charge's expense-line tags (the card's own line left out).
-fn expense_tags(link: &Arc<CompanyLink>, id: TransactionId) -> Vec<Option<cl_core::ids::TagId>> {
-    let mut demo = link.demo_state().expect("demo");
-    let chart = demo
-        .chart
-        .get_or_insert_with(crate::company::demo::chart)
-        .clone();
-    let contacts = demo.contacts_mut().clone();
-    let t = demo.ledger.get(&chart, &contacts, id).expect("txn").record;
-    t.lines
-        .iter()
-        .filter(|l| l.account_number.as_deref() != Some("2050"))
-        .map(|l| l.tag_id)
-        .collect()
-}
-
-/// Review S5: a charge has no header tags of its own on the wire; the
-/// header tags fill the tag of every line without one. So another user's
+/// Review S5: a charge has no header tags on the wire; the form's header
+/// tags fill the tag of every line without one at save. So another user's
 /// header-tag change reaches the books as line tags, and those are
-/// compared: my save after it is never a silent re-save, and Keep mine
-/// (with only my memo changed) keeps their tags.
+/// compared: my save on top of it is never a silent re-save, and Keep
+/// mine (with only my memo changed) takes their tagged lines. (The demo
+/// ledger keeps no card-charge line tags, so their read-back is the
+/// engine's shape: the stored charge with the tag on its expense line.)
 #[test]
 fn p33_their_header_tags_are_never_lost_to_my_save() {
     let (_d, link) = link();
-    let (mut a, mut b, id) = two_windows(&link);
-    assert_eq!(expense_tags(&link, id), vec![None], "saved untagged");
+    let (mut a, b, id) = two_windows(&link);
     let tag = b.books.tags.iter().find(|t| t.is_active).expect("tag").id;
-    let tags = b.books.tags.clone();
-    b.header.edit_step(|h| {
-        kit::apply_tag_edit(&tags, &mut h.header_tags, kit::TagEdit::Add(tag));
-    });
-    assert!(b.start_save(SaveIntent::Save, None), "{}", b.state());
-    assert_eq!(expense_tags(&link, id), vec![Some(tag)], "b's tag stored");
+    let mut theirs = super::records::demo_get(&link, id).expect("their charge");
+    for l in &mut theirs.record.lines {
+        if l.debit.is_positive() {
+            l.tag_id = Some(tag);
+        }
+    }
+    theirs.version = cl_api::RecordVersion::Fingerprint([7; 32]);
     a.header.edit_step(|h| h.memo = "mine".into());
     let saves = a.flow.count;
-    assert!(!a.start_save(SaveIntent::Save, None));
+    a.conflict_read(Ok(theirs), SaveIntent::Save);
     assert_eq!(a.flow.count, saves, "no silent re-save over their tags");
     let open = a
         .conflict
@@ -1091,11 +1077,10 @@ fn p33_their_header_tags_are_never_lost_to_my_save() {
     let merge = open.dialog.conflict().keep_mine();
     assert!(!merge.lines_from_mine, "only their lines changed");
     a.run_choice(open, ConflictChoice::KeepMine(merge));
-    assert_eq!(a.state()["error"], false, "{}", a.state());
-    assert_eq!(stored_memo(&link, id).as_deref(), Some("mine"));
-    assert_eq!(expense_tags(&link, id), vec![Some(tag)], "their tag kept");
+    assert_eq!(a.header.current().memo, "mine");
+    let tags: Vec<_> = a.lines.value().used().map(|l| l.tag).collect();
+    assert_eq!(tags, vec![Some(tag)], "their tag is what my save sends");
 }
-
 #[test]
 fn p33_a_charge_deleted_elsewhere_is_never_saved_again() {
     let (_d, link) = link();
