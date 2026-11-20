@@ -1167,6 +1167,10 @@ fn office_network_soak() {
     }));
     host.stop();
     if let Err(p) = result {
+        // The host's engine and host logs are what explain a failed soak:
+        // keep the scratch folder (synthetic data only).
+        let kept = scratch.keep();
+        eprintln!("soak: scratch kept at {}", kept.display());
         std::panic::resume_unwind(p);
     }
 }
