@@ -24,12 +24,15 @@ steps:
   - assert_exists: {label_contains: "Hidden accounts"}
   - assert_exists: {label_contains: "Never passwords"}
   - assert_exists: {role: button, label: "Save transfer file…"}
+  - assert_exists: {role: button, label: Refresh}
+  - assert_no_clipping: {}
+  - screenshot: send-to-accountant
   # QA-4: Refresh reads the check totals again.
   - click: {role: button, label: Refresh}
   - wait: {ms: 300}
   - assert_state: {key: screen.preview_loaded, equals: true}
-  - assert_no_clipping: {}
-  - screenshot: send-to-accountant
+  - scroll: {target: {label: Total assets}, to: start}
+  - wait: {ms: 200}
   # One column at the minimum window and at 200% (B1).
   - resize: {width: 960, height: 640}
   - wait: {ms: 300}
@@ -90,6 +93,8 @@ steps:
   - command: dev.transfer_demo_ask_backup_passphrase
   - wait: {ms: 200}
   - assert_state: {key: screen.backup_passphrase_needed, equals: true}
+  - scroll: {target: {label: Total assets}, to: end}
+  - wait: {ms: 200}
   - assert_exists: {role: password_input, label: "Backup passphrase (12+ characters)"}
   - screenshot: backup-passphrase
   - click: {role: password_input, label: "Backup passphrase (12+ characters)"}
