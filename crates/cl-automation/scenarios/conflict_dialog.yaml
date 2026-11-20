@@ -1,0 +1,99 @@
+# Save conflicts on the office network (P33 D4 step 11, Q-P33r) against
+# `clientledger --demo`: a journal entry is saved, opened again, and someone
+# else saves it first (dev.lan_simulate_edit flips its Adjusting flag) while
+# this window changes the memo. Save opens the conflict dialog; Esc is Back
+# (the form keeps my edit); saving again asks again; Keep mine saves their
+# Adjusting flag with my memo, balanced. Then someone else only attaches a
+# file (dev.lan_simulate_touch): the save goes through without asking.
+#
+# Light and dark run in the same app, so the entry is deleted at the end and
+# the scenario repeats. All data is synthetic.
+name: conflict_dialog
+description: Someone else saves the open journal entry first; Back, Keep mine, and a silent re-save when nothing editable changed.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+J
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.mode, equals: new}
+  # --- 1. An entry to share: 25.00 to 6100 from 1010 ---------------------------
+  - click: {label_contains: "Account, line 1"}
+  - type: {text: "6100"}
+  - key: Tab
+  - type: {text: "25"}
+  - key: Tab
+  - click: {role: grid_cell, label: "Account, line 2"}
+  - type: {text: "1010"}
+  - key: Tab
+  - assert_state: {key: screen.difference, equals: "0.00"}
+  - click: {role: text_input, label: Memo}
+  - type: {text: "Conflict scenario"}
+  - key: Tab
+  - key: Alt+N
+  - assert_state: {key: screen.last_action, equals: save}
+  - assert_state: {key: screen.save.error, equals: false}
+  - command: form.prev_record
+  - assert_state: {key: screen.mode, equals: edit}
+  - assert_state: {key: screen.adjusting, equals: false}
+
+  # --- 2. Someone else saves it first; I change the memo ----------------------
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - type: {text: "Conflict scenario, mine"}
+  - key: Tab
+  - command: dev.lan_simulate_edit
+  - key: Alt+N
+  - assert_state: {key: screen.save.conflict.fields, equals: 2}
+  - assert_state: {key: screen.save.conflict.undoes, equals: 0}
+  - assert_state: {key: screen.save.conflict.lines_differ, equals: false}
+  - assert_exists: {role: label, label: "Someone else changed this while you were editing"}
+  - assert_exists: {role: label, label: "Adjusting entry"}
+  - assert_exists: {role: button, label: Keep mine}
+  - assert_exists: {role: button, label: Use theirs}
+  - assert_exists: {role: button, label: Back}
+  - assert_no_clipping: {}
+  - screenshot: conflict
+  # Esc is Back: nothing saved, my edit stays.
+  - key: Escape
+  - assert_state: {key: screen.save.conflict, equals: null}
+  - assert_state: {key: screen.save.stale, equals: true}
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_value: {target: {role: text_input, label: Memo}, equals: "Conflict scenario, mine"}
+  - screenshot: back
+  # Saving again asks again; Keep mine keeps their Adjusting flag.
+  - key: Alt+N
+  - assert_state: {key: screen.save.conflict.fields, equals: 2}
+  - click: {role: button, label: Keep mine}
+  - assert_state: {key: screen.save.conflict, equals: null}
+  - assert_state: {key: screen.last_action, equals: save}
+  - assert_state: {key: screen.save.error, equals: false}
+  - assert_state: {key: screen.mode, equals: new}
+  - command: form.prev_record
+  - assert_state: {key: screen.adjusting, equals: true}
+  - assert_value: {target: {role: text_input, label: Memo}, equals: "Conflict scenario, mine"}
+  - assert_state: {key: screen.difference, equals: "0.00"}
+
+  # --- 3. Only a file attached elsewhere: saved without asking ---------------
+  - command: dev.lan_simulate_touch
+  - click: {role: text_input, label: Memo}
+  - key: Ctrl+A
+  - type: {text: "Conflict scenario, again"}
+  - key: Tab
+  - key: Alt+N
+  - assert_state: {key: screen.save.conflict, equals: null}
+  - assert_state: {key: screen.last_action, equals: save}
+  - assert_state: {key: screen.save.error, equals: false}
+  - assert_state: {key: screen.mode, equals: new}
+
+  # --- 4. Clean up: delete it ---------------------------------------------------
+  - command: form.prev_record
+  - assert_value: {target: {role: text_input, label: Memo}, equals: "Conflict scenario, again"}
+  - click: {role: button, label: Delete}
+  - assert_state: {key: screen.delete_open, equals: true}
+  - click: {role: button, label: Delete, index: 1}
+  - assert_state: {key: screen.last_action, equals: delete}
+  - assert_state: {key: screen.save.error, equals: false}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Make Journal Entry"}

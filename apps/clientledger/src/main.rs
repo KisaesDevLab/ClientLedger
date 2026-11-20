@@ -53,7 +53,9 @@ fn start_control(path: Option<&std::path::Path>) -> Result<Option<cl_automation:
 
 /// The host process's LAN parts, stopped before the engine (field order).
 struct Running {
-    _lan: Option<cl_ui::lan_link::LanHost>,
+    /// The only strong reference: the setup window holds a weak one
+    /// (`set_running_host`), so dropping this stops the proxy first.
+    _lan: Option<Arc<cl_ui::lan_link::LanHost>>,
     _link: HostLink,
 }
 
@@ -145,6 +147,12 @@ fn main() -> Result<()> {
     cl_ui::reading::install(cl_ui::reading::ReadingService::for_app(&paths));
 
     let lan = LanSettings::load(&cl_ui::lan_link::settings_path(paths.root()));
+    // The Office Network window reads lan.json and the keychain through
+    // this (before any window can open).
+    cl_ui::lan_link::install(
+        paths.root().to_path_buf(),
+        Arc::new(KeyringSecrets::for_root(paths.root())),
+    );
     if lan.mode == Mode::Host {
         clear_auto_sign_in(&paths);
     }
@@ -180,7 +188,10 @@ fn main() -> Result<()> {
             let mut cfg = HostConfig::new(paths.clone(), exe);
             cfg.lan_host = lan.mode == Mode::Host && lan.host.is_some();
             let link = HostLink::start(cfg, guard);
-            let lan_host = start_lan_host(&link, &paths, &lan);
+            let lan_host = start_lan_host(&link, &paths, &lan).map(Arc::new);
+            if let Some(h) = &lan_host {
+                cl_ui::lan_link::set_running_host(h);
+            }
             shell.host = Some(link.probe());
             shell.company = Some(company_link(&link, &paths)?);
             options.focus_request = Some(Arc::clone(&link.focus));

@@ -118,7 +118,7 @@ impl JournalScreen {
         if conflict.silent_resave() {
             // Nothing editable changed on their side: save again on their
             // version without asking (S2).
-            self.adopt_version(&theirs);
+            self.adopt_version(&theirs, their_form, their_lines);
             self.start_save(intent, None);
             return;
         }
@@ -171,12 +171,20 @@ impl JournalScreen {
         out
     }
 
-    /// The form keeps its fields and takes their version.
-    fn adopt_version(&mut self, theirs: &Versioned<Transaction>) {
+    /// The form keeps its fields and takes their version; their record is
+    /// the new "as opened", so a later conflict compares against it (what
+    /// this form took from theirs never counts as a change of mine).
+    fn adopt_version(
+        &mut self,
+        theirs: &Versioned<Transaction>,
+        their_form: JournalForm,
+        their_lines: FormLines,
+    ) {
         if let Some(e) = self.editing.as_mut() {
             e.version = theirs.version;
             e.old_date = theirs.record.txn_date;
         }
+        self.opened = Some((their_form, their_lines));
         self.key = None;
         self.stale = false;
     }
@@ -224,10 +232,10 @@ impl JournalScreen {
                 }
                 if !merge.lines_from_mine && open.dialog.conflict().theirs_changed_lines() {
                     let lists = Arc::clone(&self.books.lists);
-                    self.lines.load(their_lines, &*lists);
+                    self.lines.load(their_lines.clone(), &*lists);
                 }
                 self.sync_inputs();
-                self.adopt_version(&open.theirs);
+                self.adopt_version(&open.theirs, their_form, their_lines);
                 self.start_save(open.intent, None);
             }
         }

@@ -1,0 +1,76 @@
+# Office Network (Multi-User) (P33 D4 step 10, Q-108–Q-111) against
+# `clientledger --demo`. The demo office network is synthetic: no socket,
+# keychain, lan.json or multicast. Host: only private connections can be
+# picked (the VPN's 100.64 address and the public one are listed but off),
+# sharing starts, a pairing code shows, "Back office" asks to join and is
+# allowed, then removed; sharing stops. Workstation: the found host, a wrong
+# code refused in plain words, the right code pairs, then Stop using this
+# host.
+#
+# Light and dark run in the same app: the scenario ends where it began
+# (just this computer, one paired computer). All data is synthetic.
+name: lan_setup
+description: Host shares on a private connection, pairs a computer with the code and Allow, removes it; a workstation pairs with the code.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: company.lan_setup
+  - assert_exists: {role: tab, label_contains: "Office Network"}
+  - assert_state: {key: screen.screen, equals: lan_setup}
+  - assert_state: {key: screen.mode, equals: "off"}
+  - assert_state: {key: screen.interfaces, equals: 4}
+  - assert_state: {key: screen.allowed, equals: 2}
+  - assert_exists: {role: radio_button, label: "Just this computer"}
+  - assert_no_clipping: {}
+  - screenshot: start
+
+  # --- 1. Host: private connections only ---------------------------------------
+  - click: {role: radio_button, label: "Share my books with other computers (this is the host)"}
+  - assert_state: {key: screen.choice, equals: host}
+  - assert_exists: {role: radio_button, label: "Ethernet (192.168.1.20)"}
+  - assert_exists: {role: radio_button, label: "VPN (100.64.3.9)"}
+  - screenshot: host-choose
+  - click: {role: button, label: Start sharing}
+  - assert_state: {key: screen.mode, equals: host}
+  - assert_state: {key: screen.devices, equals: 1}
+  - click: {role: button, label: Show a pairing code}
+  - assert_state: {key: screen.code_on, equals: true}
+  - command: dev.lan_demo_pair_request
+  - assert_state: {key: screen.request, equals: true}
+  - assert_exists: {role: button, label: Allow}
+  - assert_exists: {role: button, label: "Don't allow"}
+  - assert_no_clipping: {}
+  - screenshot: host-allow
+  - click: {role: button, label: Allow}
+  - assert_state: {key: screen.request, equals: false}
+  - assert_state: {key: screen.code_on, equals: false}
+  - assert_state: {key: screen.devices, equals: 2}
+  - screenshot: host-paired
+  - click: {role: button, label: Remove, index: 1}
+  - assert_state: {key: screen.devices, equals: 1}
+  - click: {role: button, label: Stop sharing}
+  - assert_state: {key: screen.mode, equals: "off"}
+
+  # --- 2. Workstation: the code from the host ------------------------------------
+  - click: {role: radio_button, label: "Use the books on another computer in the office"}
+  - assert_state: {key: screen.choice, equals: workstation}
+  - click: {role: button, label: Use this one}
+  - click: {role: text_input, label: "Pairing code shown on the host computer"}
+  - type: {text: "AAAAA-BBBBB"}
+  - click: {role: button, label: Pair with the host}
+  - assert_state: {key: screen.error, equals: lan.pair.refused.wrong_code}
+  - assert_state: {key: screen.paired, equals: false}
+  - screenshot: workstation-refused
+  - click: {role: text_input, label: "Pairing code shown on the host computer"}
+  - key: Ctrl+A
+  - type: {text: "k7qx2m9vd4ht3nwb8rlc"}
+  - click: {role: button, label: Pair with the host}
+  - assert_state: {key: screen.paired, equals: true}
+  - assert_state: {key: screen.mode, equals: workstation}
+  - assert_state: {key: screen.link, equals: connected}
+  - assert_exists: {role: label, label: "Connected to the host"}
+  - screenshot: workstation-paired
+  - click: {role: button, label: Stop using this host}
+  - assert_state: {key: screen.mode, equals: "off"}
+  - command: file.close_window
+  - assert_not_exists: {role: tab, label_contains: "Office Network"}

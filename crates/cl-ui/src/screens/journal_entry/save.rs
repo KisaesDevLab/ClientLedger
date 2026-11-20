@@ -869,6 +869,12 @@ impl JournalScreen {
                 };
                 crate::company::demo::journal::simulate_other_edit(&mut d, e.id)
             }
+            "dev.lan_simulate_touch" => {
+                let (Some(e), Some(mut d)) = (self.editing.as_ref(), self.link.demo_state()) else {
+                    return false;
+                };
+                crate::company::demo::journal::simulate_other_touch(&mut d, e.id)
+            }
             "form.save_new" => {
                 self.start_save(SaveIntent::SaveAndNew, None);
                 true

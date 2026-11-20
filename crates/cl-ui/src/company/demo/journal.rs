@@ -34,6 +34,9 @@ pub struct JeMeta {
     pub reversal: Option<TransactionId>,
     /// The entry this one reverses.
     pub reverses: Option<TransactionId>,
+    /// P33 (demo only): times someone else touched the entry without
+    /// changing an editable field (an attachment): its version moves.
+    pub touched: u8,
 }
 
 /// The demo's journal entry fields, by entry.
@@ -155,6 +158,7 @@ fn meta_of(e: &NewJournalEntry) -> JeMeta {
         tags: e.lines().iter().map(|l| l.tag).collect(),
         reversal: None,
         reverses: None,
+        touched: 0,
     }
 }
 
@@ -307,6 +311,18 @@ pub fn simulate_other_edit(state: &mut DemoState, id: TransactionId) -> bool {
     true
 }
 
+/// P33 (demo only): another person attaches a file to entry `id`: its
+/// version moves, no editable field changes (the form re-saves without
+/// asking). False when there is no such entry.
+pub fn simulate_other_touch(state: &mut DemoState, id: TransactionId) -> bool {
+    if get(state, id).is_err() {
+        return false;
+    }
+    let m = state.journal.meta.entry(id).or_default();
+    m.touched = m.touched.wrapping_add(1).max(1);
+    true
+}
+
 /// An entry as `GET /transactions/{id}` answers it, with its names, tags,
 /// Adjusting flag and reversal link.
 ///
@@ -343,7 +359,11 @@ pub fn get(state: &mut DemoState, id: TransactionId) -> Result<Versioned<Transac
             });
         }
     }
-    v.version = RecordVersion::Fingerprint(v.record.fingerprint());
+    let mut fp = v.record.fingerprint();
+    if let Some(m) = state.journal.meta.get(&id) {
+        fp[0] = fp[0].wrapping_add(m.touched);
+    }
+    v.version = RecordVersion::Fingerprint(fp);
     Ok(v)
 }
 

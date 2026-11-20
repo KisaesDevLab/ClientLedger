@@ -792,6 +792,10 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Demo Office Network: Someone Else Saves This Entry (developer)",
     ),
     dev_action(
+        "dev.lan_simulate_touch",
+        "Demo Office Network: Someone Else Attaches a File to This Entry (developer)",
+    ),
+    dev_action(
         "dev.lan_host_down",
         "Demo Office Network: Host Stops Answering (developer)",
     ),
