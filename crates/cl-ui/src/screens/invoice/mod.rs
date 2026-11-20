@@ -32,6 +32,7 @@
 
 mod attach;
 mod billable;
+mod conflict;
 pub(crate) mod credit;
 // P21 D7: the held customer deposit card (Q-P21f, Q-P21l).
 pub(crate) mod deposit_card;
@@ -379,6 +380,10 @@ pub struct InvoiceScreen {
     pub(crate) key: Option<(String, IdempotencyKey)>,
     pub(crate) void_job: Option<(Pending, Job<SavedDoc>)>,
     pub(crate) load_job: Option<Job<SavedDoc>>,
+    /// P33: their version being read after a stale save.
+    pub(crate) conflict_job: Option<(Job<SavedDoc>, cl_model::forms::SaveIntent)>,
+    /// P33: the conflict dialog.
+    pub(crate) conflict: crate::forms::conflict::ConflictFlow<SavedDoc>,
     pub(crate) nav_job: Option<Job<Vec<TransactionId>>>,
     pub(crate) nav: Vec<TransactionId>,
     pub(crate) nav_at: Option<usize>,
@@ -508,6 +513,8 @@ impl InvoiceScreen {
             key: None,
             void_job: None,
             load_job: None,
+            conflict_job: None,
+            conflict: crate::forms::conflict::ConflictFlow::default(),
             nav_job: None,
             nav: Vec::new(),
             nav_at: None,
@@ -808,6 +815,7 @@ impl InvoiceScreen {
 
     pub(crate) fn poll(&mut self) {
         self.poll_returns();
+        self.poll_conflict();
         let mut lists = self.books.poll();
         if let Some(r) = engine::poll(&mut self.items_job) {
             self.items = r.unwrap_or_default();
@@ -1267,6 +1275,7 @@ impl InvoiceScreen {
                 "problems": self.problems.len(),
                 "error": self.error.is_some(),
                 "stale": self.stale,
+            "conflict": self.conflict.state(),
             },
             "last_action": self.last_action,
             "notice": self.notice,
@@ -1443,6 +1452,8 @@ impl Screen for InvoiceScreen {
             self.sync_inputs();
         }
         self.draw(ui);
+        let ctx = ui.ctx().clone();
+        self.conflict_ui(&ctx);
         self.recheck_problems();
         if let Some(cmd) = self.after_frame.take() {
             self.command(cmd);
@@ -1451,6 +1462,7 @@ impl Screen for InvoiceScreen {
             || self.busy()
             || self.items_job.is_some()
             || self.load_job.is_some()
+            || self.conflict_job.is_some()
             || self.nav_job.is_some()
             || self.sales_job.is_some()
             || self.preview_job.is_some()
