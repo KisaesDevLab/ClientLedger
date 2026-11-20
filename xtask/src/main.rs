@@ -14,6 +14,7 @@ mod gen_sample;
 mod golden_reports;
 mod grid_bench;
 mod keymap_doc;
+mod lan_soak;
 mod layering;
 mod licenses;
 mod meta;
@@ -77,6 +78,9 @@ usage: cargo xtask <command>
   golden-reports [--bless]
                      golden company reports against the real engine: cross-checks, then compare
                      (or write, --bless) fixtures/golden/reports
+  lan-soak [--minutes N | --seconds N]
+                     five office-network workstations saving through a real host's proxy
+                     (P33 AC3); default 3 minutes (PR CI), nightly 30
   transfer-roundtrip make a .clxfer on the desktop side, import it with the pinned
                      engine in server mode, compare totals and scan for secrets (P32)
   qa-company [--out DIR] [--fresh]
@@ -203,6 +207,7 @@ fn main() -> Result<()> {
         Some("keymap-doc") => keymap_doc::keymap_doc(&args[1..]),
         Some("gen-sample") => gen_sample::gen_sample(&args[1..]),
         Some("golden-reports") => golden_reports::golden_reports(&args[1..]),
+        Some("lan-soak") => lan_soak::lan_soak(&args[1..]),
         Some("transfer-roundtrip") => transfer_roundtrip::transfer_roundtrip(&args[1..]),
         Some("gen-invoices") => gen_invoices::gen_invoices(&args[1..]),
         Some("docread-accuracy") => docread_accuracy::docread_accuracy(&args[1..]),

@@ -174,6 +174,11 @@ pub const HOST_ONLY: &[&str] = &[
     "file.import_system",
     "file.import_transactions",
     "payroll.import",
+    // The transfer file is an engine archive written on the host
+    // (`POST /tenants/{id}/archives`, host-only).
+    "company.send_to_accountant",
+    // Builds the practice company when it is missing (a new company).
+    "file.open_practice",
 ];
 
 static WORKSTATION_NOW: AtomicBool = AtomicBool::new(false);
@@ -483,6 +488,67 @@ mod tests {
         assert!(!LanShell::command(&link, "dev.other"));
     }
 
+    /// The Office Network window in front uncovers the app, so a host that
+    /// moved can be fixed; otherwise the overlay covers it.
+    #[test]
+    fn host_down_overlay_steps_aside_for_the_office_network_window() {
+        let (_d, link) = demo();
+        let mut s = LanShell::default();
+        assert!(LanShell::command(&link, "dev.lan_host_down"));
+        s.tick(Some(&link), Instant::now());
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        let mut seen = Vec::new();
+        for front in [false, true] {
+            let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+                seen.push(s.overlay(ui.ctx(), 2, front));
+            });
+            out.textures_delta.clear();
+        }
+        assert_eq!(seen, vec![Overlay::Covered, Overlay::None]);
+        assert!(crate::i18n::has("lan.down.settings"));
+        assert!(crate::i18n::has("lan.ws.start_failed"));
+        assert!(LanShell::demo_off(&link));
+        s.tick(Some(&link), Instant::now());
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            assert_eq!(s.overlay(ui.ctx(), 0, false), Overlay::None);
+        });
+        out.textures_delta.clear();
+    }
+
+    /// A workstation's company link (P33): live (not the demo), no
+    /// supervisor, and with no link registered it is not on the office
+    /// network yet (nothing covers the app; the status bar says why).
+    #[test]
+    fn a_workstation_company_link_has_no_supervisor() {
+        let client = cl_api::Client::new(
+            Arc::new(crate::lan_link::NoHost),
+            cl_api::ClientConfig::default(),
+        )
+        .expect("client");
+        let queue = cl_api::ApiQueue::start(Arc::new(|| {}), cl_api::QueueConfig::default())
+            .expect("queue");
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(CompanyLink::workstation(
+            client,
+            queue,
+            cl_settings::RecentStore::in_dir(&dir.path().join("settings")),
+            Arc::new(cl_settings::MemorySecrets::new()),
+            dir.path().join("backups"),
+        ));
+        assert!(link.is_workstation());
+        assert!(!link.is_demo());
+        assert!(link.supervisor().is_none());
+        assert_eq!(state_of(&link), None);
+        let (_d, demo_link) = demo();
+        assert!(!demo_link.is_workstation(), "the demo is never one");
+        for id in ["company.send_to_accountant", "file.open_practice"] {
+            assert!(host_only(true, id), "{id}");
+        }
+        assert!(!host_only(true, "file.export_all"));
+    }
+
     #[test]
     fn link_states_map_and_every_key_has_words() {
         assert_eq!(of_link(&LinkState::HostDown), LanState::HostDown);
@@ -501,6 +567,17 @@ mod tests {
             LanState::UpdateNeeded,
         ] {
             assert!(crate::i18n::has(s.status_key()), "{s:?}");
+        }
+        // Every link state has words (the Office Network window and the
+        // workstation's status bar show them).
+        for s in [
+            LinkState::Connecting,
+            LinkState::HostDown,
+            LinkState::HostEngineDown,
+            LinkState::HostMaintenance,
+            LinkState::Unpaired,
+        ] {
+            assert!(crate::i18n::has(&format!("lan.link.{}", s.key())), "{s:?}");
         }
         for k in [
             "lan.banner.maintenance",
