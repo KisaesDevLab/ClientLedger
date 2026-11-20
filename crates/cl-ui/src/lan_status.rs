@@ -694,7 +694,7 @@ mod tests {
             ..ChangePage::default()
         };
         assert_eq!(changes_of(&reset), everything());
-        assert!(changes_of(&ChangePage::default()).is_empty());
+        assert_eq!(changes_of(&ChangePage::default()).len(), 0);
     }
 
     #[test]
