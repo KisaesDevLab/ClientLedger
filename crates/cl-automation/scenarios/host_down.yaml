@@ -49,6 +49,19 @@ steps:
   - assert_state: {key: screen.last_action, equals: clear}
   - click: {role: button, label: Check again}
   - assert_state: {key: lan.covered, equals: true}
+  # QA-6: Save & Close behind the overlay saves nothing and nothing waits
+  # to be sent later; the window stays as it was.
+  - key: Alt+S
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_state: {key: screen.last_action, equals: clear}
+  # QA-12: the overlay fits a small window at 200%.
+  - resize: {width: 960, height: 640}
+  - set_zoom: {percent: 200}
+  - assert_no_clipping: {}
+  - screenshot: overlay-small-zoom
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}
 
   # --- 3. The host answers again -------------------------------------------------
   - command: dev.lan_host_up

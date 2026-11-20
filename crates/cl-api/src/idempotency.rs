@@ -762,11 +762,16 @@ impl Executor {
             TransportError::BadHeader => ApiError::Decode {
                 what: "request header",
             },
+            TransportError::WriteHeld => ApiError::Lan(crate::LanRefusal::NotSent),
         };
         match e {
             TransportError::NotReady { .. }
             | TransportError::TooLarge
             | TransportError::BadHeader => Step::Done(Err(give_up(e))),
+            // P33 QA-6: the LAN link is down; this attempt sent nothing and
+            // the save is never held for later. An earlier attempt that may
+            // have committed makes it unknown (same key), as ever.
+            TransportError::WriteHeld => Step::Done(Err(keyed_give_up(ctx, r, give_up(e)))),
             // Nothing reached the engine: safe to retry for every class but
             // `Never` (rate-limited and rotating routes stay single-shot).
             TransportError::NotSent { generation } => {

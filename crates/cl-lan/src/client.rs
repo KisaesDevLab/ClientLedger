@@ -232,8 +232,9 @@ async fn get_json<T: serde::de::DeserializeOwned>(
 /// the host's full fingerprint, which the caller saves as the pin.
 ///
 /// # Errors
-/// `Unreachable` (wrong address, or the certificate does not match the
-/// code), `Pair(refusal)`, `Protocol`.
+/// `Unreachable` (wrong address, nothing answering); `Pair(WrongCode)` when
+/// the host's certificate does not match the code (nothing was spent);
+/// `Pair(refusal)`, `Protocol`.
 pub async fn pair(
     host: SocketAddr,
     code: PairingCode,
@@ -244,7 +245,16 @@ pub async fn pair(
         tls::client_config(device, HostPin::Pairing(code.pin)).map_err(|_| CallError::Protocol)?;
     let body = serde_json::json!({ "secret": code.secret_text(), "label": label }).to_string();
     let (status, parsed) =
-        get_json::<PairOk>(host, cfg, "/lan/pair", Some(body), PAIR_TIMEOUT).await?;
+        match get_json::<PairOk>(host, cfg, "/lan/pair", Some(body), PAIR_TIMEOUT).await {
+            Ok(r) => r,
+            // QA-3: a computer answered, but not the one the code names: the
+            // first part of the code is mistyped (or it is another host).
+            // That is the code, not the network or the firewall.
+            Err(_) if verifier.refused_a_certificate() => {
+                return Err(CallError::Pair(PairRefusal::WrongCode));
+            }
+            Err(e) => return Err(e),
+        };
     match parsed {
         Ok(ok) if status == 200 => {
             let fp = Fingerprint::from_hex(&ok.host_fingerprint).ok_or(CallError::Protocol)?;
@@ -449,6 +459,12 @@ impl EndpointSource for LanEndpoint {
     fn current(&self) -> EndpointState {
         let s = self.shared.state.borrow().clone();
         endpoint_state(&s, self.shared.port, &self.shared.local_token)
+    }
+
+    /// A save never waits for the host to come back (P33 QA-6, Q-110):
+    /// it is refused as not sent and goes only when the owner saves again.
+    fn writes_wait(&self) -> bool {
+        false
     }
 }
 

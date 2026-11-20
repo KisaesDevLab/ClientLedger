@@ -326,13 +326,26 @@ async fn wrong_code_and_denied_pairing_are_refused() {
         client::pair(lab.addr, wrong, &device, "x").await,
         Err(CallError::Pair(PairRefusal::WrongCode))
     );
-    // A code whose pin is not this host's never even connects.
+    // A code whose pin is not this host's never gets past the handshake
+    // (nothing is sent, no try is spent), and the owner is told the code
+    // doesn't match, not that the host didn't answer (QA-3).
+    let tries_before = format!("{:?}", lab.pairing.view());
     let other = PairingCode {
         pin: code.pin ^ 1,
         secret: code.secret,
     };
     assert_eq!(
         client::pair(lab.addr, other, &device, "x").await,
+        Err(CallError::Pair(PairRefusal::WrongCode))
+    );
+    assert_eq!(format!("{:?}", lab.pairing.view()), tries_before);
+    // Nothing listening at all is still "unreachable".
+    let dead = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        l.local_addr().expect("addr")
+    };
+    assert_eq!(
+        client::pair(dead, code, &device, "x").await,
         Err(CallError::Unreachable)
     );
     let p = lab.pairing.clone();

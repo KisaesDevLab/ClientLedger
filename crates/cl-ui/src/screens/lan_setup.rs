@@ -46,10 +46,14 @@ const PORT: u16 = cl_lan::host::DEFAULT_PORT;
 pub fn make(
     kind: CommandId,
     link: &Arc<CompanyLink>,
-    _open: Option<(cl_core::ids::TenantId, String)>,
+    open: Option<(cl_core::ids::TenantId, String)>,
     _today: CalendarDate,
 ) -> Option<Box<dyn Screen>> {
-    (kind.as_str() == KIND).then(|| Box::new(LanSetupScreen::new(Arc::clone(link))) as _)
+    (kind.as_str() == KIND).then(|| {
+        let mut s = LanSetupScreen::new(Arc::clone(link));
+        s.set_standalone(open.is_none());
+        Box::new(s) as _
+    })
 }
 
 /// The pairing code as the host shows it.
@@ -118,6 +122,9 @@ pub struct LanView {
     pub link: &'static str,
     /// The change waits for a restart.
     pub restart_needed: bool,
+    /// Sharing runs in this app now (not only chosen, waiting for the
+    /// restart; QA-2).
+    pub running: bool,
     /// Why sharing could not start, when the owner can fix it here (an
     /// i18n key; review M2: the host certificate file is missing).
     pub host_problem: Option<&'static str>,
@@ -222,6 +229,8 @@ impl LanControl for DemoControl {
                 DemoLink::Maintenance => "host-maintenance",
             },
             restart_needed: false,
+            // The demo shares at once (no restart).
+            running: l.mode == Mode::Host && !l.cert_missing,
             host_problem: l.cert_missing.then_some("lan.host.cert_missing"),
         })
         .unwrap_or_else(|| LanView {
@@ -238,6 +247,7 @@ impl LanControl for DemoControl {
             paired_host: None,
             link: "connecting",
             restart_needed: false,
+            running: false,
             host_problem: None,
         })
     }
@@ -336,6 +346,9 @@ pub struct LanSetupScreen {
     paired_note: bool,
     /// The events being sent (sign-ins ended, audit rows).
     sending: Option<crate::company::Task<Result<(), &'static str>>>,
+    /// Opened with no company open (P33 QA-1: from Open Company or the
+    /// first-run screen); a Back button returns there.
+    standalone: bool,
 }
 
 impl LanSetupScreen {
@@ -369,8 +382,25 @@ impl LanSetupScreen {
             error: None,
             paired_note: false,
             sending: None,
+            standalone: false,
             control,
         }
+    }
+
+    /// Opened with no company open (P33 QA-1). A computer that is just
+    /// itself starts on "Use the books on another computer": that is what
+    /// a new second computer comes here for.
+    pub fn set_standalone(&mut self, on: bool) {
+        self.standalone = on;
+        if on && self.choice == Mode::Off && self.control.view().mode == Mode::Off {
+            self.choice = Mode::Workstation;
+        }
+    }
+
+    /// Sharing this computer's books needs a signed-in owner (the window
+    /// is admin-only once a company is open); pairing with a host doesn't.
+    fn may_host(&self) -> bool {
+        self.link.signed_in()
     }
 
     /// Sends the control's events: a removed computer's sign-ins end on
@@ -458,7 +488,13 @@ impl LanSetupScreen {
                 }
             });
             ui.add_space(6.0);
-            if sharing {
+            if sharing && !v.running {
+                // QA-2: chosen, but nothing listens until the restart.
+                form::inline_warning(ui, tokens, &t("lan.host.after_restart"));
+                if ui.button(t("lan.host.off")).clicked() {
+                    self.error = self.control.set_host(false, None).err();
+                }
+            } else if sharing {
                 if let Some(c) = v.chosen.and_then(|i| v.interfaces.get(i)) {
                     form::inline_note(
                         ui,
@@ -489,7 +525,7 @@ impl LanSetupScreen {
                 });
             }
         });
-        if !sharing {
+        if !sharing || !v.running {
             return;
         }
         ui.add_space(6.0);
@@ -709,12 +745,24 @@ impl Screen for LanSetupScreen {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                if self.standalone
+                    && ui
+                        .button(t("lan.back"))
+                        .on_hover_text(t("lan.back.tip"))
+                        .clicked()
+                {
+                    self.link
+                        .push(crate::company::CompanyEvent::CloseWindow(CommandId::new(
+                            KIND,
+                        )));
+                }
                 form::heading(ui, &tokens, &t("cmd.company.lan_setup"));
                 form::hint(ui, &tokens, &t("lan.purpose"));
                 ui.add_space(6.0);
                 form::card(ui, &tokens, |ui| {
                     ui.label(RichText::new(t("lan.mode")).strong());
                     let busy = v.mode != Mode::Off;
+                    let may_host = self.may_host();
                     for (m, key) in [
                         (Mode::Off, "lan.mode.off"),
                         (Mode::Host, "lan.mode.host"),
@@ -722,14 +770,22 @@ impl Screen for LanSetupScreen {
                     ] {
                         // While sharing or paired, the owner stops that
                         // first (Stop sharing / Stop using this host).
-                        let enabled = !busy || m == v.mode;
-                        if ui
-                            .add_enabled(enabled, egui::RadioButton::new(self.choice == m, t(key)))
-                            .clicked()
-                        {
+                        let enabled =
+                            (!busy || m == v.mode) && (m != Mode::Host || may_host || busy);
+                        let r = ui
+                            .add_enabled(enabled, egui::RadioButton::new(self.choice == m, t(key)));
+                        let r = if m == Mode::Host && !may_host {
+                            r.on_disabled_hover_text(t("lan.host.sign_in_first"))
+                        } else {
+                            r
+                        };
+                        if r.clicked() {
                             self.choice = m;
                             self.error = None;
                         }
+                    }
+                    if !may_host && !busy {
+                        form::hint(ui, &tokens, &t("lan.host.sign_in_first"));
                     }
                 });
                 if v.restart_needed {
@@ -799,6 +855,8 @@ impl Screen for LanSetupScreen {
             "error": self.error,
             "restart_needed": v.restart_needed,
             "host_problem": v.host_problem,
+            "standalone": self.standalone,
+            "may_host": self.may_host(),
         })
     }
 }

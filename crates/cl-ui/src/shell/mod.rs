@@ -1007,6 +1007,23 @@ impl Shell {
         self.about.is_open()
     }
 
+    /// The host-down overlay covers the app (P33): the host doesn't answer
+    /// and the Office Network window is not in front.
+    fn lan_covered(&self) -> bool {
+        self.lan
+            .state()
+            .is_some_and(crate::lan_status::LanState::covered)
+            && !self.lan_setup_in_front()
+    }
+
+    fn lan_setup_in_front(&self) -> bool {
+        self.windows.active().is_some_and(|w| {
+            self.windows
+                .find_kind(CommandId::new(crate::screens::lan_setup::KIND))
+                == Some(w.id)
+        })
+    }
+
     fn modal_open(&self) -> bool {
         self.palette.open
             || self.shortcuts_open
@@ -1135,6 +1152,9 @@ impl Shell {
                 && self.company.is_none()
                 && kind.as_str() != "file.open_company"
                 && kind.as_str() != "file.new_company"
+                // P33 QA-1: a new second computer pairs with the host
+                // before it has (or needs) a company of its own.
+                && kind.as_str() != crate::screens::lan_setup::KIND
             {
                 // Nothing but Open Company and the interview works without a
                 // company (Q-182); the restore panel lives in Open Company.
@@ -1350,6 +1370,7 @@ impl Shell {
             return;
         }
         let modal = self.modal_open();
+        let covered = self.lan_covered();
         let window = target.and_then(|id| self.windows.get(id));
         // The viewer drawn inside the main window (embedded viewports) has
         // the keyboard: its keys act on it (A02).
@@ -1384,6 +1405,13 @@ impl Shell {
                 continue;
             };
             if modal && !matches!(id.as_str(), "help.palette" | "help.shortcuts") {
+                continue;
+            }
+            // P33 QA-6: behind the host-down overlay no key acts on a
+            // window (Alt+S there saved nothing then, and nothing is kept
+            // to send later); only the shortcut list opens.
+            if covered && id.as_str() != "help.shortcuts" {
+                handled.push(s);
                 continue;
             }
             if kept {
@@ -1596,6 +1624,10 @@ impl Shell {
         menu::show(ui, self, narrow, &tokens);
         let dirty = self.windows.dirty_ids().len();
         self.lan.banner(ui, &tokens, dirty);
+        // QA-9: the host ended this computer's sign-in; sign in again.
+        if self.lan.take_sign_in() {
+            self.queue(CommandId::new("file.sign_out"));
+        }
         if let Some(kind) = status_bar::show(ui, self, narrow, &tokens) {
             self.open_screen(CommandId::new(kind));
         }
@@ -1616,11 +1648,7 @@ impl Shell {
         self.show_overlays(&ctx);
         // P33: while the host doesn't answer, the app is covered and every
         // window stays as it was; commands asked for meanwhile are dropped.
-        let setup_in_front = self.windows.active().is_some_and(|w| {
-            self.windows
-                .find_kind(CommandId::new(crate::screens::lan_setup::KIND))
-                == Some(w.id)
-        });
+        let setup_in_front = self.lan_setup_in_front();
         match self.lan.overlay(&ctx, dirty, setup_in_front) {
             crate::lan_status::Overlay::None => {}
             // The demo office network's own link commands (`dev.lan_*`)

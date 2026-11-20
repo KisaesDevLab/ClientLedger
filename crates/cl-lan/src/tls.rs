@@ -345,6 +345,9 @@ pub struct PinnedHostVerifier {
     pin: HostPin,
     algs: WebPkiSupportedAlgorithms,
     seen: Mutex<Option<Fingerprint>>,
+    /// A host answered with a certificate the pin refused (QA-3: during
+    /// pairing, a mistyped first part of the code).
+    refused: std::sync::atomic::AtomicBool,
 }
 
 impl PinnedHostVerifier {
@@ -355,7 +358,14 @@ impl PinnedHostVerifier {
             pin,
             algs: algorithms(),
             seen: Mutex::new(None),
+            refused: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// A host answered but its certificate did not match the pin.
+    #[must_use]
+    pub fn refused_a_certificate(&self) -> bool {
+        self.refused.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// The fingerprint of the certificate the last handshake accepted.
@@ -381,6 +391,8 @@ impl ServerCertVerifier for PinnedHostVerifier {
             HostPin::Pairing(pin) => PairingCode { pin, secret: 0 }.matches_host(&fp),
         };
         if !ok {
+            self.refused
+                .store(true, std::sync::atomic::Ordering::Relaxed);
             return Err(TlsError::InvalidCertificate(
                 CertificateError::ApplicationVerificationFailure,
             ));

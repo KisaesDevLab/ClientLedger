@@ -222,7 +222,7 @@ impl Probe {
         let deadline = Instant::now() + budget;
         let poll = POLL.min(budget / 4);
         if transport
-            .wait_ready(deadline, crate::endpoint::Purpose::Ordinary)
+            .wait_ready(deadline, crate::endpoint::Purpose::Ordinary, true)
             .await
             .is_err()
         {

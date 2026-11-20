@@ -109,6 +109,12 @@ pub enum UpstreamState {
 pub trait HostUpstream: Send + Sync + 'static {
     /// Cheap and non-blocking.
     fn state(&self) -> UpstreamState;
+
+    /// The host app holds the engine's maintenance (said in the hello so
+    /// workstations show the banner; QA-9).
+    fn maintenance(&self) -> bool {
+        false
+    }
 }
 
 /// The proxy's settings.
@@ -731,6 +737,9 @@ fn hello(sh: &Shared, paired: bool) -> Response<Body> {
     let prefix = sh.identity.fingerprint().prefix();
     let h = if paired {
         let (engine, generation, commit) = match sh.upstream.state() {
+            UpstreamState::Ready(u) if sh.upstream.maintenance() => {
+                ("maintenance", Some(u.generation), Some(u.engine_commit))
+            }
             UpstreamState::Ready(u) => ("ready", Some(u.generation), Some(u.engine_commit)),
             UpstreamState::EngineDown => ("down", None, None),
         };

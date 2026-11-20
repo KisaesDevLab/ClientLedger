@@ -68,6 +68,9 @@ steps:
   - command: dev.lan_demo_cert_missing
   - assert_state: {key: screen.host_problem, equals: lan.host.cert_missing}
   - assert_exists: {role: button, label: Make a new certificate}
+  # The status bar never says "Sharing" while sharing can't run.
+  - assert_state: {key: lan.state, equals: null}
+  - assert_not_exists: {role: label, label: "Sharing these books with the office"}
   - screenshot: host-cert-missing
   - click: {role: button, label: Make a new certificate}
   - assert_state: {key: screen.host_problem, equals: null}
@@ -107,3 +110,24 @@ steps:
   - assert_state: {key: lan.state, equals: null}
   - command: file.close_window
   - assert_not_exists: {role: tab, label_contains: "Office Network"}
+
+  # --- 3. No company open (QA-1): a new second computer gets here too ------------
+  - command: file.close_company
+  - assert_state: {key: company_open, equals: false}
+  - assert_state: {key: screen.screen, equals: open_company}
+  - click: {role: button, label: "Open a company on my office network"}
+  - assert_state: {key: screen.screen, equals: lan_setup}
+  - assert_state: {key: screen.standalone, equals: true}
+  - assert_state: {key: screen.choice, equals: workstation}
+  - assert_exists: {role: text_input, label: "Pairing code shown on the host computer"}
+  - assert_no_clipping: {}
+  - screenshot: no-company
+  - click: {role: button, label: "← Back to Open Company"}
+  - assert_state: {key: screen.screen, equals: open_company}
+  # Company › Office Network with no company open is not sent back either.
+  - command: company.lan_setup
+  - assert_state: {key: screen.screen, equals: lan_setup}
+  - click: {role: button, label: "← Back to Open Company"}
+  - assert_state: {key: screen.screen, equals: open_company}
+  - key: Enter
+  - assert_state: {key: company_open, equals: true}

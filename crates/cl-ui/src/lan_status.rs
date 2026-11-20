@@ -55,6 +55,8 @@ pub enum LanState {
     Maintenance,
     /// This computer and the host run different versions.
     UpdateNeeded,
+    /// The host removed this computer (QA-11): it pairs again to go on.
+    Unpaired,
 }
 
 impl LanState {
@@ -67,7 +69,10 @@ impl LanState {
     /// The app is covered until the host answers.
     #[must_use]
     pub fn covered(self) -> bool {
-        matches!(self, LanState::HostDown | LanState::HostRestarting)
+        matches!(
+            self,
+            LanState::HostDown | LanState::HostRestarting | LanState::Unpaired
+        )
     }
 
     /// The status bar's words (i18n key).
@@ -81,6 +86,7 @@ impl LanState {
             LanState::HostRestarting => "lan.link.host-engine-down",
             LanState::Maintenance => "lan.link.host-maintenance",
             LanState::UpdateNeeded => "lan.link.update-needed",
+            LanState::Unpaired => "lan.link.unpaired",
         }
     }
 
@@ -95,6 +101,7 @@ impl LanState {
             LanState::HostRestarting => "host_restarting",
             LanState::Maintenance => "maintenance",
             LanState::UpdateNeeded => "update_needed",
+            LanState::Unpaired => "unpaired",
         }
     }
 }
@@ -108,7 +115,9 @@ pub fn of_link(s: &LinkState) -> LanState {
         LinkState::HostEngineDown => LanState::HostRestarting,
         LinkState::HostMaintenance => LanState::Maintenance,
         LinkState::UpdateNeeded { .. } => LanState::UpdateNeeded,
-        // Unpaired, clock off, or gone: nothing reaches the host.
+        // QA-11: removed on the host; never "isn't answering".
+        LinkState::Unpaired => LanState::Unpaired,
+        // Clock off, or gone: nothing reaches the host.
         _ => LanState::HostDown,
     }
 }
@@ -147,6 +156,9 @@ pub fn state_of(link: &CompanyLink) -> Option<LanState> {
         let d = link.demo_state()?;
         return match d.lan.mode {
             Mode::Off => None,
+            // The status bar never says "Sharing" while sharing can't run
+            // (the host certificate is missing).
+            Mode::Host if d.lan.cert_missing => None,
             Mode::Host => Some(LanState::Host),
             Mode::Workstation => Some(match d.lan.link {
                 DemoLink::Connected => LanState::Connected,
@@ -221,10 +233,13 @@ where
         return work.await;
     }
     session.start_maintenance().await?;
+    // QA-9: the workstations' heartbeat says "maintenance" while it lasts.
+    crate::lan_link::set_host_maintenance(true);
     let r = work.await;
     if let Err(e) = session.end_maintenance().await {
         tracing::warn!(error = %e, "maintenance could not be ended; it ends when this sign-in does");
     }
+    crate::lan_link::set_host_maintenance(false);
     r
 }
 
@@ -248,6 +263,16 @@ pub struct LanShell {
     was_covered: bool,
     /// "Connected again" shows until dismissed.
     back_note: bool,
+    /// The host ended this computer's sign-in (QA-9: a restore or import
+    /// on the host signs the workstations out): the banner says so and
+    /// offers to sign in again, until a read works again.
+    signed_out: bool,
+    /// The host was in maintenance since the last read that worked.
+    saw_maintenance: bool,
+    /// "Sign in again" was clicked (the shell runs File › Sign Out, which
+    /// closes the company, asking about unsaved windows, and shows the
+    /// sign-in).
+    sign_in_asked: bool,
     group: Option<(usize, RequestGroup)>,
     poll: Option<Task<Answer>>,
     last: Option<LedgerStamp>,
@@ -340,6 +365,9 @@ impl LanShell {
             }
             _ => {}
         }
+        if state == Some(LanState::Maintenance) {
+            self.saw_maintenance = true;
+        }
         self.state = state;
         if let (Some(link), Some(s)) = (link, state) {
             self.refresh(link, s, now);
@@ -358,7 +386,22 @@ impl LanShell {
             return;
         }
         if let Some(task) = self.poll.as_mut() {
-            match task.try_take() {
+            let answer = task.try_take();
+            match &answer {
+                None => return,
+                Some(Ok(_)) => {
+                    self.signed_out = false;
+                    self.saw_maintenance = false;
+                }
+                Some(Err(cl_api::ApiError::Unauthorized(_))) if state.workstation() => {
+                    if !self.signed_out {
+                        tracing::info!("the host ended this computer's sign-in");
+                    }
+                    self.signed_out = true;
+                }
+                Some(Err(_)) => {}
+            }
+            match answer {
                 None => return,
                 Some(Ok(Answer::Ledger(stamp))) => {
                     if self.last.is_some_and(|l| l != stamp) {
@@ -452,6 +495,11 @@ impl LanShell {
         let text = match self.state {
             Some(LanState::Maintenance) => Some(t("lan.banner.maintenance")),
             Some(LanState::UpdateNeeded) => Some(t("lan.banner.update_needed")),
+            Some(LanState::Connected) if self.signed_out => Some(t(if self.saw_maintenance {
+                "lan.banner.signed_out.maintenance"
+            } else {
+                "lan.banner.signed_out"
+            })),
             Some(LanState::Connected) if self.back_note => {
                 Some(t_count("lan.banner.back", dirty, &[]))
             }
@@ -479,6 +527,16 @@ impl LanShell {
                         tokens.text_primary
                     };
                     ui.label(RichText::new(text).color(color));
+                    if self.signed_out && self.state == Some(LanState::Connected) {
+                        if ui
+                            .button(t("lan.banner.sign_in"))
+                            .on_hover_text(t("lan.banner.sign_in.tip"))
+                            .clicked()
+                        {
+                            self.sign_in_asked = true;
+                        }
+                        return;
+                    }
                     if self.back_note
                         && ui
                             .button(t("lan.banner.dismiss"))
@@ -504,11 +562,19 @@ impl LanShell {
         }
         let mut open_setup = false;
         let tokens = Tokens::of(ctx);
+        // QA-12: never wider than the window (960 x 640 at 200% leaves 480
+        // points); every line wraps.
+        let width = (ctx.content_rect().width() - 48.0).clamp(200.0, 520.0);
         egui::Modal::new(egui::Id::unique("lan_host_down")).show(ctx, |ui| {
-            ui.set_max_width(520.0);
+            ui.set_max_width(width);
             ui.label(RichText::new(t(state.status_key())).strong().size(16.0));
             ui.add_space(4.0);
-            ui.label(t("lan.down.explain"));
+            let unpaired = state == LanState::Unpaired;
+            ui.label(t(if unpaired {
+                "lan.down.unpaired"
+            } else {
+                "lan.down.explain"
+            }));
             ui.add_space(4.0);
             ui.label(
                 RichText::new(t_count("lan.down.kept", dirty, &[])).color(tokens.text_secondary),
@@ -516,11 +582,13 @@ impl LanShell {
             ui.add_space(4.0);
             ui.label(RichText::new(t("lan.down.never_resent")).color(tokens.text_secondary));
             ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(t("lan.down.waiting"));
-            });
-            ui.horizontal(|ui| {
+            if !unpaired {
+                ui.horizontal_wrapped(|ui| {
+                    ui.spinner();
+                    ui.label(t("lan.down.waiting"));
+                });
+            }
+            ui.horizontal_wrapped(|ui| {
                 if ui
                     .button(t("lan.down.check"))
                     .on_hover_text(t("lan.down.check.tip"))
@@ -547,6 +615,11 @@ impl LanShell {
         }
     }
 
+    /// "Sign in again" was clicked (taken once).
+    pub fn take_sign_in(&mut self) -> bool {
+        std::mem::take(&mut self.sign_in_asked)
+    }
+
     /// For the control channel (no host address, no names).
     #[must_use]
     pub fn json(&self) -> serde_json::Value {
@@ -554,6 +627,7 @@ impl LanShell {
             "state": self.state.map(LanState::name),
             "covered": self.state.is_some_and(LanState::covered),
             "back_note": self.back_note,
+            "signed_out": self.signed_out,
             "polling": self.poll.is_some(),
         })
     }
@@ -713,6 +787,7 @@ mod tests {
             LanState::HostRestarting,
             LanState::Maintenance,
             LanState::UpdateNeeded,
+            LanState::Unpaired,
         ] {
             assert!(crate::i18n::has(s.status_key()), "{s:?}");
         }

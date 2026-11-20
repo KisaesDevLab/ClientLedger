@@ -233,4 +233,16 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lan.list.changed_elsewhere", "Someone else changed this since you opened it. Close it and open it again to see their changes."),
     ("lan.payment.applications", "{n} invoices or credits"),
     ("lan.payment.recheck", "Someone else changed which invoices this payment pays. Their choices are shown, with your other changes. Check the invoices, then save."),
+    // P33 QA fixes.
+    ("lan.banner.signed_out", "The host computer ended your sign-in. Your open windows are kept on this computer. Sign in again to go on; windows with unsaved changes ask what to do first."),
+    ("lan.banner.signed_out.maintenance", "You were signed out because the host computer restored or imported books. Your open windows are kept on this computer. Sign in again to go on; windows with unsaved changes ask what to do first."),
+    ("lan.banner.sign_in", "Sign in again"),
+    ("lan.banner.sign_in.tip", "Close the company and sign in again on this computer"),
+    ("lan.host.after_restart", "Sharing starts when you restart ClientLedger. Until then nothing is shared, and the pairing code shows here after the restart."),
+    ("lan.down.unpaired", "The host computer's owner removed this computer from the office network. To use the books again, open Office Network below and pair with the host using a new pairing code from the host computer."),
+    ("lan.banner.back.zero", "Connected to the host again."),
+    ("lan.down.kept.zero", "No window has unsaved changes."),
+    ("lan.back", "\u{2190} Back to Open Company"),
+    ("lan.back.tip", "Close this window and go back to choosing a company"),
+    ("lan.host.sign_in_first", "To share this computer's books, sign in as the owner first. Pairing with another computer needs no sign-in here."),
 ];

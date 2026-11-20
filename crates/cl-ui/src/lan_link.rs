@@ -120,6 +120,10 @@ pub struct LanHost {
     identity: Identity,
     discovery: Arc<dyn Discovery>,
     pump_stop: Arc<AtomicBool>,
+    /// The gate pump holds a supervisor reference: `stop` waits for it, so
+    /// the app's own drop is the supervisor's last and stops the database
+    /// before the process ends (QA-13).
+    pump: Option<std::thread::JoinHandle<()>>,
 }
 
 impl std::fmt::Debug for LanHost {
@@ -151,6 +155,7 @@ impl LanHost {
         let pairing = Arc::new(Pairing::default());
         let gate = Arc::new(Gate::default());
         let pump_stop = Arc::new(AtomicBool::new(false));
+        let pump;
         let proxy = rt
             .block_on(HostProxy::start(
                 ProxyConfig {
@@ -174,7 +179,7 @@ impl LanHost {
             let mut status = proxy.subscribe();
             let (disc, announce) = (Arc::clone(&discovery), settings.announce);
             let tag = identity.fingerprint().prefix();
-            let _ = std::thread::Builder::new()
+            pump = std::thread::Builder::new()
                 .name("cl-lan-gate".into())
                 .spawn(move || {
                     let mut announced: Option<SocketAddr> = None;
@@ -198,7 +203,8 @@ impl LanHost {
                         }
                         std::thread::sleep(Duration::from_millis(250));
                     }
-                });
+                })
+                .ok();
         }
         tracing::info!("LAN host mode on");
         Ok(LanHost {
@@ -210,6 +216,7 @@ impl LanHost {
             identity,
             discovery,
             pump_stop,
+            pump,
         })
     }
 
@@ -253,6 +260,11 @@ impl LanHost {
         self.discovery.stop();
         if let Some(p) = self.proxy.take() {
             self.rt.block_on(p.shutdown());
+        }
+        if let Some(pump) = self.pump.take()
+            && pump.join().is_err()
+        {
+            tracing::warn!("the LAN gate pump stopped with a panic");
         }
         tracing::info!("LAN host mode off");
     }
@@ -558,10 +570,26 @@ fn running_host() -> Option<Arc<LanHost>> {
     })
 }
 
+/// Tells the workstations (through the hello) that this host holds the
+/// engine's maintenance (QA-9). Nothing when no host runs here.
+pub fn set_host_maintenance(on: bool) {
+    if let Some(h) = running_host() {
+        h.gate().set_maintenance(on);
+    }
+}
+
 /// A host runs in this process (the status bar's "Sharing these books").
 #[must_use]
 pub fn host_running() -> bool {
     running_host().is_some()
+}
+
+/// 2026-11-20 as 11/20/2026 (DESIGN dates, QA-14); anything else as is.
+fn us_date(iso: &str) -> String {
+    match iso.split('-').collect::<Vec<_>>()[..] {
+        [y, m, d] if y.len() == 4 && m.len() == 2 && d.len() == 2 => format!("{m}/{d}/{y}"),
+        _ => iso.to_string(),
+    }
 }
 
 /// An audit event from the Office Network window: what, the computer's
@@ -656,7 +684,7 @@ impl crate::screens::lan_setup::LanControl for LiveLan {
                     .map(|d| DeviceRow {
                         label: d.label,
                         fingerprint: d.fingerprint,
-                        paired: d.paired_at.get(..10).unwrap_or_default().to_string(),
+                        paired: us_date(d.paired_at.get(..10).unwrap_or_default()),
                         signed_in: None,
                     })
                     .collect(),
@@ -684,6 +712,7 @@ impl crate::screens::lan_setup::LanControl for LiveLan {
             // bar too); "connecting" before one runs.
             link: crate::lan_status::workstation_link_key().unwrap_or("connecting"),
             restart_needed: self.restart,
+            running: host.is_some(),
             host_problem: if host.is_none() && !self.restart {
                 host_problem()
             } else {

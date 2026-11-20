@@ -261,9 +261,13 @@ pub async fn wait_for_job(
 ) -> Result<ArchiveJobStatus, CompanyError> {
     let status = poll_job(session, job, progress).await?;
     match status.status {
-        JobState::Failed => Err(CompanyError::JobFailed {
-            code: status.error_code(),
-        }),
+        JobState::Failed => {
+            let code = status.error_code();
+            // The engine's code only (P33 QA-10: an unlisted code reads
+            // "try again" to the owner, so the log must name it).
+            tracing::warn!(code = %code, "archive job failed");
+            Err(CompanyError::JobFailed { code })
+        }
         _ => Ok(status),
     }
 }

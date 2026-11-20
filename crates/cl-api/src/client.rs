@@ -384,6 +384,9 @@ pub(crate) enum TransportError {
     TooLarge,
     /// A header value could not be built (a malformed token).
     BadHeader,
+    /// A save on a source whose writes never wait (a LAN workstation)
+    /// found the engine away: nothing was sent (P33 QA-6).
+    WriteHeld,
 }
 
 /// One-attempt HTTP transport over loopback.
@@ -469,9 +472,11 @@ impl Transport {
         &self,
         deadline: Instant,
         purpose: Purpose,
+        may_wait: bool,
     ) -> Result<EngineEndpoint, TransportError> {
         loop {
-            match self.source.current_for(purpose) {
+            let state = self.source.current_for(purpose);
+            match state {
                 EndpointState::Ready(ep) => {
                     crate::idempotency::set_clock_offset_ms(ep.clock_offset_ms);
                     let prev = self.last_generation.swap(ep.generation, Ordering::Relaxed);
@@ -483,6 +488,13 @@ impl Transport {
                 }
                 EndpointState::Down { permanent: true } => {
                     return Err(TransportError::NotReady { permanent: true });
+                }
+                EndpointState::Starting
+                | EndpointState::Restarting
+                | EndpointState::Down { permanent: false }
+                    if !may_wait =>
+                {
+                    return Err(TransportError::WriteHeld);
                 }
                 EndpointState::Starting
                 | EndpointState::Restarting
@@ -513,7 +525,10 @@ impl Transport {
         } else {
             Purpose::Ordinary
         };
-        let ep = self.wait_ready(deadline, purpose).await?;
+        // P33 QA-6: a save never waits through a LAN link that is down; it
+        // is refused as not sent, and goes only when the owner saves again.
+        let may_wait = call.method.is_read() || self.source.writes_wait();
+        let ep = self.wait_ready(deadline, purpose, may_wait).await?;
         let budget = self.cfg.timeouts.budget(call.timeout);
         let per_attempt = if call.method.is_read() {
             budget
@@ -1043,6 +1058,72 @@ pub(crate) mod tests {
             .await
             .expect_err("never ready");
         assert_eq!(e, TransportError::NotReady { permanent: false });
+    }
+
+    /// A source whose saves never wait (a LAN workstation's link).
+    struct NoWaitSource(Arc<FixedEndpoint>);
+    impl EndpointSource for NoWaitSource {
+        fn current(&self) -> EndpointState {
+            self.0.current()
+        }
+        fn writes_wait(&self) -> bool {
+            false
+        }
+    }
+
+    /// P33 QA-6: with the host away a save is refused at once and nothing
+    /// is held; when the host comes back nothing is sent until the next
+    /// save. Reads still wait as before.
+    #[tokio::test]
+    async fn a_save_never_waits_through_a_down_lan_link() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+        let port = server.address().port();
+        let fixed = Arc::new(FixedEndpoint::with_state(EndpointState::Down {
+            permanent: false,
+        }));
+        let t =
+            Transport::new(Arc::new(NoWaitSource(fixed.clone())), fast_config()).expect("client");
+        let setter = fixed.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            setter.set(EndpointState::Ready(EngineEndpoint {
+                port,
+                token: Secret::new(TOKEN),
+                generation: 2,
+                clock_offset_ms: 0,
+            }));
+        });
+        let save = Call::at(Method::Put, "/api/v1/x").json_body(b"{}".to_vec());
+        let started = Instant::now();
+        let e = t
+            .attempt(&save, &AttemptAuth::default(), 1, soon())
+            .await
+            .expect_err("held");
+        assert_eq!(e, TransportError::WriteHeld);
+        assert!(started.elapsed() < Duration::from_millis(100));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .is_empty(),
+            "nothing reached the engine on its own"
+        );
+        // The owner saves again: it goes now.
+        let reply = t
+            .attempt(&save, &AttemptAuth::default(), 1, soon())
+            .await
+            .expect("sent");
+        assert_eq!(reply.status, 200);
+        assert_eq!(
+            server.received_requests().await.unwrap_or_default().len(),
+            1
+        );
     }
 
     /// A port nothing listened on a moment ago. Only for a single immediate

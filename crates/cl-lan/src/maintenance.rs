@@ -13,6 +13,7 @@
 //! untested surface. A stale hold is cleared by the supervisor at every
 //! engine start (review B1).
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, PoisonError};
 
 use crate::host::{HostUpstream, Upstream, UpstreamState};
@@ -22,12 +23,21 @@ use crate::host::{HostUpstream, Upstream, UpstreamState};
 #[derive(Debug, Default)]
 pub struct Gate {
     upstream: Mutex<Option<Upstream>>,
+    /// The host app holds the engine's maintenance (restore, import): the
+    /// workstations' hello says so, so they show the maintenance banner
+    /// (QA-9). Nothing is refused here; the engine refuses itself.
+    maintenance: AtomicBool,
 }
 
 impl Gate {
     /// Publishes the running engine (or `None` while it is down).
     pub fn set_upstream(&self, up: Option<Upstream>) {
         *self.upstream.lock().unwrap_or_else(PoisonError::into_inner) = up;
+    }
+
+    /// The host app started (`true`) or ended a maintenance hold.
+    pub fn set_maintenance(&self, on: bool) {
+        self.maintenance.store(on, Ordering::SeqCst);
     }
 }
 
@@ -37,6 +47,10 @@ impl HostUpstream for Gate {
             Some(u) => UpstreamState::Ready(u.clone()),
             None => UpstreamState::EngineDown,
         }
+    }
+
+    fn maintenance(&self) -> bool {
+        self.maintenance.load(Ordering::SeqCst)
     }
 }
 
@@ -58,5 +72,10 @@ mod tests {
         assert!(matches!(g.state(), UpstreamState::Ready(_)));
         g.set_upstream(None);
         assert!(matches!(g.state(), UpstreamState::EngineDown));
+        assert!(!g.maintenance());
+        g.set_maintenance(true);
+        assert!(g.maintenance());
+        g.set_maintenance(false);
+        assert!(!g.maintenance());
     }
 }

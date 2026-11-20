@@ -582,7 +582,16 @@ impl OpenCompanyScreen {
                     self.restore_result = Some(out);
                     self.loaded_once = false;
                 }
-                Err(e) => self.error = Some(e),
+                Err(e) => {
+                    // P33 QA-10: the scrubbed detail (the engine's job code,
+                    // never a path or name) so a failed restore can be told
+                    // apart in ui.log.
+                    tracing::warn!(
+                        detail = %cl_core::OwnerFacing::scrubbed_detail(&e),
+                        "restore failed"
+                    );
+                    self.error = Some(e);
+                }
             }
         }
     }
@@ -1110,6 +1119,14 @@ impl OpenCompanyScreen {
         if self.practice_pending {
             form::hint(ui, tokens, &t("open.practice_after_signin"));
         }
+        // P33 QA-1: a new second computer pairs with the host from here,
+        // with no owner account or company of its own.
+        ui.add_space(6.0);
+        if Self::side_button(ui, tokens, &t("open.lan"), &t("open.lan_first_sub")).clicked() {
+            self.link.push(CompanyEvent::OpenWindow(CommandId::new(
+                crate::screens::lan_setup::KIND,
+            )));
+        }
     }
 
     fn card(&mut self, ui: &mut Ui, tokens: &Tokens) {
@@ -1274,8 +1291,10 @@ impl OpenCompanyScreen {
                 *restore = true;
             }
             ui.add_space(6.0);
+            // P33 QA-1: the Office Network window, where this computer
+            // pairs with the host (or shares its own books).
             if Self::side_button(ui, tokens, &t("open.lan"), &t("open.lan_sub")).clicked() {
-                *action = Some(CommandId::new("help.current"));
+                *action = Some(CommandId::new(crate::screens::lan_setup::KIND));
             }
             ui.add_space(6.0);
             if Self::side_button(ui, tokens, &t("open.practice"), &t("open.practice_sub")).clicked()

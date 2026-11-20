@@ -28,6 +28,15 @@ pub trait EndpointSource: Send + Sync + 'static {
         let _ = purpose;
         self.current()
     }
+
+    /// Whether a save may wait here for the engine to come back. True for
+    /// the local engine (a restart takes seconds and the save goes when it
+    /// answers). A LAN workstation's link answers false (P33 QA-6, Q-110):
+    /// a save asked for while the host is down is refused at once as "not
+    /// sent", and goes only when the owner saves again.
+    fn writes_wait(&self) -> bool {
+        true
+    }
 }
 
 /// What an attempt is about to send.

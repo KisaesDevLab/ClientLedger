@@ -59,8 +59,11 @@ pub fn count_text(n: u64) -> String {
 #[must_use]
 pub fn t_count(key: &str, n: usize, args: &[(&str, &str)]) -> String {
     let one = format!("{key}.one");
+    let zero = format!("{key}.zero");
     let chosen = if n == 1 && has(&one) {
         one.as_str()
+    } else if n == 0 && has(&zero) {
+        zero.as_str()
     } else {
         key
     };
@@ -409,6 +412,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("open.restore_sub", "From a .clbackup file"),
     ("open.lan", "Open a company on my office network"),
     ("open.lan_sub", "Another computer here is sharing it"),
+    ("open.lan_first_sub", "Another computer here shares its books: pair this one with it, no account needed here"),
     ("open.practice", "Try the practice company"),
     ("open.practice_sub", "Explore without touching real books"),
     ("open.practice_later", "Sign in first; the practice company opens right after."),
