@@ -953,6 +953,7 @@ pub(crate) mod tests {
             port: b.address().port(),
             token: Secret::new("second-token"),
             generation: 2,
+            clock_offset_ms: 0,
         }));
         let r2 = t
             .attempt(&call, &AttemptAuth::default(), 2, soon())
@@ -985,6 +986,7 @@ pub(crate) mod tests {
                 port,
                 token: Secret::new(TOKEN),
                 generation: 5,
+                clock_offset_ms: 0,
             }));
         });
         let reply = t

@@ -109,6 +109,7 @@ fn fail_and_restart(
             port,
             token: Secret::new(TOKEN),
             generation: 2,
+            clock_offset_ms: 0,
         }));
         ResponseTemplate::new(500)
     }

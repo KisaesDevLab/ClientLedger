@@ -1191,6 +1191,7 @@ pub(crate) mod tests {
             port,
             token: Secret::new(token),
             generation,
+            clock_offset_ms: 0,
         })
     }
 

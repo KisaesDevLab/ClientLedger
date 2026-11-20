@@ -178,6 +178,7 @@ impl VerifiedEndpoint {
             port: ep.port,
             token: Secret::new(ep.token.expose()),
             generation: ep.generation,
+            clock_offset_ms: 0,
         })
     }
 }

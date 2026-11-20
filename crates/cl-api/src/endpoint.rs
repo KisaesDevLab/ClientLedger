@@ -72,6 +72,11 @@ pub struct EngineEndpoint {
     pub token: Secret,
     /// Increases by one each time the engine process is (re)started.
     pub generation: u64,
+    /// The engine's clock minus this computer's, in milliseconds. Zero for
+    /// the local engine; on a LAN workstation, measured by the heartbeat
+    /// (Q-P33o). Add it to local time before comparing with engine
+    /// timestamps (JWT `exp`, `createdAt`).
+    pub clock_offset_ms: i64,
 }
 
 impl fmt::Debug for EngineEndpoint {
@@ -80,6 +85,7 @@ impl fmt::Debug for EngineEndpoint {
             .field("port", &self.port)
             .field("token", &"***")
             .field("generation", &self.generation)
+            .field("clock_offset_ms", &self.clock_offset_ms)
             .finish()
     }
 }
@@ -99,6 +105,7 @@ impl FixedEndpoint {
                 port,
                 token,
                 generation,
+                clock_offset_ms: 0,
             })),
         }
     }

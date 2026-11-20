@@ -78,6 +78,7 @@ fn restart(src: &FixedEndpoint, port: u16) {
         port,
         token: Secret::new(TOKEN),
         generation: 2,
+        clock_offset_ms: 0,
     }));
 }
 
