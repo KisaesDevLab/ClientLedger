@@ -376,7 +376,11 @@ pub fn edges(h: &Harness) {
             ),
             "{e:?}"
         );
-        assert_eq!(h.observer.sent(Method::Put, "/api/v1/checks/{id}"), puts);
+        // With `stale-all-v1` the engine refuses it (one PUT, 409).
+        assert_eq!(
+            h.observer.sent(Method::Put, "/api/v1/checks/{id}"),
+            puts + u64::from(h.caps.has(Capabilities::STALE_ALL))
+        );
         // Print later on an edit: unnumbered, queued.
         let mut to_print = story(&b, on, None, false);
         to_print.print_later = true;
