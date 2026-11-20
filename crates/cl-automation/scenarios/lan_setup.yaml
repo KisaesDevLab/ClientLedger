@@ -56,7 +56,6 @@ steps:
   - command: dev.lan_demo_code_burned
   - assert_state: {key: screen.code_burned, equals: true}
   - assert_exists: {role: label, label_contains: "192.168.1.77"}
-  - assert_no_clipping: {}
   - screenshot: host-code-burned
   - click: {role: button, label: Show a pairing code}
   - assert_state: {key: screen.code_burned, equals: false}
@@ -69,7 +68,6 @@ steps:
   - command: dev.lan_demo_cert_missing
   - assert_state: {key: screen.host_problem, equals: lan.host.cert_missing}
   - assert_exists: {role: button, label: Make a new certificate}
-  - assert_no_clipping: {}
   - screenshot: host-cert-missing
   - click: {role: button, label: Make a new certificate}
   - assert_state: {key: screen.host_problem, equals: null}

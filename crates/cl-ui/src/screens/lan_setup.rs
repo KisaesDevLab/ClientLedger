@@ -419,8 +419,13 @@ impl LanSetupScreen {
                 {
                     self.control.regenerate();
                 }
+                // Sharing is not running: nothing below (connection,
+                // pairing code) would work, so only the way out shows.
+                if sharing && ui.button(t("lan.host.off")).clicked() {
+                    self.error = self.control.set_host(false, None).err();
+                }
             });
-            ui.add_space(6.0);
+            return;
         }
         form::card(ui, tokens, |ui| {
             ui.label(RichText::new(t("lan.host.iface")).strong());
@@ -894,6 +899,9 @@ mod tests {
             nodes = frame(&mut s, &ctx, Vec::new());
         }
         assert!(texts(&nodes).contains(&t("lan.host.cert_missing")));
+        // Sharing isn't running: no "Sharing on ..." note, no pairing code.
+        assert!(named(&nodes, Role::Button, &t("lan.host.code.new")).is_none());
+        assert!(named(&nodes, Role::Button, &t("lan.host.off")).is_some());
         let button = named(&nodes, Role::Button, &t("lan.host.regenerate"))
             .expect("Make a new certificate")
             .clone();
