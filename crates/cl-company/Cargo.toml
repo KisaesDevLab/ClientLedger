@@ -12,10 +12,17 @@ cl-core = { path = "../cl-core" }
 cl-pg = { path = "../cl-pg" }
 cl-settings = { path = "../cl-settings" }
 chrono = { version = "0.4.45", default-features = false, features = ["std", "clock"] }
+# P32: IIF cents rounding (display and file text only; the engine owns
+# amounts). MIT.
+rust_decimal = { version = "1.43.0", default-features = false, features = ["std"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 sha2 = "0.11.1"
 thiserror = "2.0.21"
+# P32: the transfer passphrase generator (OS random source) and its
+# zeroized buffers; both already in the tree (cl-pg). MIT OR Apache-2.0.
+getrandom = "0.4.3"
+zeroize = { version = "1.9.1", default-features = false, features = ["alloc"] }
 tokio = { version = "1.53.3", features = ["rt", "time"] }
 tracing = "0.1.44"
 # Stored (uncompressed) entries only: the engine archive is already
@@ -36,7 +43,6 @@ cl-model = { path = "../cl-model" }
 # A09: builder export goldens are written as the desktop writes the file.
 cl-print = { path = "../cl-print" }
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
-rust_decimal = { version = "1.43.0", default-features = false, features = ["std"] }
 tempfile = "3.27.0"
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6.5"

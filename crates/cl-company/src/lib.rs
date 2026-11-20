@@ -21,6 +21,7 @@ pub mod backup;
 pub mod delete;
 pub mod error;
 pub mod export_all;
+pub mod iif;
 pub mod intake;
 pub mod lifecycle;
 pub mod report_story;
@@ -30,6 +31,7 @@ pub mod sample;
 pub mod setup;
 pub mod statistics;
 pub mod templates;
+pub mod transfer;
 pub mod year_end;
 mod zipfile;
 
@@ -40,7 +42,8 @@ pub mod inbox {
 }
 
 pub use backup::{
-    BackupOutcome, BackupRequest, HostMetadata, Progress, ProgressSink, backup, wait_for_job,
+    BackupOutcome, BackupRequest, HostMetadata, MissingAttachment, Progress, ProgressSink, backup,
+    wait_for_job,
 };
 pub use delete::{DeleteOutcome, DeleteRequest, delete_company};
 pub use error::CompanyError;

@@ -48,6 +48,42 @@ pub struct HostMetadata {
     /// (`CompanyPrefs::for_archive`, Q-P09c); absent in P08 archives.
     #[serde(default)]
     pub prefs: cl_settings::CompanyPrefs,
+    /// The newest transfer files sent to the accountant (P32 "Sent
+    /// before"), so a restore keeps them; absent before P32.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub transfers: Vec<cl_settings::TransferRecord>,
+}
+
+/// How many transfer records a backup carries in `manifest.host` (the
+/// engine caps it at 16 KiB).
+pub const HOST_TRANSFERS: usize = 20;
+/// The most the transfer records may take in `manifest.host`, serialized
+/// (review S4): the rest of the 16 KiB host block stays free for the
+/// name, flags and preferences.
+pub const HOST_TRANSFERS_MAX_BYTES: usize = 12 * 1024;
+
+/// The "Sent before" records a backup carries (review S4): the newest
+/// [`HOST_TRANSFERS`], each with its file name only (no folder: the
+/// backup may travel to another computer, and `for_archive` keeps no
+/// paths), dropping the oldest until they fit in
+/// [`HOST_TRANSFERS_MAX_BYTES`].
+#[must_use]
+pub fn host_transfers(records: &[cl_settings::TransferRecord]) -> Vec<cl_settings::TransferRecord> {
+    let skip = records.len().saturating_sub(HOST_TRANSFERS);
+    let mut out: Vec<cl_settings::TransferRecord> = records[skip..]
+        .iter()
+        .map(|r| {
+            let mut r = r.clone();
+            r.path = r.path.file_name().map(PathBuf::from).unwrap_or_default();
+            r
+        })
+        .collect();
+    while !out.is_empty()
+        && serde_json::to_vec(&out).map_or(usize::MAX, |b| b.len()) > HOST_TRANSFERS_MAX_BYTES
+    {
+        out.remove(0);
+    }
+    out
 }
 
 impl HostMetadata {
@@ -74,6 +110,7 @@ impl HostMetadata {
             accent: accent.hex(),
             flags,
             prefs,
+            transfers: Vec::new(),
         }
     }
 }
@@ -222,6 +259,25 @@ pub async fn wait_for_job(
     job: &JobId,
     progress: &ProgressSink,
 ) -> Result<ArchiveJobStatus, CompanyError> {
+    let status = poll_job(session, job, progress).await?;
+    match status.status {
+        JobState::Failed => Err(CompanyError::JobFailed {
+            code: status.error_code(),
+        }),
+        _ => Ok(status),
+    }
+}
+
+/// Polls an archive job until it succeeds or fails and returns its last
+/// status either way (a failure keeps the engine's `details`).
+///
+/// # Errors
+/// `JobFailed` with `TIMEOUT` or `JOB_UNKNOWN`; `Api`.
+pub async fn poll_job(
+    session: &Session,
+    job: &JobId,
+    progress: &ProgressSink,
+) -> Result<ArchiveJobStatus, CompanyError> {
     let deadline = tokio::time::Instant::now() + EXPORT_DEADLINE;
     loop {
         let status = match session.tenants().archive_job(job).await {
@@ -234,12 +290,7 @@ pub async fn wait_for_job(
             Err(e) => return Err(e.into()),
         };
         match status.status {
-            JobState::Succeeded => return Ok(status),
-            JobState::Failed => {
-                return Err(CompanyError::JobFailed {
-                    code: status.error_code(),
-                });
-            }
+            JobState::Succeeded | JobState::Failed => return Ok(status),
             JobState::Queued | JobState::Running => {
                 progress(Progress::Working {
                     percent: status.progress,
@@ -254,6 +305,60 @@ pub async fn wait_for_job(
             }
         }
     }
+}
+
+/// One attachment file an export could not read (Q-P32k, QA-1).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MissingAttachment {
+    /// The attachment id.
+    pub attachment_id: String,
+    /// Its file name (owner data: shown, never logged).
+    pub file_name: Option<String>,
+    /// The kind of record it belongs to (`bill`, `transaction`, …).
+    pub record_type: Option<String>,
+    /// That record's id (for Open record).
+    pub record_id: Option<String>,
+    /// `FILE_MISSING`, `FILE_SIZE_MISMATCH` or `EXTERNAL_FILE`.
+    pub reason: String,
+}
+
+/// Each missing file with its name and record, as far as the engine can
+/// say (an attachment it can't find keeps only its id).
+pub(crate) async fn resolve_missing(
+    session: &Session,
+    files: Vec<cl_api::MissingFile>,
+) -> Vec<MissingAttachment> {
+    let mut out = Vec::with_capacity(files.len());
+    for f in files {
+        let found = match cl_api::AttachmentId::parse(&f.row_id) {
+            Ok(id) => session.attachments().get(id).await.ok(),
+            Err(_) => None,
+        };
+        out.push(MissingAttachment {
+            attachment_id: f.row_id,
+            file_name: found.as_ref().map(|a| a.file_name.clone()),
+            record_type: found.as_ref().map(|a| a.attachable_type.clone()),
+            record_id: found.map(|a| a.attachable_id),
+            reason: f.reason,
+        });
+    }
+    out
+}
+
+/// The error for a failed backup job: the engine's list of missing or
+/// changed attachment files when it gave one (QA-1: desktop backups stop
+/// on `FILE_MISSING` / `FILE_SIZE_MISMATCH` and list every file), else
+/// `JobFailed` with its code.
+pub(crate) async fn job_failure(session: &Session, status: &ArchiveJobStatus) -> CompanyError {
+    let code = status.error_code();
+    tracing::warn!(code = %code, "backup: export failed");
+    if let Some(err) = status.error.as_ref() {
+        let files = err.missing_files();
+        if !files.is_empty() {
+            return CompanyError::MissingFiles(resolve_missing(session, files).await);
+        }
+    }
+    CompanyError::JobFailed { code }
 }
 
 /// Moves the finished archive to `dest` and checks its hash. The source is
@@ -330,13 +435,14 @@ pub async fn backup(
         .get(req.tenant_id)
         .cloned()
         .ok_or(CompanyError::UnknownCompany)?;
-    let host = HostMetadata::new(
+    let mut host = HostMetadata::new(
         req.kind,
         &rec.name,
         rec.accent,
         rec.flags,
         rec.prefs.for_archive(),
     );
+    host.transfers = host_transfers(&rec.transfers);
     progress(Progress::Starting);
     let job = session
         .tenants()
@@ -347,17 +453,20 @@ pub async fn backup(
                 include_audit: true,
                 omit_intake_settings: false,
                 omit_document_drafts: false,
+                transfer: false,
+                as_of: None,
                 host: serde_json::to_value(&host).map_err(|_| CompanyError::Metadata)?,
                 passphrase,
             },
         )
         .await?;
-    let result = wait_for_job(session, &job.job_id, progress)
-        .await?
-        .export_result()
-        .ok_or(CompanyError::JobFailed {
-            code: "NO_RESULT".into(),
-        })?;
+    let status = poll_job(session, &job.job_id, progress).await?;
+    if status.status == JobState::Failed {
+        return Err(job_failure(session, &status).await);
+    }
+    let result = status.export_result().ok_or(CompanyError::JobFailed {
+        code: "NO_RESULT".into(),
+    })?;
     let now = cl_settings::recent::now();
     let dest = req
         .dest_dir
@@ -503,6 +612,60 @@ mod tests {
             backup_file_name("x", at, BackupKind::BeforeDelete)
                 .ends_with("-before-delete.clbackup")
         );
+    }
+
+    /// Review S4: the worst case (20 records, long non-ASCII file names in
+    /// deep folders, the largest amounts) stays under 12 KiB of transfers
+    /// and the whole host block under the engine's 16 KiB, with no folder.
+    #[test]
+    fn host_transfers_fit_the_host_limit_and_carry_no_folder() {
+        let big = cl_core::Money::parse_wire("-99999999999999.9999").expect("money");
+        let deep: PathBuf = std::iter::repeat_n("Ünïcödé-földer-名前-📁", 12).collect();
+        let name = format!("{}.clxfer", "Ünïcödé 名前 📁 ".repeat(15));
+        let rec = |i: usize| cl_settings::TransferRecord {
+            path: Path::new("C:\\Users\\owner").join(&deep).join(&name),
+            sha256: "f".repeat(64),
+            archive_id: format!("{i:036}"),
+            created_at: Timestamp::parse_wire("2026-11-04T08:12:00.000Z").expect("ts"),
+            totals: Some(cl_settings::TransferTotals {
+                as_of: cl_core::CalendarDate::from_ymd(2026, 11, 4).expect("d"),
+                total_assets: big,
+                total_liabilities: big,
+                total_equity: big,
+                net_income: big,
+                transactions: u64::MAX,
+                attachments: u64::MAX,
+            }),
+        };
+        let all: Vec<_> = (0..40).map(rec).collect();
+        let kept = host_transfers(&all);
+        assert!(!kept.is_empty() && kept.len() <= HOST_TRANSFERS);
+        let bytes = serde_json::to_vec(&kept).expect("json").len();
+        assert!(bytes <= HOST_TRANSFERS_MAX_BYTES, "{bytes} bytes");
+        // The newest are kept, in order, with the file name only.
+        assert_eq!(
+            kept.last().map(|r| r.archive_id.clone()),
+            Some(format!("{:036}", 39))
+        );
+        for r in &kept {
+            assert_eq!(r.path, PathBuf::from(&name));
+            assert!(!serde_json::to_string(r).expect("json").contains("owner"));
+        }
+        // The whole host block, with every preference, fits the engine's cap.
+        let mut host = HostMetadata::new(
+            BackupKind::Backup,
+            &"N".repeat(255),
+            cl_settings::ACCENT_PALETTE[0],
+            CompanyFlags::default(),
+            cl_settings::CompanyPrefs::default(),
+        );
+        host.transfers = kept;
+        let all = serde_json::to_vec(&host).expect("json").len();
+        assert!(all <= cl_api::HOST_METADATA_MAX_BYTES, "{all} bytes");
+        // A short history is kept whole.
+        let short: Vec<_> = (0..3).map(rec).collect();
+        assert_eq!(host_transfers(&short).len(), 3);
+        assert_eq!(host_transfers(&[]), Vec::new());
     }
 
     #[test]

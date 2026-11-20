@@ -48,9 +48,23 @@ pub enum CompanyError {
         /// `ARCHIVE_TOO_NEW`, ...), or `JOB_UNKNOWN` / `TIMEOUT`.
         code: String,
     },
+    /// A backup stopped because attachment files are missing or changed
+    /// on this computer (QA-1, engine `FILE_MISSING` /
+    /// `FILE_SIZE_MISMATCH`); every one is listed. Retrying never helps.
+    #[error("{} attachment files can't be read", .0.len())]
+    MissingFiles(Vec<crate::backup::MissingAttachment>),
     /// The file is not a `ClientLedger` backup.
     #[error("not a backup file")]
     NotABackup,
+    /// The backup was made by a newer version (a higher archive format
+    /// than [`crate::restore::MAX_FORMAT_VERSION`]): update first.
+    #[error("archive made by a newer version")]
+    ArchiveTooNew,
+    /// A transfer file for the accountant's `MyBooks` was chosen for Restore
+    /// (Q-P32n): `.clxfer` by extension, or the engine's
+    /// `TRANSFER_NOT_A_BACKUP`.
+    #[error("a transfer file is not a backup")]
+    TransferNotABackup,
     /// The file's hash differs from the one recorded when it was written.
     #[error("backup file changed since it was written")]
     Tampered,
@@ -112,11 +126,38 @@ impl OwnerFacing for CompanyError {
                 "ARCHIVE_TOO_NEW" => {
                     OwnerMessage::with_fix("error.company.too_new", "fix.company.too_new")
                 }
+                "TRANSFER_NOT_A_BACKUP" => OwnerMessage::with_fix(
+                    "error.company.transfer_not_backup",
+                    "fix.company.transfer_not_backup",
+                ),
+                "TENANT_BUSY" => OwnerMessage::with_fix("error.company.busy", "fix.company.busy"),
+                "ARCHIVE_TOTALS_MISMATCH" => OwnerMessage::with_fix(
+                    "error.company.totals_mismatch",
+                    "fix.company.totals_mismatch",
+                ),
+                "NOT_A_TRANSFER_FILE" => OwnerMessage::with_fix(
+                    "error.company.not_a_transfer",
+                    "fix.company.not_a_transfer",
+                ),
+                // QA-1: without the list (an older engine); never "try again".
+                "FILE_MISSING" | "FILE_SIZE_MISMATCH" | "EXTERNAL_FILE" => {
+                    OwnerMessage::with_fix("error.backup.missing_files", "fix.backup.missing_files")
+                }
                 _ => OwnerMessage::with_fix("error.company.job_failed", "fix.api.try_again_soon"),
             },
+            CompanyError::MissingFiles(_) => {
+                OwnerMessage::with_fix("error.backup.missing_files", "fix.backup.missing_files")
+            }
             CompanyError::NotABackup => {
                 OwnerMessage::with_fix("error.company.not_a_backup", "fix.company.not_a_backup")
             }
+            CompanyError::ArchiveTooNew => {
+                OwnerMessage::with_fix("error.company.too_new", "fix.company.too_new")
+            }
+            CompanyError::TransferNotABackup => OwnerMessage::with_fix(
+                "error.company.transfer_not_backup",
+                "fix.company.transfer_not_backup",
+            ),
             CompanyError::Tampered => {
                 OwnerMessage::with_fix("error.company.tampered", "fix.company.tampered")
             }
@@ -145,6 +186,7 @@ impl OwnerFacing for CompanyError {
             },
             CompanyError::Setup(issues) => format!("setup issues: {issues:?}"),
             CompanyError::JobFailed { code } => format!("job {code}"),
+            CompanyError::MissingFiles(f) => format!("missing files: {}", f.len()),
             CompanyError::Unavailable(cap) => format!("capability {cap}"),
             other => format!("{other}"),
         }
@@ -172,5 +214,39 @@ mod tests {
             e.owner_message().suggestion_key,
             Some("fix.company.name_mismatch")
         );
+    }
+
+    /// Review S5: the transfer codes read in plain words, not "try again".
+    #[test]
+    fn transfer_job_codes_have_owner_messages() {
+        for (code, key) in [
+            ("ARCHIVE_TOTALS_MISMATCH", "error.company.totals_mismatch"),
+            ("NOT_A_TRANSFER_FILE", "error.company.not_a_transfer"),
+            ("TRANSFER_NOT_A_BACKUP", "error.company.transfer_not_backup"),
+        ] {
+            let m = CompanyError::JobFailed { code: code.into() }.owner_message();
+            assert_eq!(m.key, key, "{code}");
+            assert_ne!(m.suggestion_key, Some("fix.api.try_again_soon"), "{code}");
+        }
+    }
+
+    /// QA-1: missing attachment files never read "try again", and the
+    /// detail carries a count only (file names are owner data).
+    #[test]
+    fn missing_files_read_in_plain_words() {
+        for code in ["FILE_MISSING", "FILE_SIZE_MISMATCH", "EXTERNAL_FILE"] {
+            let m = CompanyError::JobFailed { code: code.into() }.owner_message();
+            assert_eq!(m.key, "error.backup.missing_files", "{code}");
+            assert_eq!(m.suggestion_key, Some("fix.backup.missing_files"));
+        }
+        let e = CompanyError::MissingFiles(vec![crate::backup::MissingAttachment {
+            attachment_id: "a1".into(),
+            file_name: Some("Receipt Ozark.pdf".into()),
+            record_type: Some("bill".into()),
+            record_id: Some("t1".into()),
+            reason: "FILE_MISSING".into(),
+        }]);
+        assert_eq!(e.owner_message().key, "error.backup.missing_files");
+        assert_eq!(e.scrubbed_detail(), "missing files: 1");
     }
 }

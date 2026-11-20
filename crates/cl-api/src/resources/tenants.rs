@@ -137,16 +137,30 @@ pub struct ArchiveRequest {
     /// [`DOCUMENT_DRAFTS_OMITTED`] in `omitted`. Needs `document-drafts-v1`;
     /// only written when `true`.
     pub omit_document_drafts: bool,
+    /// A transfer file for the accountant's `MyBooks` (U-284, P32): users as
+    /// names only, secrets left out. Needs `tenant-archive-transfer-v1`
+    /// ([`Tenants::export_archive`] refuses it otherwise, because an older
+    /// engine would drop the flag and write a full backup); only written
+    /// when `true`. The result's [`ArchiveResult::transfer_honoured`] must
+    /// then be checked.
+    pub transfer: bool,
+    /// The verification totals' as-of date, the owner's local day (U-283,
+    /// `asOf`); only written when set and the engine has
+    /// `archive-verification-totals-v1`.
+    pub as_of: Option<cl_core::CalendarDate>,
     /// Opaque application metadata kept in `manifest.host` (≤ 16 KiB).
     pub host: Value,
-    /// The owner's backup passphrase (never logged).
+    /// The archive passphrase (never logged).
     pub passphrase: Secret,
 }
 
 impl Serialize for ArchiveRequest {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        let fields =
-            4 + usize::from(self.omit_intake_settings) + usize::from(self.omit_document_drafts);
+        let fields = 4
+            + usize::from(self.omit_intake_settings)
+            + usize::from(self.omit_document_drafts)
+            + usize::from(self.transfer)
+            + usize::from(self.as_of.is_some());
         let mut st = s.serialize_struct("ArchiveRequest", fields)?;
         st.serialize_field("includeAttachments", &self.include_attachments)?;
         st.serialize_field("includeAudit", &self.include_audit)?;
@@ -155,6 +169,12 @@ impl Serialize for ArchiveRequest {
         }
         if self.omit_document_drafts {
             st.serialize_field("omitDocumentDrafts", &true)?;
+        }
+        if self.transfer {
+            st.serialize_field("transfer", &true)?;
+        }
+        if let Some(d) = self.as_of {
+            st.serialize_field("asOf", &d.to_wire())?;
         }
         st.serialize_field("host", &self.host)?;
         st.serialize_field("passphrase", self.passphrase.expose())?;
@@ -283,6 +303,37 @@ pub struct JobError {
     /// The engine's message (owner data may be absent; never logged).
     #[serde(default)]
     pub message: String,
+    /// Structured details (`FILE_MISSING`: `files[] {table, rowId,
+    /// reason}`; `ARCHIVE_TOO_NEW`: versions). Never logged.
+    #[serde(default)]
+    pub details: Option<Value>,
+}
+
+/// One attachment file an export could not read (U-284, S8): every one
+/// is listed in a single run.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingFile {
+    /// The table holding the row (`attachments`).
+    #[serde(default)]
+    pub table: String,
+    /// The row id.
+    pub row_id: String,
+    /// `FILE_MISSING`, `FILE_SIZE_MISMATCH` or `EXTERNAL_FILE`.
+    #[serde(default)]
+    pub reason: String,
+}
+
+impl JobError {
+    /// The files a `FILE_MISSING` failure lists (empty otherwise).
+    #[must_use]
+    pub fn missing_files(&self) -> Vec<MissingFile> {
+        self.details
+            .as_ref()
+            .and_then(|d| d.get("files"))
+            .and_then(|f| serde_json::from_value(f.clone()).ok())
+            .unwrap_or_default()
+    }
 }
 
 /// `GET /api/v1/tenant-archives/jobs/{jobId}`: an export or import job.
@@ -367,6 +418,32 @@ pub struct ArchiveResult {
     /// Schema version written.
     #[serde(default)]
     pub schema_version: Option<u64>,
+    /// What the manifest says (options echoed, verification totals,
+    /// omitted parts; U-283/U-284).
+    #[serde(default)]
+    pub manifest_summary: Option<crate::resources::archive_totals::ManifestSummary>,
+}
+
+impl ArchiveResult {
+    /// The engine wrote the file in transfer mode (S3): only an explicit
+    /// `manifestSummary.options.transfer == true` counts.
+    #[must_use]
+    pub fn transfer_honoured(&self) -> bool {
+        self.manifest_summary
+            .as_ref()
+            .and_then(|m| m.options.as_ref())
+            .is_some_and(|o| o.transfer)
+    }
+
+    /// The verification totals in the file.
+    #[must_use]
+    pub fn verification_totals(
+        &self,
+    ) -> Option<&crate::resources::archive_totals::VerificationTotals> {
+        self.manifest_summary
+            .as_ref()
+            .and_then(|m| m.verification_totals.as_ref())
+    }
 }
 
 /// Input of [`Tenants::import_archive`].
@@ -452,6 +529,10 @@ pub struct ImportResult {
     /// colour and flags.
     #[serde(default)]
     pub host: Option<Value>,
+    /// The verification totals comparison (U-283; `None` from an engine
+    /// without it).
+    #[serde(default)]
+    pub verification_totals: Option<crate::resources::archive_totals::TotalsComparison>,
 }
 
 /// Input of [`Tenants::delete`] (E5b safe delete, Q-185).
@@ -642,6 +723,26 @@ impl Tenants<'_> {
         {
             return Err(ApiError::Local(LocalValidation::Unsupported));
         }
+        if request.transfer
+            && !self
+                .0
+                .client()
+                .capabilities()
+                .has(crate::wire::Capabilities::TENANT_ARCHIVE_TRANSFER)
+        {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
+        }
+        let mut request = std::borrow::Cow::Borrowed(request);
+        if request.as_of.is_some()
+            && !self
+                .0
+                .client()
+                .capabilities()
+                .has(crate::wire::Capabilities::ARCHIVE_VERIFICATION_TOTALS)
+        {
+            request.to_mut().as_of = None;
+        }
+        let request = request.as_ref();
         if request.passphrase.is_empty()
             || serde_json::to_vec(&request.host).is_ok_and(|b| b.len() > HOST_METADATA_MAX_BYTES)
             || serde_json::to_vec(&request.host).is_err()
@@ -905,6 +1006,8 @@ mod tests {
             include_audit: true,
             omit_intake_settings: false,
             omit_document_drafts: false,
+            transfer: false,
+            as_of: None,
             host: serde_json::json!({"app":"ClientLedger","kind":"backup"}),
             passphrase: Secret::new("pass-canary-123"),
         };
@@ -947,6 +1050,8 @@ mod tests {
             include_audit: true,
             omit_intake_settings: true,
             omit_document_drafts: false,
+            transfer: false,
+            as_of: None,
             host: serde_json::json!({"app":"ClientLedger","kind":"transfer"}),
             passphrase: Secret::new("pass-canary-123"),
         };
@@ -969,6 +1074,99 @@ mod tests {
         assert_eq!(body["includeAudit"], true);
     }
 
+    /// P32 S3: `transfer` is never sent to an engine without
+    /// `tenant-archive-transfer-v1` (it would drop the flag and write a full
+    /// backup); `asOf` is dropped without the totals capability.
+    #[tokio::test]
+    async fn transfer_needs_the_capability_and_as_of_follows_the_totals() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v1/tenants/{TENANT}/archives")))
+            .respond_with(json(202, r#"{"jobId":"job_3","archiveId":"a-3"}"#))
+            .mount(&server)
+            .await;
+        let mut req = ArchiveRequest {
+            include_attachments: true,
+            include_audit: true,
+            omit_intake_settings: false,
+            omit_document_drafts: false,
+            transfer: true,
+            as_of: Some(cl_core::CalendarDate::from_ymd(2026, 11, 19).expect("date")),
+            host: serde_json::json!({"app":"ClientLedger","kind":"transfer"}),
+            passphrase: Secret::new("pass-canary-123"),
+        };
+        let tenant = TenantId::parse(TENANT).expect("id");
+        assert_eq!(
+            ws(&server).tenants().export_archive(tenant, &req).await,
+            Err(ApiError::Local(LocalValidation::Unsupported))
+        );
+        assert!(requests(&server, "POST").await.is_empty(), "nothing sent");
+        let s = crate::resources::testkit::session_with_caps(
+            &server,
+            &[crate::Capabilities::TENANT_ARCHIVE_TRANSFER],
+        )
+        .await;
+        s.tenants().export_archive(tenant, &req).await.expect("job");
+        let posts = requests(&server, "POST").await;
+        let body: Value = serde_json::from_slice(&posts.last().expect("post").body).expect("json");
+        assert_eq!(body["transfer"], true);
+        assert!(body.get("asOf").is_none(), "no totals capability");
+        // A second engine, with both (capabilities are read per server).
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(format!("/api/v1/tenants/{TENANT}/archives")))
+            .respond_with(json(202, r#"{"jobId":"job_4","archiveId":"a-4"}"#))
+            .mount(&server)
+            .await;
+        let s = crate::resources::testkit::session_with_caps(
+            &server,
+            &[
+                crate::Capabilities::TENANT_ARCHIVE_TRANSFER,
+                crate::Capabilities::ARCHIVE_VERIFICATION_TOTALS,
+            ],
+        )
+        .await;
+        s.tenants().export_archive(tenant, &req).await.expect("job");
+        let posts = requests(&server, "POST").await;
+        let body: Value = serde_json::from_slice(&posts.last().expect("post").body).expect("json");
+        assert_eq!(body["asOf"], "2026-11-19");
+        req.transfer = false;
+        req.as_of = None;
+        let v = serde_json::to_value(&req).expect("json");
+        assert!(v.get("transfer").is_none() && v.get("asOf").is_none());
+    }
+
+    /// S3: only an explicit `options.transfer: true` counts as honoured;
+    /// S8: a `FILE_MISSING` failure lists every file.
+    #[test]
+    fn transfer_echo_and_missing_files_read_strictly() {
+        let base = r#"{"archiveId":"a","fileName":"a.clbackup","sha256":"00"}"#;
+        let r: ArchiveResult = serde_json::from_str(base).expect("result");
+        assert!(!r.transfer_honoured());
+        let r: ArchiveResult = serde_json::from_str(
+            r#"{"archiveId":"a","fileName":"a.clbackup","sha256":"00","manifestSummary":{"options":{"transfer":false}}}"#,
+        )
+        .expect("result");
+        assert!(!r.transfer_honoured());
+        let r: ArchiveResult = serde_json::from_str(
+            r#"{"archiveId":"a","fileName":"a.clbackup","sha256":"00","manifestSummary":{"options":{"transfer":true}}}"#,
+        )
+        .expect("result");
+        assert!(r.transfer_honoured());
+        assert!(r.verification_totals().is_none());
+        let s: ArchiveJobStatus = serde_json::from_str(
+            r#"{"status":"failed","error":{"code":"FILE_MISSING","message":"x","details":{"files":[
+              {"table":"attachments","rowId":"r1","reason":"FILE_MISSING"},
+              {"table":"attachments","rowId":"r2","reason":"FILE_SIZE_MISMATCH"},
+              {"table":"attachments","rowId":"r3","reason":"EXTERNAL_FILE"}]}}}"#,
+        )
+        .expect("status");
+        let files = s.error.as_ref().expect("error").missing_files();
+        assert_eq!(files.len(), 3);
+        assert_eq!(files[2].reason, "EXTERNAL_FILE");
+        assert_eq!(s.error_code(), "FILE_MISSING");
+    }
+
     /// U-92: a transfer file leaves the drafts out and its import resets
     /// them; both need `document-drafts-v1` and are written only when set.
     #[tokio::test]
@@ -989,6 +1187,8 @@ mod tests {
             include_audit: true,
             omit_intake_settings: false,
             omit_document_drafts: true,
+            transfer: false,
+            as_of: None,
             host: serde_json::json!({"app":"ClientLedger","kind":"transfer"}),
             passphrase: Secret::new("pass-canary-123"),
         };

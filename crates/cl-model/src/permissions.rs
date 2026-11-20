@@ -992,7 +992,9 @@ pub fn need(id: CommandId) -> Option<Need> {
         "file.open_company" | "file.new_company" | "file.close_company" | "file.open_practice"
         | "file.sign_out" | "file.lock" | "file.restore" | "file.print" | "file.print_forms"
         | "file.printer_setup" | "file.close_window" | "file.quit" => Always,
-        "file.backup" | "file.export_all" => Read(R::CompanySettings),
+        // Q-P32i: an IIF file needs the backup right (and sight of every
+        // hidden account, checked by the screen).
+        "file.backup" | "file.export_all" | "file.export_iif" => Read(R::CompanySettings),
         // P31 (S4): commit, undo and verify are the Admin's; the wizards are too
         // (D5: the spreadsheet import's commit and undo, U-263).
         "file.full_backup"

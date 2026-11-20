@@ -166,9 +166,12 @@ mod audit;
 mod auth;
 // P29: sensitive accounts (U-33).
 mod sensitive;
+// P32: Send to My Accountant and the IIF export.
+mod send_to_accountant;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 61] = [
+const TABLES: [&[(&str, &str)]; 62] = [
+    send_to_accountant::ENGLISH,
     audit::ENGLISH,
     auth::ENGLISH,
     sensitive::ENGLISH,
@@ -648,6 +651,29 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.company.too_new", "This backup was made by a newer ClientLedger."),
     ("fix.company.too_new", "Update ClientLedger, then restore it."),
     ("error.company.job_failed", "The backup or restore could not be finished."),
+    ("error.company.transfer_not_backup", "This is a transfer file for your accountant's MyBooks."),
+    ("fix.company.transfer_not_backup", "To move your company to another computer, use a backup."),
+    ("error.company.totals_mismatch", "The file's check totals don't match the books it holds, so the company wasn't restored."),
+    ("fix.company.totals_mismatch", "The file may be damaged. Try another copy of it, or ask whoever made it for a new one."),
+    ("error.company.not_a_transfer", "This file isn't a transfer file made with Send to My Accountant."),
+    ("fix.company.not_a_transfer", "Ask for a transfer file (it ends in .clxfer). A backup can only be restored on the desktop."),
+    ("error.company.busy", "A backup, transfer or restore is already running."),
+    ("error.transfer.unsupported", "This version can't make transfer files yet."),
+    ("error.transfer.passphrase_mismatch", "The two transfer passphrase entries are not the same."),
+    ("error.transfer.passphrase_short", "The transfer passphrase needs at least 12 characters."),
+    ("fix.transfer.passphrase_short", "Pick a longer one, or use Make one for me."),
+    ("error.transfer.same_as_backup", "Use a different passphrase from your backup passphrase."),
+    ("fix.transfer.same_as_backup", "Your backup passphrase opens every backup, so never share it. Pick a new one, or use Make one for me."),
+    ("error.transfer.payroll_waiting", "Unposted payroll imports are waiting."),
+    ("fix.transfer.payroll_waiting", "Discard them first, or post them, then try again."),
+    ("error.transfer.missing_files", "Some attached files are missing or changed on this computer."),
+    ("fix.transfer.missing_files", "Open each record below and attach the file again, or remove the attachment. Saving again won't help until every file is fixed."),
+    ("error.backup.missing_files", "The backup stopped because some attached files are missing or changed on this computer."),
+    ("fix.backup.missing_files", "Use File › Back Up Company to see which files are missing, with Open record for each. Attach each file again or remove it; backing up again won't help until every file is fixed."),
+    ("error.transfer.not_honoured", "The transfer file could not be made safely, so nothing was saved."),
+    ("fix.transfer.not_honoured", "Update ClientLedger, then try again."),
+    ("fix.transfer.not_honoured_left", "Update ClientLedger, then try again. A full copy of your books, sign-ins included, may be left in the engine's backup folder: delete it."),
+    ("fix.company.busy", "Try again when it finishes."),
     ("fix.company.no_passphrase", "Set one in the boxes shown here, or on File \u{203a} Back Up Company."),
     ("error.company.not_a_backup", "That file is not a ClientLedger backup."),
     ("fix.company.not_a_backup", "Pick a .clbackup file made by ClientLedger."),

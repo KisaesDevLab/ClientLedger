@@ -1700,3 +1700,34 @@ fn the_close_prompt_speaks_of_payroll() {
         "{msg}"
     );
 }
+
+/// P32 QA-14: Send to My Accountant discarded every unposted import; an
+/// open window on one starts over with a plain note and discards nothing
+/// again. A post in flight is left alone.
+#[test]
+fn a_transfer_discard_starts_the_open_import_over() {
+    let f = fixture();
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    assert!(s.upload.is_some());
+    let before = discards(&f);
+    f.link
+        .bus()
+        .publish(crate::data_bus::Change::PayrollDiscarded);
+    s.poll();
+    assert_eq!(s.step, Step::Choose, "{}", state_text(&s));
+    assert!(s.upload.is_none());
+    assert_eq!(s.file_error, Some("payroll.discarded_by_transfer"));
+    assert_eq!(discards(&f), before, "nothing discarded twice");
+
+    let mut s = screen(&f);
+    cmd(&mut s, "dev.payroll_demo_file_adp_run_gli");
+    next_to(&mut s, Step::Preview);
+    post_in_flight(&mut s);
+    f.link
+        .bus()
+        .publish(crate::data_bus::Change::PayrollDiscarded);
+    s.poll();
+    assert!(s.upload.is_some(), "a post in flight is kept");
+}

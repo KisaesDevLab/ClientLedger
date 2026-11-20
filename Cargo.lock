@@ -829,6 +829,7 @@ dependencies = [
  "cl-pg",
  "cl-print",
  "cl-settings",
+ "getrandom 0.4.3",
  "libc",
  "proptest",
  "rust_decimal",
@@ -840,6 +841,7 @@ dependencies = [
  "tokio",
  "tracing",
  "wiremock",
+ "zeroize",
  "zip",
 ]
 

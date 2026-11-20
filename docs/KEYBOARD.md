@@ -241,7 +241,7 @@ When two scopes use the same keys, the innermost one wins: a grid beats a form, 
 
 Find these from the menus or with `Ctrl+K`.
 
-- **File:** New Company, Close Company, Sign Out, Lock ClientLedger, Open Practice Company, Back Up Company, Restore a Backup, Export All Data, Import Transactions from a Spreadsheet, Full Database Backup (Utilities), Import from QuickBooks Desktop, Import from Another Accounting Program, Delete Company, Print Forms, Printer Setup
+- **File:** New Company, Close Company, Sign Out, Lock ClientLedger, Open Practice Company, Back Up Company, Restore a Backup, Export All Data, Export IIF File, Import Transactions from a Spreadsheet, Full Database Backup (Utilities), Import from QuickBooks Desktop, Import from Another Accounting Program, Delete Company, Print Forms, Printer Setup
 - **Edit:** Void Transaction
 - **Lists:** Item List, Price Levels, Unit Sets, Tags, Terms, Payment Methods, Templates, Sales Tax Setup, Import or Export a List
 - **Customers:** Customers & Projects, Daily Sales Summary, Credit Memo or Refund, Statements, Refund a Credit, Assess Finance Charges, Outbox, Tax Exemption Certificates, Recover a Bad Debt

@@ -52,6 +52,9 @@ pub enum Change {
     BankFeed,
     /// Payroll imports (P30): Home's unposted count.
     Payroll,
+    /// Send to My Accountant discarded every unposted payroll import (P32
+    /// QA-14): an open Import Payroll on one of them starts over.
+    PayrollDiscarded,
     /// Memorized reports were saved, changed or deleted (A08 QA-16): an
     /// open report window's Memorized list reads them again.
     Reports,
@@ -113,6 +116,8 @@ pub struct Changes {
     pub ai: bool,
     /// A backup passphrase was set (Q-P30h).
     pub backup_passphrase: bool,
+    /// Every unposted payroll import was discarded (P32 QA-14).
+    pub payroll_discarded: bool,
 }
 
 impl Changes {
@@ -133,6 +138,9 @@ impl Changes {
             reports: true,
             ai: true,
             backup_passphrase: true,
+            // Never guessed: a subscriber that fell behind must not throw
+            // away a live import on a maybe.
+            payroll_discarded: false,
         }
     }
 
@@ -191,6 +199,10 @@ impl Changes {
             Change::Reports => self.reports = true,
             Change::Ai => self.ai = true,
             Change::BackupPassphrase => self.backup_passphrase = true,
+            Change::PayrollDiscarded => {
+                self.payroll_discarded = true;
+                self.bank_feed = true;
+            }
             Change::Bills(vendor) => {
                 self.bill_vendors.insert(*vendor);
             }

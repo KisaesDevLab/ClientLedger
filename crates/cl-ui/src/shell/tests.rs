@@ -1846,3 +1846,35 @@ fn the_control_channel_sees_only_locked_behind_the_idle_lock() {
         serde_json::json!({ "locked": true })
     );
 }
+
+/// Q-P32z: Close Company and Sign Out during a transfer are refused with
+/// a toast, whoever asks, and nothing runs once the transfer ends; the
+/// idle lock stays up with its Sign Out disabled.
+#[test]
+fn close_and_sign_out_are_refused_during_a_transfer() {
+    let ctx = context();
+    let mut shell = demo();
+    settle(&ctx, &mut shell, WIDE);
+    assert!(shell.company.is_some(), "the demo company is open");
+    for id in shell.windows.dirty_ids() {
+        shell.windows.close_now(id);
+    }
+    let sending = crate::screens::send_to_accountant::Sending::start();
+    shell.close_company();
+    shell.sign_out();
+    settle(&ctx, &mut shell, WIDE);
+    assert!(shell.company.is_some(), "not closed while sending");
+    // The idle lock: drawn with its Sign Out disabled; still signed in.
+    shell.idle.lock_now();
+    settle(&ctx, &mut shell, WIDE);
+    assert!(shell.idle.locked(), "the lock stays up");
+    assert!(shell.company_link.as_ref().is_some_and(|l| l.signed_in()));
+    // Nothing runs when the transfer ends.
+    drop(sending);
+    settle(&ctx, &mut shell, WIDE);
+    assert!(shell.company.is_some(), "a refused Close never runs later");
+    assert!(
+        shell.company_link.as_ref().is_some_and(|l| l.signed_in()),
+        "a refused Sign Out never runs later"
+    );
+}

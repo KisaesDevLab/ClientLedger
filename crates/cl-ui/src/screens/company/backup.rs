@@ -228,8 +228,25 @@ impl Screen for BackupScreen {
                 );
             }
         });
-        if let Some(e) = &self.error {
-            form::inline_error(ui, &tokens, e);
+        let mut open = None;
+        match &self.error {
+            // QA-1: every missing file, with Open record; never "try again".
+            Some(CompanyError::MissingFiles(files)) => {
+                ui.add_space(6.0);
+                open = crate::widgets::missing_files::panel(
+                    ui,
+                    &tokens,
+                    files,
+                    "backup.missing.body",
+                    "backup",
+                )
+                .1;
+            }
+            Some(e) => form::inline_error(ui, &tokens, e),
+            None => {}
+        }
+        if let Some((kind, id)) = open {
+            crate::widgets::missing_files::open_record(&self.link, kind.as_deref(), id.as_deref());
         }
         if let Some(o) = &self.outcome {
             ui.add_space(6.0);
@@ -266,7 +283,52 @@ impl Screen for BackupScreen {
             "running": self.task.is_some(),
             "done": self.outcome.is_some(),
             "error": self.error.is_some(),
+            "error_key": self.error.as_ref().map(|e| cl_core::OwnerFacing::owner_message(e).key),
+            "missing_files": match &self.error {
+                Some(CompanyError::MissingFiles(f)) => f.len(),
+                _ => 0,
+            },
             "passphrase_needed": self.passphrase_needed,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// QA-1: a backup stopped by missing attachment files lists each one
+    /// (with Open record) and never says "try again".
+    #[test]
+    fn missing_files_are_listed_in_plain_words() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(CompanyLink::demo(dir.path()));
+        let tenant = TenantId::parse("1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
+        let mut s = BackupScreen::new(link, Job::Backup, Some((tenant, "Ozark Ridge".into())));
+        s.error = Some(CompanyError::MissingFiles(vec![
+            cl_company::MissingAttachment {
+                attachment_id: "a1".into(),
+                file_name: Some("receipt-0412.pdf".into()),
+                record_type: Some("bill".into()),
+                record_id: Some("9a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01".into()),
+                reason: "FILE_MISSING".into(),
+            },
+            cl_company::MissingAttachment {
+                attachment_id: "a2".into(),
+                file_name: None,
+                record_type: None,
+                record_id: None,
+                reason: "FILE_SIZE_MISMATCH".into(),
+            },
+        ]));
+        assert_eq!(s.state()["missing_files"], 2);
+        assert_eq!(s.state()["error_key"], "error.backup.missing_files");
+        let m = cl_core::OwnerFacing::owner_message(s.error.as_ref().expect("e"));
+        assert_ne!(m.suggestion_key, Some("fix.api.try_again_soon"));
+        let ctx = eframe::egui::Context::default();
+        let mut out = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            eframe::egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+        });
+        out.textures_delta.clear();
     }
 }

@@ -57,6 +57,7 @@ pub mod statements;
 pub mod stock;
 pub mod template_store;
 pub mod templates;
+pub mod transfer;
 pub mod units;
 // P25: the in-memory bank feed of Import Bank File.
 pub mod bank_import;
@@ -142,6 +143,8 @@ pub struct DemoState {
     pub bank_feed: bank_import::DemoBankFeed,
     /// P30: payroll imports.
     pub payroll: payroll::DemoPayroll,
+    /// P32: Send to My Accountant and IIF export.
+    pub transfer: transfer::DemoTransfer,
     /// P31: QBD and other-system imports.
     pub imports: imports::DemoImports,
     /// P31 D5: spreadsheet transaction imports.
@@ -320,6 +323,7 @@ impl DemoState {
             daily_sales: daily_sales::DemoDailySales::default(),
             bank_feed: bank_import::DemoBankFeed::default(),
             payroll: payroll::DemoPayroll::default(),
+            transfer: transfer::DemoTransfer::default(),
             imports: imports::DemoImports::default(),
             txn_import: import_transactions::DemoTxnImport::default(),
             feed_review: feed_review::DemoFeedReview::default(),

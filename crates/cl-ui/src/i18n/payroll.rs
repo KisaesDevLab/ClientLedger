@@ -35,6 +35,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("payroll.file.kb", "{n} KB"),
     ("payroll.file.chosen", "File chosen ({size})"),
     ("payroll.file.browse", "Choose a file\u{2026}"),
+    ("payroll.discarded_by_transfer", "This import was discarded before your transfer file was made, so it can't be posted. The backup taken first still holds it. Choose the payroll file again to start over."),
     ("payroll.file.hint", "CSV, TSV, TXT or Excel, exported from your payroll service. Up to 10 MB."),
     ("payroll.file.too_large", "This file is larger than 10 MB. Export a shorter date range."),
     ("payroll.file.type", "This kind of file can't be read. Export a CSV or Excel file."),

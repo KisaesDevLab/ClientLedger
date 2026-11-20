@@ -701,6 +701,13 @@ impl Shell {
     /// are asked about), then end the session; the Open Company window
     /// asks for a sign-in. Automatic sign-in waits for the next start.
     fn sign_out(&mut self) {
+        // Q-P32z: never while a transfer file is being made, whoever asks;
+        // the owner is told to wait and nothing runs later (the idle lock
+        // disables its Sign Out meanwhile).
+        if crate::screens::send_to_accountant::transfer_running() {
+            self.refuse_during_transfer();
+            return;
+        }
         let Some(link) = self.company_link.clone() else {
             return;
         };
@@ -716,6 +723,14 @@ impl Shell {
         self.dispatch_now(CommandId::new("file.open_company"));
     }
 
+    /// Q-P32z: Close Company or Sign Out while a transfer file is being
+    /// made is refused with the same toast as the menu's disabled rows.
+    fn refuse_during_transfer(&self) {
+        if let Some(link) = &self.company_link {
+            link.push(CompanyEvent::Toast("send.busy_tip"));
+        }
+    }
+
     fn finish_sign_out(&mut self, link: &Arc<CompanyLink>) {
         link.sign_out();
         self.idle.reset();
@@ -727,6 +742,13 @@ impl Shell {
     /// Close the open company: save or prompt for open forms first, wait
     /// for pending writes, then return to the Open Company window.
     fn close_company(&mut self) {
+        // Q-P32z: the guard lives here, not only in the dispatcher (a
+        // close prompt's answer, a script).
+        if crate::screens::send_to_accountant::transfer_running() {
+            self.sign_out_after_close = false;
+            self.refuse_during_transfer();
+            return;
+        }
         let Some(link) = self.company_link.clone() else {
             return;
         };
@@ -1062,6 +1084,14 @@ impl Shell {
             }
             return;
         }
+        // Q-P32u: a transfer file being made blocks Close Company, Restore
+        // and Delete (a shortcut or the palette).
+        if crate::screens::send_to_accountant::blocked_now(id.as_str()) {
+            if let Some(ctx) = ctx {
+                self.toast(ctx, "send.busy_tip");
+            }
+            return;
+        }
         // P29: a list the role may only look at takes no changes (New,
         // Make inactive, Merge, Delete); the engine would refuse them.
         if let Some(resource) = target
@@ -1241,6 +1271,13 @@ impl Shell {
     }
 
     fn request_quit(&mut self, ctx: Option<&Context>) {
+        // Q-P32u: the window's close button waits for a transfer too.
+        if crate::screens::send_to_accountant::blocked_now("file.quit") {
+            if let Some(ctx) = ctx {
+                self.toast(ctx, "send.busy_tip");
+            }
+            return;
+        }
         if self.windows.begin_quit() == QuitProgress::Ready {
             self.finish_quit(ctx);
         }
@@ -1594,8 +1631,14 @@ impl Shell {
         let user = self.signed_in_name.clone();
         match self.idle.show(ui, &link, user.as_deref(), dirty) {
             Some(idle_lock::LockAction::SignOut) if dirty == 0 => {
-                self.idle.reset();
-                self.sign_out();
+                if crate::screens::send_to_accountant::transfer_running() {
+                    // Q-P32z: refused (the button is disabled meanwhile);
+                    // the lock stays up.
+                    self.refuse_during_transfer();
+                } else {
+                    self.idle.reset();
+                    self.sign_out();
+                }
             }
             Some(_) | None => {}
         }
@@ -2057,6 +2100,7 @@ fn make_any(
             .chain(&crate::screens::P29_SCREENS)
             .chain(&crate::screens::P30_SCREENS)
             .chain(&crate::screens::P31_SCREENS)
+            .chain(&crate::screens::P32_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;

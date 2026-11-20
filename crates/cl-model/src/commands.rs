@@ -236,6 +236,8 @@ pub const COMMANDS: &[Command] = &[
     built("file.backup", "Back Up Company", Some(Menu::File), 1, None),
     cmd("file.restore", "Restore a Backup", Some(Menu::File), 1, None, Scope::Global),
     built("file.export_all", "Export All Data", Some(Menu::File), 1, None),
+    // P32 (Q-126): lists and journal entries for QuickBooks Desktop.
+    built("file.export_iif", "Export IIF File", Some(Menu::File), 1, None),
     // P31 D5 (Q-125): invoices, bills and journal entries from a spreadsheet.
     built("file.import_transactions", "Import Transactions from a Spreadsheet", Some(Menu::File), 1, None),
     screen("file.full_backup", "Full Database Backup (Utilities)", Some(Menu::File), 1, None, "P34"),
@@ -519,7 +521,8 @@ pub const COMMANDS: &[Command] = &[
     built("company.users", "Users and Permissions", Some(Menu::Company), 1, None),
     // P29 WP2: change your own password, automatic sign-in, idle lock
     built("company.my_sign_in", "My Sign-in", Some(Menu::Company), 1, None),
-    screen("company.send_to_accountant", "Send to My Accountant", Some(Menu::Company), 2, None, "P32"),
+    // P32: the transfer file for the accountant's MyBooks (no shortcut).
+    built("company.send_to_accountant", "Send to My Accountant", Some(Menu::Company), 2, None),
     built("company.audit_trail", "Audit Trail", Some(Menu::Company), 2, None),
     // Window
     built("nav.home", "Home", Some(Menu::Window), 0, alt('H')),
@@ -736,6 +739,43 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Demo Import: Inventory Tab (developer)",
     ),
     // P30: the payroll scenarios run light and dark in one app.
+    // P32: Send to My Accountant and IIF scenarios (one failure, once).
+    dev_action(
+        "dev.transfer_demo_busy",
+        "Demo Transfer Busy Once (developer)",
+    ),
+    dev_action(
+        "dev.transfer_demo_missing_files",
+        "Demo Transfer Missing Files Once (developer)",
+    ),
+    dev_action(
+        "dev.transfer_demo_post",
+        "Demo Post After the Transfer Preview (developer)",
+    ),
+    dev_action(
+        "dev.transfer_demo_payroll_draft",
+        "Add a Demo Payroll Draft (developer)",
+    ),
+    dev_action(
+        "dev.transfer_demo_hold",
+        "Hold the Next Demo Transfer (developer)",
+    ),
+    dev_action(
+        "dev.transfer_demo_release",
+        "Finish the Held Demo Transfer (developer)",
+    ),
+    dev_action(
+        "dev.transfer_demo_ask_backup_passphrase",
+        "Ask for the Demo Backup Passphrase (developer)",
+    ),
+    dev_action(
+        "dev.transfer_demo_waiting_documents",
+        "Demo Documents Waiting for Review (developer)",
+    ),
+    dev_action(
+        "dev.iif_demo_unbalanced",
+        "Demo IIF Unbalanced Entry Once (developer)",
+    ),
     dev_action("dev.payroll_demo_reset", "Reset Demo Payroll (developer)"),
     dev_action(
         "dev.payroll_start_over",
@@ -1047,6 +1087,9 @@ mod tests {
             "file.import_qbd",
             "file.import_system",
             "file.import_transactions",
+            // P32
+            "company.send_to_accountant",
+            "file.export_iif",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

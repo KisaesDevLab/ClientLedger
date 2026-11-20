@@ -51,6 +51,10 @@ pub enum PickUse {
     ImportFile,
     /// A spreadsheet of transactions to import (P31 D5).
     TxnImportFile,
+    /// Where to save a transfer file for the accountant (P32).
+    SaveTransfer,
+    /// Where to save an IIF file (P32).
+    SaveIif,
 }
 
 impl PickUse {
@@ -66,6 +70,8 @@ impl PickUse {
             PickUse::PayrollFile => "picker.title.payroll_file",
             PickUse::ImportFile => "picker.title.import_file",
             PickUse::TxnImportFile => "picker.title.txn_import_file",
+            PickUse::SaveTransfer => "picker.title.save_transfer",
+            PickUse::SaveIif => "picker.title.save_iif",
         }
     }
 }

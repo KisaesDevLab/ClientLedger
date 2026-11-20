@@ -1,0 +1,52 @@
+# Export IIF File (P32 D5) against `clientledger --demo`: the purpose line,
+# the back-up-first advice and the plaintext warning; an entry that doesn't
+# add up in cents stops the export with its reason and Open, writing
+# nothing (Q-P32c); a good export lists what the file can't carry. The demo
+# writes a real IIF file of a small synthetic company.
+name: iif_export
+description: IIF export warnings, the stop list, and the limitations after a save.
+steps:
+  - resize: {width: 1280, height: 860}
+  - set_zoom: {percent: 100}
+  - command: dev.demo_rights_all
+  - command: file.export_iif
+  - wait: {ms: 300}
+  - assert_exists: {role: tab, label: Export IIF File}
+  - assert_state: {key: screen.screen, equals: iif_export}
+  - assert_exists: {label_contains: "into QuickBooks Desktop"}
+  - assert_exists: {label: Back up your QuickBooks file before you import.}
+  - assert_exists: {label_contains: "not encrypted"}
+  - assert_exists: {role: check_box, label: All dates}
+  - assert_no_clipping: {}
+  - screenshot: iif-export
+  - resize: {width: 960, height: 640}
+  - wait: {ms: 300}
+  # The tab strip and the scroll body's lower edge cut by design.
+  - assert_no_clipping:
+      ignore:
+        - {x: -4000, y: 0, width: 8480, height: 120}
+        - {x: -4000, y: 560, width: 8480, height: 200}
+  - resize: {width: 1280, height: 860}
+  - wait: {ms: 200}
+  # An unbalanced entry: the stop list, nothing written.
+  - command: dev.iif_demo_unbalanced
+  - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/iif_export/stopped-{theme}.iif"]}
+  - click: {role: button, label: "Save IIF file…"}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.error, equals: iif.stopped}
+  - assert_state: {key: screen.stops, equals: 1}
+  - assert_exists: {label_contains: "after rounding to cents"}
+  - assert_exists: {role: button, label: Open}
+  - screenshot: stopped
+  # A good export: the counts and the limitations.
+  - dialog_answer: {paths: ["{scenario_dir}/../../../target/ui-check/iif_export/books-{theme}.iif"]}
+  - click: {role: button, label: "Save IIF file…"}
+  - wait: {ms: 400}
+  - assert_state: {key: screen.done, equals: true}
+  - assert_state: {key: screen.transactions, equals: 2}
+  - assert_exists: {label: What the file can't carry}
+  - assert_exists: {label_contains: "1 client, 1 vendor"}
+  - assert_exists: {label_contains: "couldn't be checked against QuickBooks"}
+  - screenshot: saved
+  - command: file.close_window
+  - wait: {ms: 200}

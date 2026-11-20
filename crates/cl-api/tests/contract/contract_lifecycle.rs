@@ -564,6 +564,8 @@ pub fn archive_export_import_e5a(h: &Harness) {
                     include_audit: true,
                     omit_intake_settings: false,
                     omit_document_drafts: false,
+                    transfer: false,
+                    as_of: None,
                     host: json!({"app": "ClientLedger", "appVersion": "test", "kind": "backup", "accent": "#3E7CB1"}),
                     passphrase: passphrase.clone(),
                 },

@@ -184,7 +184,13 @@ fn items(
         if let Some(s) = row.shortcut {
             button = button.shortcut_text(s);
         }
-        if ui.add(button).clicked() {
+        // Q-P32u: nothing that closes or replaces the company (or the app)
+        // while a transfer file is made.
+        let blocked = crate::screens::send_to_accountant::blocked_now(row.id.as_str());
+        let r = ui
+            .add_enabled(!blocked, button)
+            .on_disabled_hover_text(crate::i18n::t("send.busy_tip"));
+        if r.clicked() {
             queued.push(row.id);
             ui.close();
         }

@@ -1172,6 +1172,8 @@ fn export_import(h: &Harness, s: &Session, co: TenantId, transfer: bool) -> Tena
                 include_audit: true,
                 omit_intake_settings: false,
                 omit_document_drafts: transfer,
+                transfer: false,
+                as_of: None,
                 host: json!({"app": "ClientLedger", "appVersion": "test",
                     "kind": if transfer { "transfer" } else { "backup" }}),
                 passphrase: passphrase.clone(),
