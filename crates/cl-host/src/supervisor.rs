@@ -162,6 +162,9 @@ pub struct Endpoint {
     pub token: Secret,
     /// Matches [`HostStatus::generation`].
     pub generation: u64,
+    /// LAN host mode only: the workstation-class token (`CL_LAN_TOKEN`) for
+    /// the in-process LAN proxy. Never sent anywhere else (Q-P33z).
+    pub lan_token: Option<Secret>,
 }
 
 impl fmt::Debug for Endpoint {
@@ -170,6 +173,7 @@ impl fmt::Debug for Endpoint {
             .field("port", &self.port)
             .field("token", &"***")
             .field("generation", &self.generation)
+            .field("lan_token", &self.lan_token.as_ref().map(|_| "***"))
             .finish()
     }
 }
@@ -255,6 +259,9 @@ pub struct HostConfig {
     pub expected_engine_commit: Option<String>,
     /// "Work offline": passed to the engine as `CL_OFFLINE` (`Auto` by default).
     pub offline: OfflineSetting,
+    /// LAN host mode (P33): each engine launch gets `CL_LAN=1` and a fresh
+    /// workstation-class token (published in [`Endpoint::lan_token`]).
+    pub lan_host: bool,
     extra_engine_env: Vec<(String, String)>,
 }
 
@@ -281,6 +288,7 @@ impl HostConfig {
             policy: RestartPolicy::default(),
             expected_engine_commit: None,
             offline: OfflineSetting::Auto,
+            lan_host: false,
             extra_engine_env: Vec::new(),
         }
     }
@@ -661,6 +669,7 @@ struct Worker {
     policy: RestartPolicy,
     expected_commit: Option<String>,
     offline: OfflineSetting,
+    lan_host: bool,
     extra_env: Vec<(String, String)>,
     secrets_store: Option<Arc<dyn PasswordStore>>,
     log: HostLog,
@@ -680,6 +689,7 @@ impl Worker {
             policy: config.policy,
             expected_commit: config.expected_engine_commit,
             offline: config.offline,
+            lan_host: config.lan_host,
             extra_env: config.extra_engine_env,
             secrets_store: config.secrets_store,
             stop_rx,
@@ -863,6 +873,7 @@ impl Worker {
 
             // 2. engine
             let mut token = Secret::new("");
+            let mut lan_token: Option<Secret> = None;
             let mut report: Option<HealthReport> = None;
             if engine.is_none() {
                 self.shared.set_state(if first {
@@ -886,9 +897,31 @@ impl Worker {
                         break 'life;
                     }
                 };
+                if self.lan_host {
+                    lan_token = match Secret::generate() {
+                        Ok(t) => Some(t),
+                        Err(e) => {
+                            self.fault(
+                                Component::Engine,
+                                &e.to_string(),
+                                0,
+                                vec![],
+                                Some(db.as_ref()),
+                            );
+                            break 'life;
+                        }
+                    };
+                }
                 let mut all = scrub_values.clone();
                 all.push(token.clone());
-                match self.start_engine(&ep, &token, &secrets, &Scrubber::new(all)) {
+                all.extend(lan_token.clone());
+                match self.start_engine(
+                    &ep,
+                    &token,
+                    lan_token.as_ref(),
+                    &secrets,
+                    &Scrubber::new(all),
+                ) {
                     Ok((p, r)) => {
                         engine = Some(p);
                         report = Some(r);
@@ -932,6 +965,7 @@ impl Worker {
                 let (pid, port) = (proc.pid, proc.port);
                 self.log.info("engine ready");
                 let tok = token.clone();
+                let lan_tok = lan_token.clone();
                 self.shared.update(|i| {
                     i.status.engine_pid = Some(pid);
                     i.status.generation = generation;
@@ -941,6 +975,7 @@ impl Worker {
                         port,
                         token: tok,
                         generation,
+                        lan_token: lan_tok,
                     });
                     i.status.state = HostState::Running;
                 });
@@ -1186,6 +1221,7 @@ impl Worker {
         &self,
         ep: &DbEndpoint,
         token: &Secret,
+        lan_token: Option<&Secret>,
         secrets: &EngineSecrets,
         scrubber: &Scrubber,
     ) -> std::result::Result<(EngineProcess, HealthReport), StartFailure> {
@@ -1197,6 +1233,7 @@ impl Worker {
             secrets,
             extra_env: &self.extra_env,
             offline: self.offline,
+            lan_token,
         };
         let cancelled = || self.stop_requested();
         let mut proc = engine::launch(&plan, scrubber, self.policy.ready_timeout, &cancelled)
@@ -1327,8 +1364,10 @@ mod tests {
             port: 1,
             token: Secret::new("sekret-token"),
             generation: 2,
+            lan_token: Some(Secret::new("lan-sekret")),
         };
         assert!(!format!("{e:?}").contains("sekret-token"));
+        assert!(!format!("{e:?}").contains("lan-sekret"));
     }
 
     #[test]

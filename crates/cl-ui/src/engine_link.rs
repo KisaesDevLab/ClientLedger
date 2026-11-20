@@ -325,6 +325,7 @@ mod tests {
                 port,
                 token: cl_host::Secret::new("tok-canary-9"),
                 generation,
+                lan_token: None,
             }),
             generation,
         }

@@ -37,6 +37,8 @@ mod os_print;
 mod paths;
 mod procs;
 mod secrets;
+/// The background LAN host: start at sign-in, hand-over (P33).
+pub mod service;
 mod supervisor;
 #[cfg(windows)]
 mod win_print;
@@ -55,7 +57,8 @@ pub use engine::OfflineSetting;
 pub use error::{HostError, Result, is_master_secret_message};
 pub use health::{HealthError, HealthReport, check_health, verify_listener};
 pub use instance_lock::{
-    Acquired, InstanceGuard, Request, SendError, acquire, acquire_or_focus, send,
+    Acquired, InstanceGuard, Request, SendError, acquire, acquire_or_focus, acquire_or_take_over,
+    send,
 };
 pub use logs::{HostLog, Level, LogPolicy, PruneReport, prune_logs, tail_lines};
 #[cfg(windows)]
