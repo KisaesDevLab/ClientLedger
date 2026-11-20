@@ -29,6 +29,7 @@ pub mod i18n;
 pub mod icon;
 pub mod input;
 pub mod lan_link;
+pub mod lan_status;
 pub mod layout;
 pub mod links;
 pub mod list_field;

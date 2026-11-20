@@ -812,6 +812,10 @@ pub const DEV_COMMANDS: &[Command] = &[
         "Demo Office Network: Host Ends Maintenance (developer)",
     ),
     dev_action(
+        "dev.lan_demo_off",
+        "Demo Office Network: Just This Computer (developer)",
+    ),
+    dev_action(
         "dev.iif_demo_unbalanced",
         "Demo IIF Unbalanced Entry Once (developer)",
     ),

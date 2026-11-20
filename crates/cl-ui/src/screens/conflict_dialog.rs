@@ -38,10 +38,27 @@ pub enum ConflictChoice {
 /// form from its own lists.
 pub type LineText = Box<dyn Fn(&Value) -> String + Send>;
 
+/// How one header field's value reads (an account's name instead of its
+/// id, a date as the owner types it); `None` falls back to [`value_text`].
+pub type FieldText = Box<dyn Fn(&str, &Value) -> Option<String> + Send>;
+
+/// The header fields "Keep mine" takes from their record: they changed it
+/// and this form didn't. Every form's Keep mine applies these onto its own
+/// fields, then saves on their version.
+#[must_use]
+pub fn fields_from_theirs(c: &Conflict) -> Vec<String> {
+    c.field_changes()
+        .into_iter()
+        .filter(|f| f.theirs_changed() && !f.mine_changed())
+        .map(|f| f.field)
+        .collect()
+}
+
 /// The dialog over one conflict.
 pub struct ConflictDialog {
     conflict: Conflict,
     line_text: LineText,
+    field_text: Option<FieldText>,
 }
 
 impl std::fmt::Debug for ConflictDialog {
@@ -67,6 +84,13 @@ pub fn value_text(v: &Value) -> String {
     match v {
         Value::Null => t("lan.conflict.empty"),
         Value::String(s) if s.is_empty() => t("lan.conflict.empty"),
+        // A wire date reads as the owner types it.
+        Value::String(s) if s.len() == 10 && cl_core::CalendarDate::parse_wire(s).is_ok() => {
+            cl_core::CalendarDate::parse_wire(s).map_or_else(
+                |_| s.clone(),
+                |d| format!("{:02}/{:02}/{}", d.month(), d.day(), d.year()),
+            )
+        }
         Value::String(s) => s.clone(),
         Value::Bool(true) => t("lan.yes"),
         Value::Bool(false) => t("lan.no"),
@@ -81,7 +105,22 @@ impl ConflictDialog {
         ConflictDialog {
             conflict,
             line_text,
+            field_text: None,
         }
+    }
+
+    /// The form's own words for header values.
+    #[must_use]
+    pub fn with_field_text(mut self, f: FieldText) -> ConflictDialog {
+        self.field_text = Some(f);
+        self
+    }
+
+    fn value(&self, field: &str, v: &Value) -> String {
+        self.field_text
+            .as_ref()
+            .and_then(|f| f(field, v))
+            .unwrap_or_else(|| value_text(v))
     }
 
     /// The conflict shown.
@@ -179,14 +218,14 @@ impl ConflictDialog {
                     ui.end_row();
                     for f in &changes {
                         ui.label(field_label(&f.field));
-                        ui.label(value_text(&f.original));
-                        let mine = RichText::new(value_text(&f.mine));
+                        ui.label(self.value(&f.field, &f.original));
+                        let mine = RichText::new(self.value(&f.field, &f.mine));
                         ui.label(if f.mine_changed() {
                             mine.strong()
                         } else {
                             mine
                         });
-                        let theirs = RichText::new(value_text(&f.theirs));
+                        let theirs = RichText::new(self.value(&f.field, &f.theirs));
                         ui.label(if f.theirs_changed() {
                             theirs.strong()
                         } else {
@@ -259,6 +298,7 @@ mod tests {
         assert_eq!(field_label("unknownField"), "unknownField");
         assert_eq!(value_text(&Value::Null), t("lan.conflict.empty"));
         assert_eq!(value_text(&json!("10.50")), "10.50");
+        assert_eq!(value_text(&json!("2026-11-04")), "11/04/2026");
         let c = Conflict::new(
             &json!({"memo": "a", "lines": ["x"]}),
             &json!({"memo": "b", "lines": ["y"]}),

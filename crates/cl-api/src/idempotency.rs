@@ -911,12 +911,33 @@ impl Executor {
             // never do (review S4): those refusals are final for mutations.
             (
                 RetryClass::Idempotent,
-                ApiError::Lan(crate::LanRefusal::HostEngineDown | crate::LanRefusal::NotSent),
+                ApiError::Lan(
+                    crate::LanRefusal::HostEngineDown
+                    | crate::LanRefusal::NotSent
+                    | crate::LanRefusal::LinkLost,
+                ),
             ) => {
                 if self.backoff(r, ctx.deadline).await {
                     Step::Again
                 } else {
                     Step::Done(Err(e))
+                }
+            }
+            // LAN (P33, Q-P33al): the save left this computer and the link
+            // dropped. It may be in the books, so it is never sent again
+            // here: a keyed save is "unknown, safe to save again with the
+            // same key" (the form replays that key when the owner says so);
+            // an unkeyed one is reconciled by reading, like a 5xx.
+            (class, ApiError::Lan(crate::LanRefusal::LinkLost)) => {
+                if class == RetryClass::PreHandlerOnly {
+                    self.ambiguous(ctx, generation, AmbiguityCause::ServerError(502), r)
+                        .await
+                } else {
+                    Step::Done(Err(ApiError::OutcomeUnknown {
+                        request_id: ctx.call.request_id,
+                        idempotency_key: ctx.call.idempotency_key.clone(),
+                        keyed: class == RetryClass::KeyedOnce,
+                    }))
                 }
             }
             (
@@ -2827,6 +2848,30 @@ pub(crate) mod tests {
         }
     }
 
+    /// Q-P33al: the link dropped after a save was sent. Sent once, never
+    /// again on its own; a keyed save says so (the form may replay the key).
+    #[tokio::test]
+    async fn a_link_lost_after_sending_is_an_unknown_outcome_and_never_resent() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(json(
+                502,
+                r#"{"error":{"message":"x","code":"LAN_LINK_LOST"}}"#,
+            ))
+            .mount(&server)
+            .await;
+        let ex = exec_at(server.address().port());
+        ex.set_idempotency_v1(true);
+        let e = ex
+            .run(&post_op(), post_call(), &none(), None)
+            .await
+            .expect_err("unknown");
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { keyed: true, .. }),
+            "{e:?}"
+        );
+        assert_eq!(count(&server).await, 1, "sent once");
+    }
     /// A read that meets a LAN refusal before any handler ran backs off and
     /// tries again (the heartbeat may not have noticed the host yet).
     #[tokio::test]

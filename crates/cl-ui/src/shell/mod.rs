@@ -195,6 +195,9 @@ pub struct Shell {
     doc_follow: Option<WindowId>,
     /// A04 WP-C: the pop-out's compare events, for next frame.
     viewer_outbox: outbox::ViewerOutbox,
+    /// P33: the office network (status, host-down overlay, banners, live
+    /// refresh).
+    pub(crate) lan: crate::lan_status::LanShell,
     /// P29: reads the rights again after a 403.
     rights_watch: crate::company::RightsWatch,
     /// P29: the signed-in user's role in the open company (the engine's
@@ -254,6 +257,7 @@ impl Shell {
             doc_viewer,
             doc_follow: None,
             viewer_outbox: outbox::ViewerOutbox::new(),
+            lan: crate::lan_status::LanShell::default(),
             rights_watch: crate::company::RightsWatch::default(),
             company_role: String::new(),
             idle: idle_lock::IdleLock::default(),
@@ -1084,6 +1088,24 @@ impl Shell {
             }
             return;
         }
+        // P33: the demo office network's link (any window).
+        if let Some(link) = &self.company_link {
+            let handled = match id.as_str() {
+                "dev.lan_demo_off" => crate::lan_status::LanShell::demo_off(link),
+                other => crate::lan_status::LanShell::command(link, other),
+            };
+            if handled {
+                return;
+            }
+        }
+        // P33 (Q-P33y): on a workstation the host-only actions say where
+        // to do them (a shortcut or the palette; the menu shows them off).
+        if crate::lan_status::host_only_now(id.as_str()) {
+            if let Some(ctx) = ctx {
+                self.toast(ctx, "lan.host_only");
+            }
+            return;
+        }
         // Q-P32u: a transfer file being made blocks Close Company, Restore
         // and Delete (a shortcut or the palette).
         if crate::screens::send_to_accountant::blocked_now(id.as_str()) {
@@ -1557,6 +1579,9 @@ impl Shell {
         let tokens = Tokens::of(&ctx);
 
         self.apply_company_events(Some(&ctx));
+        // P33: the office network's state for this frame.
+        self.lan
+            .tick(self.company_link.as_ref(), std::time::Instant::now());
         // Security review minor 5: a copied secret leaves the clipboard.
         crate::secret_clipboard::tick(&ctx);
         if self.show_idle_lock(ui) {
@@ -1569,6 +1594,8 @@ impl Shell {
         self.publish_grid_facts(&ctx, egui::ViewportId::ROOT);
         title_bar::show(ui, self, narrow, &tokens);
         menu::show(ui, self, narrow, &tokens);
+        let dirty = self.windows.dirty_ids().len();
+        self.lan.banner(ui, &tokens, dirty);
         if let Some(kind) = status_bar::show(ui, self, narrow, &tokens) {
             self.open_screen(CommandId::new(kind));
         }
@@ -1587,6 +1614,11 @@ impl Shell {
             self.run(Some(&ctx), id);
         }
         self.show_overlays(&ctx);
+        // P33: while the host doesn't answer, the app is covered and every
+        // window stays as it was; commands asked for meanwhile are dropped.
+        if self.lan.overlay(&ctx, dirty) {
+            self.pending.clear();
+        }
 
         for id in std::mem::take(&mut self.pending) {
             self.run(Some(&ctx), id);

@@ -264,12 +264,22 @@ pub fn show(ui: &mut Ui, shell: &Shell, narrow: bool, tokens: &Tokens) -> Option
                     .clone()
                     .unwrap_or_else(|| t("status.not_signed_in"));
                 ui.label(small(user));
-                if let Some(mode) = &shell.status.mode {
+                // P33: on the office network the mode is the network's.
+                if let Some(lan) = shell.lan.state() {
+                    use crate::lan_status::LanState;
+                    let text = RichText::new(t(lan.status_key())).size(12.0);
+                    ui.label(if matches!(lan, LanState::Host | LanState::Connected) {
+                        text.color(tokens.text_secondary)
+                    } else {
+                        text.color(tokens.warn_text)
+                    });
+                } else if let Some(mode) = &shell.status.mode {
                     ui.label(small(mode.clone()));
                 }
                 if let Some(engine) = engine {
                     ui.label(small(engine));
                 }
+
                 if let Some(ai) = &shell.status.ai
                     && !narrow
                 {

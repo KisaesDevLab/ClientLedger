@@ -810,7 +810,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("fix.api.open_company", "Open a company first (File, Open or Switch Company)."),
     ("error.api.too_large", "That file or entry is too large."),
     ("error.api.engine_unavailable", "The books engine is not answering."),
-    // LAN multi-user (P33). Nothing was saved in any of these cases.
+    // LAN multi-user (P33). Nothing was saved in any of these cases but link_lost.
     ("error.lan.maintenance", "The host computer is restoring or importing books. Nothing was saved."),
     ("error.lan.host_engine_down", "The host computer's books are restarting. Nothing was saved."),
     ("error.lan.not_sent", "The host computer cannot be reached. Nothing was sent."),
@@ -820,6 +820,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.lan.maintenance_busy", "Other people are still saving. Try again in a moment."),
     ("error.lan.stale_required", "ClientLedger could not check whether someone else changed this record. Nothing was saved."),
     ("error.lan.not_paired", "The host computer no longer knows this computer."),
+    ("error.lan.link_lost", "The connection to the host computer dropped before it answered."),
     ("fix.lan.check_host", "Check that the host computer is on and connected, then try again."),
     ("fix.lan.update", "Install the same version on this computer and the host computer."),
     ("fix.lan.on_host", "Sit at the host computer and do it there."),

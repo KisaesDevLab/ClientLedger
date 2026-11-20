@@ -1552,6 +1552,9 @@ fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: Ro
         409 if has("MAINTENANCE_BUSY") => fin(ApiError::Lan(LanRefusal::MaintenanceBusy)),
         428 if has("STALE_REQUIRED") => fin(ApiError::Lan(LanRefusal::StaleRequired)),
         403 if has("LAN_NOT_PAIRED") => fin(ApiError::Lan(LanRefusal::NotPaired)),
+        // Sent, then the link dropped: a save becomes an unknown outcome in
+        // the executor (Q-P33al); a read backs off.
+        502 if has("LAN_LINK_LOST") => fin(ApiError::Lan(LanRefusal::LinkLost)),
         400 => match &parsed {
             Some(b) if b.is("VALIDATION_ERROR") => fin(ApiError::Validation(validation(b))),
             Some(b) if b.is("INVALID_JSON") => fin(ApiError::Protocol { status, code }),
@@ -2701,9 +2704,9 @@ mod tests {
     }
 }
 
-/// Why the LAN host did not carry a request out (P33). In every case
-/// nothing was saved, so the form is kept and nothing is retried
-/// automatically.
+/// Why the LAN host did not carry a request out (P33). In every case but
+/// [`LanRefusal::LinkLost`] nothing was saved, so the form is kept and
+/// nothing is retried automatically.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LanRefusal {
     /// 503 `MAINTENANCE`: someone is restoring or importing on the host.
@@ -2728,6 +2731,11 @@ pub enum LanRefusal {
     StaleRequired,
     /// 403 `LAN_NOT_PAIRED`: the host no longer knows this computer.
     NotPaired,
+    /// 502 `LAN_LINK_LOST`: the request left this computer and the link
+    /// dropped before the answer came. Only reads end here (after backing
+    /// off); a save becomes [`ApiError::OutcomeUnknown`] and is never sent
+    /// again on its own (Q-P33al).
+    LinkLost,
 }
 
 impl LanRefusal {
@@ -2744,6 +2752,7 @@ impl LanRefusal {
             LanRefusal::MaintenanceBusy => "error.lan.maintenance_busy",
             LanRefusal::StaleRequired => "error.lan.stale_required",
             LanRefusal::NotPaired => "error.lan.not_paired",
+            LanRefusal::LinkLost => "error.lan.link_lost",
         }
     }
 
@@ -2754,7 +2763,7 @@ impl LanRefusal {
             LanRefusal::Maintenance | LanRefusal::HostEngineDown | LanRefusal::MaintenanceBusy => {
                 Some("fix.api.try_again_soon")
             }
-            LanRefusal::NotSent => Some("fix.lan.check_host"),
+            LanRefusal::NotSent | LanRefusal::LinkLost => Some("fix.lan.check_host"),
             LanRefusal::UpdateNeeded => Some("fix.lan.update"),
             LanRefusal::HostOnly | LanRefusal::MaintenanceRequired => Some("fix.lan.on_host"),
             LanRefusal::StaleRequired => Some("fix.api.report"),

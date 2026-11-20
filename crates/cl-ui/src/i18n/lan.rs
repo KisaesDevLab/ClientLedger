@@ -4,6 +4,23 @@
 /// The office network's part of the English catalog.
 #[rustfmt::skip]
 pub const ENGLISH: &[(&str, &str)] = &[
+    // Main window (status bar, host-down overlay, banners; P33 D4 step 12).
+    ("lan.status.host", "Sharing these books with the office"),
+    ("lan.banner.maintenance", "The host computer is restoring or importing books. You can look around; saving waits until it's done."),
+    ("lan.banner.update_needed", "This computer needs the same ClientLedger version as the host computer. Nothing can be saved until both match."),
+    ("lan.banner.back", "Connected to the host again. {n} windows have unsaved changes, kept as you left them. Save each one when you're ready."),
+    ("lan.banner.back.one", "Connected to the host again. 1 window has unsaved changes, kept as you left it. Save it when you're ready."),
+    ("lan.banner.dismiss", "OK"),
+    ("lan.banner.dismiss.tip", "Hide this message"),
+    ("lan.down.explain", "ClientLedger is waiting for the host computer. Check that it is on and connected to the office network."),
+    ("lan.down.kept", "Windows with unsaved changes: {n}. They stay open on this computer, as you left them."),
+    ("lan.down.kept.one", "1 window has unsaved changes. It stays open on this computer, as you left it."),
+    ("lan.down.never_resent", "Nothing is sent on its own. If a save was on its way when the connection dropped, its window asks you to check it once the host answers."),
+    ("lan.down.waiting", "Waiting for the host computer\u{2026}"),
+    ("lan.down.check", "Check again"),
+    ("lan.down.check.tip", "Try reaching the host computer now"),
+    ("lan.host_only", "Do this on the host computer."),
+    ("lan.host_only.tip", "On the office network this is done at the host computer, which makes a backup first."),
     // Setup window.
     ("lan.purpose", "Share this company's books with other computers in your office, or use the books kept on another computer. Everything stays on your own network; nothing goes to the internet."),
     ("lan.mode", "How this computer works"),
@@ -123,6 +140,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lan.field.txnDate", "Date"),
     ("lan.field.number", "Entry number"),
     ("lan.field.memo", "Memo"),
+    ("lan.field.from", "Transfer from"),
+    ("lan.field.to", "Transfer to"),
+    ("lan.field.amount", "Amount"),
     ("lan.field.adjusting", "Adjusting entry"),
     ("lan.field.reverseOn", "Reverse on"),
 ];

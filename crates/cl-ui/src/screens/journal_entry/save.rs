@@ -916,6 +916,14 @@ impl JournalScreen {
                 }
                 done
             }
+            // P33: Esc in the conflict dialog is Back (the shell takes the
+            // key before the dialog sees it).
+            "form.revert" if self.conflict.is_some() => {
+                if let Some(open) = self.conflict.take() {
+                    self.run_choice(open, crate::screens::conflict_dialog::ConflictChoice::Back);
+                }
+                true
+            }
             "form.revert" => self.revert_field(),
             _ => false,
         }

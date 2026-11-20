@@ -349,6 +349,12 @@ fn running_host() -> Option<Arc<LanHost>> {
     })
 }
 
+/// A host runs in this process (the status bar's "Sharing these books").
+#[must_use]
+pub fn host_running() -> bool {
+    running_host().is_some()
+}
+
 type Event = (cl_api::LanAuditEvent, Option<String>, Option<String>);
 
 /// The live office network behind the setup window. Settings changes are
