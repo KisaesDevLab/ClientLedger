@@ -41,6 +41,18 @@ pub fn transfer_roundtrip(args: &[String]) -> Result<()> {
     let file = out.join("roundtrip.clxfer");
     let expected = out.join("expected.json");
 
+    // The engine `cargo xtask engine` built: the test binary can't find
+    // it by itself when the build dir is outside the workspace target.
+    let engine_exe = match std::env::var_os("CL_ENGINE_EXE") {
+        Some(p) => std::path::PathBuf::from(p),
+        None => {
+            let t = crate::engine::host_target()?;
+            crate::meta::target_dir(&root)
+                .join("engine")
+                .join(t.dir)
+                .join(t.exe_name)
+        }
+    };
     println!("transfer-roundtrip: 1/2 make the transfer file on the desktop side");
     let status = Command::new(cargo())
         .args([
@@ -57,6 +69,7 @@ pub fn transfer_roundtrip(args: &[String]) -> Result<()> {
         ])
         .env("CL_OFFLINE_TESTS", "1")
         .env("CL_API_REQUIRE", "1")
+        .env("CL_ENGINE_EXE", &engine_exe)
         .env("CL_TRANSFER_OUT", &out)
         .env("CL_TRANSFER_PASSPHRASE", PASSPHRASE)
         .current_dir(&root)
