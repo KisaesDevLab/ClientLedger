@@ -57,9 +57,9 @@ pub fn payment_value(f: &PaymentForm) -> Value {
                 .map(|r| {
                     json!({
                         "invoice": r.invoice.to_string(),
-                        "amount": r.amount.map(|m| m.to_wire()),
-                        "discount": r.discount.map(|m| m.to_wire()),
-                        "writeOff": r.write_off.map(|m| m.to_wire()),
+                        "amount": r.amount.map(cl_core::Money::to_wire),
+                        "discount": r.discount.map(cl_core::Money::to_wire),
+                        "writeOff": r.write_off.map(cl_core::Money::to_wire),
                     })
                 })
                 .collect()
@@ -73,7 +73,7 @@ pub fn payment_value(f: &PaymentForm) -> Value {
             json!({
                 "source": c.source.to_string(),
                 "invoice": c.invoice.to_string(),
-                "amount": c.amount.map(|m| m.to_wire()),
+                "amount": c.amount.map(cl_core::Money::to_wire),
             })
         })
         .collect();
@@ -186,22 +186,22 @@ impl ReceivePaymentScreen {
             self.money_style,
             &["amount"],
         );
-        let dialog = crate::screens::conflict_dialog::ConflictDialog::new(conflict, words.line_text())
-            .with_field_text(Box::new(move |f, v| {
-                if f == "applications" {
-                    let n = v
-                        .get("rows")
-                        .and_then(Value::as_array)
-                        .map_or(0, Vec::len)
-                        + v.get("credits").and_then(Value::as_array).map_or(0, Vec::len);
-                    Some(crate::i18n::t_with(
-                        "lan.payment.applications",
-                        &[("n", &crate::i18n::count_text(n as u64))],
-                    ))
-                } else {
-                    words.field(f, v)
-                }
-            }));
+        let dialog =
+            crate::screens::conflict_dialog::ConflictDialog::new(conflict, words.line_text())
+                .with_field_text(Box::new(move |f, v| {
+                    if f == "applications" {
+                        let n = v.get("rows").and_then(Value::as_array).map_or(0, Vec::len)
+                            + v.get("credits")
+                                .and_then(Value::as_array)
+                                .map_or(0, Vec::len);
+                        Some(crate::i18n::t_with(
+                            "lan.payment.applications",
+                            &[("n", &crate::i18n::count_text(n as u64))],
+                        ))
+                    } else {
+                        words.field(f, v)
+                    }
+                }));
         self.conflict.open = Some(OpenConflict {
             dialog,
             theirs,
@@ -243,6 +243,7 @@ impl ReceivePaymentScreen {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)] // the dialog hands over its choice
     pub(crate) fn run_choice(&mut self, open: OpenConflict<PaymentRecord>, choice: ConflictChoice) {
         match choice {
             ConflictChoice::Back => self.notice = Some("payment.refusal.stale"),

@@ -333,7 +333,8 @@ pub struct WriteCheckScreen {
     /// A04 draft mode: the document draft this form enters (`draft.rs`).
     pub(crate) draft: draft::CheckDraftMode,
     /// P33: their version being read after a stale save, then the dialog.
-    pub(crate) conflict: crate::forms::conflict::ConflictFlow<cl_api::Versioned<cl_api::CheckRecord>>,
+    pub(crate) conflict:
+        crate::forms::conflict::ConflictFlow<cl_api::Versioned<cl_api::CheckRecord>>,
 }
 
 /// A blank check form (no lines: the grid holds them).

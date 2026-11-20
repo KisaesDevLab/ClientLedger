@@ -37,7 +37,7 @@ pub fn check_value(f: &CheckForm, lines: &FormLines, items: &ItemLines) -> Value
         "payee": f.payee.map(|c| c.to_string()),
         "payeeName": f.payee_name.trim(),
         "address": f.address.trim(),
-        "amount": f.amount.map(|m| m.to_wire()),
+        "amount": f.amount.map(cl_core::Money::to_wire),
         "memo": f.memo.trim(),
         "headerTags": tag_ids(&f.header_tags),
         "lines": lines_value(lines, Some(items)),
@@ -59,13 +59,13 @@ impl WriteCheckScreen {
             return;
         };
         if self.link.is_demo() {
-            let r = self.link.demo_state().map_or(
-                Err(ApiError::NotFound { code: None }),
-                |mut d| {
-                    crate::company::demo::checks::get(&mut d, id)
-                        .ok_or(ApiError::NotFound { code: None })
-                },
-            );
+            let r =
+                self.link
+                    .demo_state()
+                    .map_or(Err(ApiError::NotFound { code: None }), |mut d| {
+                        crate::company::demo::checks::get(&mut d, id)
+                            .ok_or(ApiError::NotFound { code: None })
+                    });
             self.conflict_read(r, intent);
             return;
         }
@@ -90,15 +90,22 @@ impl WriteCheckScreen {
     /// here (void, a bill payment, a shape this form shows read-only).
     fn theirs_of(&mut self, v: &Versioned<CheckRecord>) -> Option<Theirs> {
         let bank = self.editing.as_ref().map(|e| e.bank)?;
-        let (form, lines, items, exact) =
-            form_of(&v.record, bank, &mut self.lines.form_mut().adapter_mut().keys);
+        let (form, lines, items, exact) = form_of(
+            &v.record,
+            bank,
+            &mut self.lines.form_mut().adapter_mut().keys,
+        );
         if self.read_only_note_of(&v.record, exact).is_some() {
             return None;
         }
         Some(Theirs { form, lines, items })
     }
 
-    pub(crate) fn conflict_read(&mut self, r: Result<Versioned<CheckRecord>, ApiError>, intent: SaveIntent) {
+    pub(crate) fn conflict_read(
+        &mut self,
+        r: Result<Versioned<CheckRecord>, ApiError>,
+        intent: SaveIntent,
+    ) {
         let theirs = match read_of(r) {
             Read::Theirs(v) => v,
             Read::Gone => {
@@ -191,6 +198,7 @@ impl WriteCheckScreen {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)] // the dialog hands over its choice
     pub(crate) fn run_choice(
         &mut self,
         open: OpenConflict<Versioned<CheckRecord>>,

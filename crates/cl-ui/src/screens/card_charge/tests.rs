@@ -979,7 +979,11 @@ fn stored_memo(link: &Arc<CompanyLink>, id: TransactionId) -> Option<String> {
         .get_or_insert_with(crate::company::demo::chart)
         .clone();
     let contacts = demo.contacts_mut().clone();
-    demo.ledger.get(&chart, &contacts, id).expect("txn").record.memo
+    demo.ledger
+        .get(&chart, &contacts, id)
+        .expect("txn")
+        .record
+        .memo
 }
 
 #[test]

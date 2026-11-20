@@ -2553,7 +2553,11 @@ fn p33_keep_mine_takes_their_lines_whole_with_their_amount() {
     let (_d, link) = link();
     let (mut s, mut other, id) = two_windows(&link);
     set_lines(&mut other, "12.00", &[("5110", "8.00"), ("5110", "4.00")]);
-    assert!(other.start_save(SaveIntent::Save, None), "{:?}", other.save.problems);
+    assert!(
+        other.start_save(SaveIntent::Save, None),
+        "{:?}",
+        other.save.problems
+    );
     s.header.edit_step(|h| h.memo = "mine".into());
     assert!(!s.start_save(SaveIntent::Save, None));
     let open = s.conflict.open.take().expect("dialog");
@@ -2563,7 +2567,11 @@ fn p33_keep_mine_takes_their_lines_whole_with_their_amount() {
     let r = stored(&link, id);
     assert_eq!(r.txn.memo.as_deref(), Some("mine"));
     assert_eq!(debits(&r), vec![money("8.00"), money("4.00")]);
-    assert_eq!(bank_credit(&r), vec![money("12.00")], "the amount came with them");
+    assert_eq!(
+        bank_credit(&r),
+        vec![money("12.00")],
+        "the amount came with them"
+    );
 }
 
 #[test]
@@ -2626,10 +2634,7 @@ fn p33_a_new_stamp_with_nothing_editable_changed_saves_without_asking() {
 fn p33_a_check_deleted_elsewhere_is_never_saved_again() {
     let (_d, link) = link();
     let (mut s, _other, _id) = two_windows(&link);
-    s.conflict_read(
-        Err(ApiError::NotFound { code: None }),
-        SaveIntent::Save,
-    );
+    s.conflict_read(Err(ApiError::NotFound { code: None }), SaveIntent::Save);
     assert_eq!(s.save.notice, Some(crate::forms::conflict::GONE));
     assert!(!s.conflict.is_open());
 }

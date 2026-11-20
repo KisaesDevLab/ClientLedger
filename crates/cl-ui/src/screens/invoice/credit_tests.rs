@@ -697,8 +697,7 @@ fn p33_flow(kind: SalesDocKind) {
     settle(&mut other);
     other.poll();
     assert_eq!(other.saved_count, 1, "{:?} {:?}", other.error, other.notice);
-    s.header
-        .edit_step(|h| h.customer_message = "Thanks".into());
+    s.header.edit_step(|h| h.customer_message = "Thanks".into());
     settle(&mut s);
     s.start_save(SaveIntent::Save, None);
     settle(&mut s);

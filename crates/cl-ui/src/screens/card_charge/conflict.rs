@@ -37,7 +37,7 @@ pub fn card_value(f: &CardForm, lines: &FormLines, items: &ItemLines) -> Value {
         "payee": f.payee.map(|c| c.to_string()),
         "txnDate": f.date.map(CalendarDate::to_wire),
         "refNo": f.ref_no.trim(),
-        "amount": f.amount.map(|m| m.to_wire()),
+        "amount": f.amount.map(cl_core::Money::to_wire),
         "memo": f.memo.trim(),
         "lines": lines_value(lines, Some(items)),
     })
@@ -202,6 +202,7 @@ impl CardChargeScreen {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)] // the dialog hands over its choice
     pub(crate) fn run_choice(
         &mut self,
         open: OpenConflict<Versioned<Transaction>>,

@@ -31,7 +31,7 @@ fn line_value(l: &InvoiceLine) -> Value {
         "description": l.description.trim(),
         "serviceDate": l.service_date.map(CalendarDate::to_wire),
         "qty": l.quantity.map(cl_core::Quantity::to_wire),
-        "rate": l.rate.map(|m| m.to_wire()),
+        "rate": l.rate.map(cl_core::Money::to_wire),
         "discountPercent": l.discount_percent.map(cl_core::Quantity::to_wire),
         "taxable": l.taxable,
         "tag": l.tag.map(|t| t.to_string()),
@@ -213,6 +213,7 @@ impl InvoiceScreen {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)] // the dialog hands over its choice
     pub(crate) fn run_choice(&mut self, open: OpenConflict<SavedDoc>, choice: ConflictChoice) {
         match choice {
             ConflictChoice::Back => self.stale = true,

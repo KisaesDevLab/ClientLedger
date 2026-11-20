@@ -1141,10 +1141,18 @@ fn tag_options_on_bills_and_vendor_credits() {
 use crate::screens::conflict_dialog::ConflictChoice;
 
 /// An 18.25 bill (or credit) on 6210, saved, then open here and in `other`.
-fn two_windows(link: &Arc<CompanyLink>, kind: BillKind) -> (EnterBillScreen, EnterBillScreen, TransactionId) {
+fn two_windows(
+    link: &Arc<CompanyLink>,
+    kind: BillKind,
+) -> (EnterBillScreen, EnterBillScreen, TransactionId) {
     let mut s = screen(link);
     s.set_kind(kind);
-    fill(&mut s, demo_bills::STORY_VENDOR, "18.25", &[("6210", "18.25")]);
+    fill(
+        &mut s,
+        demo_bills::STORY_VENDOR,
+        "18.25",
+        &[("6210", "18.25")],
+    );
     assert!(s.start_save(SaveIntent::Save, None), "{}", s.state());
     let id = s.save.last.as_ref().expect("last").id;
     assert_eq!(s.state()["mode"], "edit");
@@ -1173,7 +1181,11 @@ fn p33_keep_mine_takes_their_lines_and_amount_and_keeps_my_ref() {
         "20.00",
         &[("6210", "15.00"), ("6210", "5.00")],
     );
-    assert!(other.start_save(SaveIntent::Save, None), "{}", other.state());
+    assert!(
+        other.start_save(SaveIntent::Save, None),
+        "{}",
+        other.state()
+    );
     s.header.edit_step(|h| h.reference = "INV-9".into());
     assert!(!s.start_save(SaveIntent::Save, None));
     let open = s.conflict.open.take().expect("dialog");
@@ -1191,7 +1203,12 @@ fn p33_keep_mine_takes_their_lines_and_amount_and_keeps_my_ref() {
 fn p33_my_re_split_lines_keep_my_amount_due() {
     let (_d, link) = link();
     let (mut s, mut other, id) = two_windows(&link, BillKind::Bill);
-    fill(&mut other, demo_bills::STORY_VENDOR, "20.00", &[("6210", "20.00")]);
+    fill(
+        &mut other,
+        demo_bills::STORY_VENDOR,
+        "20.00",
+        &[("6210", "20.00")],
+    );
     assert!(other.start_save(SaveIntent::Save, None));
     fill(
         &mut s,
@@ -1260,7 +1277,11 @@ fn p33_vendor_credit_keep_mine_use_theirs_and_silent_resave() {
     assert_eq!(s.state()["kind"], "credit");
     // Keep mine: their memo, my ref.
     other.header.edit_step(|h| h.memo = "theirs".into());
-    assert!(other.start_save(SaveIntent::Save, None), "{}", other.state());
+    assert!(
+        other.start_save(SaveIntent::Save, None),
+        "{}",
+        other.state()
+    );
     s.header.edit_step(|h| h.reference = "VC-2".into());
     assert!(!s.start_save(SaveIntent::Save, None));
     let open = s.conflict.open.take().expect("dialog");

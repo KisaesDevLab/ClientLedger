@@ -71,9 +71,7 @@ impl<R> ConflictFlow<R> {
     /// For the control channel: the dialog's counts, or null.
     #[must_use]
     pub fn state(&self) -> Value {
-        self.open
-            .as_ref()
-            .map_or(Value::Null, |c| c.dialog.state())
+        self.open.as_ref().map_or(Value::Null, |c| c.dialog.state())
     }
 
     /// Their version, once read.
@@ -134,7 +132,7 @@ pub(crate) fn expense_line(l: &FormLine) -> Value {
     json!({
         "kind": "expense",
         "account": l.account.map(|a| a.to_string()),
-        "amount": l.amount.map(|m| m.to_wire()),
+        "amount": l.amount.map(cl_core::Money::to_wire),
         "memo": l.memo.trim(),
         "name": l.customer.map(|c| c.to_string()),
         "billable": l.billable,
@@ -152,8 +150,8 @@ pub(crate) fn item_line(l: &ItemLine) -> Value {
         "description": l.description.trim(),
         "qty": l.qty.map(cl_core::Quantity::to_wire),
         "unit": l.unit.map(|u| u.to_string()),
-        "rate": l.rate.map(|m| m.to_wire()),
-        "amount": l.amount.map(|m| m.to_wire()),
+        "rate": l.rate.map(cl_core::Money::to_wire),
+        "amount": l.amount.map(cl_core::Money::to_wire),
         "account": l.account.map(|a| a.to_string()),
         "name": l.customer.map(|c| c.to_string()),
         "billable": l.billable,
@@ -275,14 +273,12 @@ impl Words {
     }
 
     /// The dialog's line words.
-    #[must_use]
     pub fn line_text(&self) -> LineText {
         let w = self.clone();
         Box::new(move |v| w.line(v))
     }
 
     /// The dialog's field words.
-    #[must_use]
     pub fn field_text(&self) -> FieldText {
         let w = self.clone();
         Box::new(move |f, v| w.field(f, v))
@@ -320,7 +316,11 @@ mod tests {
             key: keys.next_key(),
             ..line.clone()
         };
-        assert_eq!(expense_line(&line), expense_line(&other), "row keys never count");
+        assert_eq!(
+            expense_line(&line),
+            expense_line(&other),
+            "row keys never count"
+        );
         let wire = cl_core::Money::parse_wire("10.50").expect("m").to_wire();
         assert_eq!(expense_line(&line)["amount"], wire.as_str());
         assert_eq!(expense_line(&line)["memo"], "feed");

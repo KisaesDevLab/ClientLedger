@@ -262,7 +262,8 @@ pub struct DepositScreen {
     /// Save as Template and the template this deposit came from (P15).
     pub(crate) template: crate::screens::templates::SaveFlow,
     /// P33: their version being read after a stale save, then the dialog.
-    pub(crate) conflict: crate::forms::conflict::ConflictFlow<cl_api::Versioned<cl_api::Transaction>>,
+    pub(crate) conflict:
+        crate::forms::conflict::ConflictFlow<cl_api::Versioned<cl_api::Transaction>>,
 }
 
 /// A blank deposit (no lines: the grid holds them).

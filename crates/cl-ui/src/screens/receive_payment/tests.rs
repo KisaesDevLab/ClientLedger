@@ -865,7 +865,9 @@ fn client_center_bounce_opens_the_payment_and_its_bounce_flow() {
 use crate::screens::conflict_dialog::ConflictChoice;
 
 /// The mockup payment, saved, then open here and in `other`.
-fn two_windows(link: &Arc<CompanyLink>) -> (ReceivePaymentScreen, ReceivePaymentScreen, TransactionId) {
+fn two_windows(
+    link: &Arc<CompanyLink>,
+) -> (ReceivePaymentScreen, ReceivePaymentScreen, TransactionId) {
     let mut s = mockup(link);
     assert!(s.start_save(After::Stay, None), "{:?}", s.problems);
     s.poll();
@@ -921,10 +923,16 @@ fn p33_their_new_applications_are_shown_for_a_recheck_never_merged() {
     let ids = invoice_ids(&other);
     other.amount_text = "3000".into();
     other.amount_typed();
-    other.form.type_payment(ids["1091"], Money::parse_wire("3000.00").expect("m"));
+    other
+        .form
+        .type_payment(ids["1091"], Money::parse_wire("3000.00").expect("m"));
     other.dirty = true;
     save_stay(&mut other);
-    assert_eq!(other.saved_count, 1, "{:?} {:?} {:?}", other.problems, other.notice, other.error);
+    assert_eq!(
+        other.saved_count, 1,
+        "{:?} {:?} {:?}",
+        other.problems, other.notice, other.error
+    );
     s.form.memo = "mine".into();
     s.dirty = true;
     save_stay(&mut s);
@@ -939,7 +947,10 @@ fn p33_their_new_applications_are_shown_for_a_recheck_never_merged() {
     assert_eq!(s.notice, Some(super::conflict::RECHECK));
     assert!(s.dirty);
     assert_eq!(s.form.memo, "mine");
-    assert_eq!(s.amount_text, shown(Money::parse_wire("3000.00").expect("m")));
+    assert_eq!(
+        s.amount_text,
+        shown(Money::parse_wire("3000.00").expect("m"))
+    );
     assert_eq!(stored(&link, id).memo, None, "nothing saved yet");
     // The owner checked: Save goes on their stamp.
     save_stay(&mut s);

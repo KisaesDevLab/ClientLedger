@@ -38,7 +38,7 @@ pub fn bill_value(f: &BillForm, lines: &FormLines, items: &ItemLines) -> Value {
         "termsDays": f.terms_days,
         "discountPercent": f.discount_percent.map(cl_model::forms::bill::Percent::to_wire),
         "discountDays": f.discount_days,
-        "amount": f.amount_due.map(|m| m.to_wire()),
+        "amount": f.amount_due.map(cl_core::Money::to_wire),
         "dueDate": f.due_date.map(CalendarDate::to_wire),
         "discountDate": f.discount_date.map(CalendarDate::to_wire),
         "memo": f.memo.trim(),
@@ -61,13 +61,13 @@ impl EnterBillScreen {
             return;
         };
         if self.link.is_demo() {
-            let got = self.link.demo_state().map_or(
-                Err(ApiError::NotFound { code: None }),
-                |mut d| {
-                    crate::company::demo::bills::get(&mut d, id)
-                        .ok_or(ApiError::NotFound { code: None })
-                },
-            );
+            let got =
+                self.link
+                    .demo_state()
+                    .map_or(Err(ApiError::NotFound { code: None }), |mut d| {
+                        crate::company::demo::bills::get(&mut d, id)
+                            .ok_or(ApiError::NotFound { code: None })
+                    });
             self.conflict_read(got, intent);
             return;
         }
@@ -203,6 +203,7 @@ impl EnterBillScreen {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)] // the dialog hands over its choice
     pub(crate) fn run_choice(
         &mut self,
         open: OpenConflict<Versioned<BillRecord>>,

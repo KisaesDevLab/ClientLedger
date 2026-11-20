@@ -1011,7 +1011,12 @@ fn plain_lines(s: &mut InvoiceScreen, lines: &[(&str, &str)]) {
 }
 
 /// A plain invoice, saved, then open here and in `other`.
-fn two_windows() -> (tempfile::TempDir, InvoiceScreen, InvoiceScreen, TransactionId) {
+fn two_windows() -> (
+    tempfile::TempDir,
+    InvoiceScreen,
+    InvoiceScreen,
+    TransactionId,
+) {
     let (d, mut s) = screen();
     let c = story_client(&s);
     s.pick_client(c);

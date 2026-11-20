@@ -806,7 +806,11 @@ fn two_windows() -> (
     let link = Arc::new(CompanyLink::demo(dir.path()));
     let mut s = DepositScreen::new(Arc::clone(&link), None, today());
     set_lines(&mut s, &[(4000, "300.00")]);
-    assert!(s.start_save(SaveIntent::SaveAndNew, None), "{:?}", s.save.error);
+    assert!(
+        s.start_save(SaveIntent::SaveAndNew, None),
+        "{:?}",
+        s.save.error
+    );
     s.navigate(true);
     let id = s.editing.as_ref().map(|e| e.id).expect("saved");
     let mut other = DepositScreen::new(Arc::clone(&link), None, today());
@@ -824,7 +828,11 @@ fn stored(link: &CompanyLink, id: TransactionId) -> cl_api::DepositRecord {
 fn p33_keep_mine_takes_their_lines_whole_and_keeps_my_memo() {
     let (mut s, mut other, id, link, _dir) = two_windows();
     set_lines(&mut other, &[(4000, "250.00"), (4000, "75.00")]);
-    assert!(other.start_save(SaveIntent::Save, None), "{:?}", other.save.error);
+    assert!(
+        other.start_save(SaveIntent::Save, None),
+        "{:?}",
+        other.save.error
+    );
     s.header.edit_step(|h| h.memo = "mine".into());
     assert!(!s.start_save(SaveIntent::Save, None));
     let st = s.state_json();
@@ -836,7 +844,11 @@ fn p33_keep_mine_takes_their_lines_whole_and_keeps_my_memo() {
     assert_eq!(s.state_json()["save"]["error"], false);
     let r = stored(&link, id);
     assert_eq!(r.txn.memo.as_deref(), Some("mine"));
-    assert_eq!(r.total, money("325.00"), "the engine's total of their lines");
+    assert_eq!(
+        r.total,
+        money("325.00"),
+        "the engine's total of their lines"
+    );
 }
 
 #[test]
@@ -846,7 +858,10 @@ fn p33_use_theirs_shows_their_deposit() {
     assert!(other.start_save(SaveIntent::Save, None));
     s.header.edit_step(|h| h.memo = "mine".into());
     assert!(!s.start_save(SaveIntent::Save, None));
-    assert!(s.form_command(cl_model::CommandId::new("form.revert")), "Esc is Back");
+    assert!(
+        s.form_command(cl_model::CommandId::new("form.revert")),
+        "Esc is Back"
+    );
     assert_eq!(s.header.current().memo, "mine");
     assert!(!s.start_save(SaveIntent::Save, None));
     let open = s.conflict.open.take().expect("dialog again");

@@ -425,7 +425,9 @@ pub fn update_guarded(
     password: Option<&Secret>,
     printed: Option<cl_api::PrintedCheckChange>,
 ) -> Result<TransactionId, ApiError> {
-    let now = get(state, id).ok_or(ApiError::NotFound { code: None })?.version;
+    let now = get(state, id)
+        .ok_or(ApiError::NotFound { code: None })?
+        .version;
     if &now != expected {
         return Err(ApiError::Conflict {
             reason: ConflictReason::Stale,

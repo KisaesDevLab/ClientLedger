@@ -35,7 +35,7 @@ pub fn deposit_value(f: &DepositForm, lines: &FormLines) -> Value {
             "amount": p.amount.to_wire(),
         })).collect::<Vec<_>>(),
         "cashBackAccount": f.cash_back.account.map(|a| a.to_string()),
-        "cashBackAmount": f.cash_back.amount.map(|m| m.to_wire()),
+        "cashBackAmount": f.cash_back.amount.map(cl_core::Money::to_wire),
         "cashBackMemo": f.cash_back.memo.trim(),
         "lines": lines_value(lines, None),
     })
@@ -147,7 +147,7 @@ impl DepositScreen {
             self.lines.form_mut().edit_step(|v| *v = mine.1);
             self.lines.lines_replaced();
         }
-        if let Some(r) = self.record_of(&theirs.record).ok() {
+        if let Ok(r) = self.record_of(&theirs.record) {
             self.record = Some(r);
         }
         if let Some(e) = self.editing.as_mut() {
@@ -166,6 +166,7 @@ impl DepositScreen {
         }
     }
 
+    #[allow(clippy::needless_pass_by_value)] // the dialog hands over its choice
     pub(crate) fn run_choice(
         &mut self,
         open: OpenConflict<Versioned<Transaction>>,
