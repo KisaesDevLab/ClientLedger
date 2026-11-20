@@ -151,12 +151,39 @@ impl LanHost {
                 interfaces,
             ))
             .map_err(|e| LanStartError::Identity(e.to_string()))?;
-        if settings.announce
-            && let ProxyStatus::Listening(addr) = proxy.status()
-            && let Err(e) =
-                discovery.announce(addr.ip(), addr.port(), &identity.fingerprint().prefix())
         {
-            tracing::warn!(error = %e, "LAN announce failed; the manual address still works");
+            // Feeds the gate from the supervisor, and keeps the mDNS
+            // announcement on the address the proxy listens on (rebind:
+            // re-announce; stop: withdraw).
+            let (gate, stop) = (Arc::clone(&gate), Arc::clone(&pump_stop));
+            let mut status = proxy.subscribe();
+            let (disc, announce) = (Arc::clone(&discovery), settings.announce);
+            let tag = identity.fingerprint().prefix();
+            let _ = std::thread::Builder::new()
+                .name("cl-lan-gate".into())
+                .spawn(move || {
+                    let mut announced: Option<SocketAddr> = None;
+                    while !stop.load(Ordering::SeqCst) {
+                        gate.set_upstream(upstream_of(&snapshots.snapshot()));
+                        let now = match &*status.borrow_and_update() {
+                            ProxyStatus::Listening(a) if announce => Some(*a),
+                            _ => None,
+                        };
+                        if now != announced {
+                            disc.stop();
+                            if let Some(a) = now
+                                && let Err(e) = disc.announce(a.ip(), a.port(), &tag)
+                            {
+                                tracing::warn!(
+                                    error = %e,
+                                    "LAN announce failed; the manual address still works"
+                                );
+                            }
+                            announced = now;
+                        }
+                        std::thread::sleep(Duration::from_millis(250));
+                    }
+                });
         }
         tracing::info!("LAN host mode on");
         Ok(LanHost {
