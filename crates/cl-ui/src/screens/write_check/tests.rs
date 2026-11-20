@@ -2638,3 +2638,41 @@ fn p33_a_check_deleted_elsewhere_is_never_saved_again() {
     assert_eq!(s.save.notice, Some(crate::forms::conflict::GONE));
     assert!(!s.conflict.is_open());
 }
+
+/// U-291 S2: a file attached to the open check moves its stamp; the form
+/// takes the stamp the upload answered with, on both of its versions, so
+/// its next save is not a conflict with itself.
+#[test]
+fn p33_an_attached_file_moves_the_stamp_and_the_next_save_goes_on_it() {
+    let (_d, link) = link();
+    let (mut s, _other, id) = two_windows(&link);
+    assert_eq!(s.editing.as_ref().and_then(|e| e.version.stamp()), None);
+    s.upload_bytes("receipt.pdf", b"%PDF-1.4\n%%EOF\n".to_vec());
+    let got = s
+        .editing
+        .as_ref()
+        .and_then(|e| e.version.stamp())
+        .expect("the upload's stamp");
+    assert_eq!(
+        s.editing.as_ref().and_then(|e| e.txn_version.stamp()),
+        Some(got),
+        "both versions"
+    );
+    // A second file answers with a later stamp; it replaces the first.
+    s.upload_bytes("receipt 2.pdf", b"%PDF-1.4\n%2\n%%EOF\n".to_vec());
+    let later = s
+        .editing
+        .as_ref()
+        .and_then(|e| e.version.stamp())
+        .expect("stamp");
+    assert!(later > got);
+    s.header.edit_step(|h| h.memo = "after the files".into());
+    let before = s.save.count;
+    assert!(s.start_save(SaveIntent::Save, None) || s.save.count > before);
+    assert!(!s.conflict.is_open());
+    assert_eq!(s.save.count, before + 1);
+    assert_eq!(
+        stored(&link, id).txn.memo.as_deref(),
+        Some("after the files")
+    );
+}

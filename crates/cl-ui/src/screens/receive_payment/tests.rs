@@ -1034,3 +1034,32 @@ fn p33_their_amount_over_my_changed_applications_is_a_recheck_never_merged() {
     assert_eq!(s.form.memo, "mine", "my other change kept");
     assert_eq!(stored(&link, id).memo, None, "nothing saved yet");
 }
+
+/// U-291 S2 on a form without lines: a file attached to the open payment
+/// moves its stamp (the demo, as the engine, refuses a save on the old
+/// one); the form takes the upload's stamp and its next save goes on it.
+#[test]
+fn p33_an_attached_file_moves_the_payment_stamp_and_the_next_save_goes_on_it() {
+    let (_d, link) = link();
+    let (mut s, _other, id) = two_windows(&link);
+    let opened = s.editing.as_ref().map(|e| e.updated_at).expect("open");
+    s.upload_attachment("check.pdf".into(), b"%PDF-1.4\n%%EOF\n".to_vec());
+    for _ in 0..50 {
+        s.poll();
+        if s.attach.attached == 1 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(s.attach.attached, 1);
+    let now = stored(&link, id).updated_at;
+    assert!(now > opened, "the file moved the payment's stamp");
+    assert_eq!(s.editing.as_ref().map(|e| e.updated_at), Some(now));
+    s.form.memo = "after the file".into();
+    s.dirty = true;
+    let before = s.saved_count;
+    save_stay(&mut s);
+    assert!(s.conflict.open.is_none());
+    assert_eq!(s.saved_count, before + 1, "{:?} {:?}", s.notice, s.error);
+    assert_eq!(stored(&link, id).memo.as_deref(), Some("after the file"));
+}
