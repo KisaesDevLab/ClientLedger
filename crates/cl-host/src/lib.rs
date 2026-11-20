@@ -75,5 +75,5 @@ pub use paths::{
 pub use secrets::EngineSecrets;
 pub use supervisor::{
     Component, Endpoint, HostConfig, HostFault, HostSnapshot, HostState, HostStatus, RestartCounts,
-    RestartPolicy, Supervisor, in_memory_stores,
+    RestartPolicy, Supervisor, in_memory_stores, lan_generation,
 };

@@ -344,6 +344,7 @@ mod tests {
                 lan_token: None,
             }),
             generation,
+            boot_epoch: 0,
         }
     }
 
@@ -504,6 +505,7 @@ mod tests {
             status: status(state, None, 3),
             endpoint: None,
             generation: 3,
+            boot_epoch: 0,
         };
         f.set(snap(HostState::Starting));
         assert!(matches!(ep.current(), EndpointState::Starting));
@@ -591,6 +593,7 @@ mod tests {
                 status: status(state, None, 1),
                 endpoint: None,
                 generation: 1,
+                boot_epoch: 0,
             })));
             SupervisorProbe(fake as Arc<dyn SnapshotSource>).view()
         };

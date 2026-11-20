@@ -155,13 +155,23 @@ pub(crate) fn parse_info(body: &str) -> Result<DesktopInfo, DesktopError> {
 /// See [`DesktopError`]; an engine without `maintenance-v1` answers 404
 /// (`Refused`), which callers may ignore.
 pub fn maintenance_reset(port: u16, token: &Secret) -> Result<u64, DesktopError> {
+    maintenance_reset_within(port, token, TIMEOUT)
+}
+
+/// [`maintenance_reset`] with its own time limit (the supervisor's start
+/// path uses a short one).
+pub(crate) fn maintenance_reset_within(
+    port: u16,
+    token: &Secret,
+    timeout: Duration,
+) -> Result<u64, DesktopError> {
     let r = http::request(
         port,
         "POST",
         "/api/v1/desktop/maintenance/reset",
         token,
         Some("{}"),
-        TIMEOUT,
+        timeout,
     )
     .map_err(|e| DesktopError::Unreachable(e.kind().to_string()))?;
     if r.status != 200 && r.status != 201 {

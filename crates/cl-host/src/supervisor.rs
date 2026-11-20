@@ -308,6 +308,8 @@ impl HostConfig {
 struct Inner {
     status: HostStatus,
     endpoint: Option<Endpoint>,
+    /// See [`HostSnapshot::boot_epoch`]; fixed for this supervisor.
+    boot_epoch: u64,
     /// Set while the database runs (Q-335).
     statistics: Option<StatisticsRefresher>,
 }
@@ -321,6 +323,50 @@ pub struct HostSnapshot {
     pub endpoint: Option<Endpoint>,
     /// Same as `status.generation`; the endpoint, when present, has this value.
     pub generation: u64,
+    /// This supervisor's launch, ordered across app restarts (review S2):
+    /// larger than every earlier launch's on this computer. The office
+    /// network publishes `boot_epoch << 32 | generation`, so a workstation
+    /// sees a new engine after a host app restart even though the raw
+    /// generation starts again at 1.
+    pub boot_epoch: u64,
+}
+
+impl HostSnapshot {
+    /// The engine generation as other computers must see it: ordered
+    /// across host app restarts (see [`HostSnapshot::boot_epoch`]).
+    #[must_use]
+    pub fn lan_generation(&self) -> u64 {
+        lan_generation(self.boot_epoch, self.generation)
+    }
+}
+
+/// `epoch << 32 | generation` (the generation's low 32 bits; a host app
+/// would need four billion engine restarts in one run to wrap).
+#[must_use]
+pub fn lan_generation(boot_epoch: u64, generation: u64) -> u64 {
+    (boot_epoch << 32) | (generation & 0xffff_ffff)
+}
+
+/// The next launch epoch: the clock in seconds, but always above the last
+/// one recorded in `file` (a clock set back never reorders launches). The
+/// new value is written back. Fits 31 bits until 2038 and 32 until 2106.
+pub(crate) fn next_boot_epoch(file: &std::path::Path) -> u64 {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(1, |d| d.as_secs());
+    let last = std::fs::read_to_string(file)
+        .ok()
+        .and_then(|t| t.trim().parse::<u64>().ok())
+        .unwrap_or(0);
+    let epoch = now.max(last.saturating_add(1)) & 0xffff_ffff;
+    if let Some(dir) = file.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let tmp = file.with_extension("tmp");
+    if std::fs::write(&tmp, epoch.to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, file);
+    }
+    epoch
 }
 
 impl Inner {
@@ -342,6 +388,7 @@ impl Inner {
             generation: status.generation,
             status,
             endpoint,
+            boot_epoch: self.boot_epoch,
         }
     }
 }
@@ -415,6 +462,7 @@ impl Supervisor {
                 },
                 endpoint: None,
                 statistics: None,
+                boot_epoch: next_boot_epoch(&config.paths.root().join("engine-epoch")),
             }),
             changed: Condvar::new(),
         });
@@ -974,6 +1022,15 @@ impl Worker {
             if let (Some(proc), Some(r)) = (engine.as_ref(), report) {
                 generation += 1;
                 let (pid, port) = (proc.pid, proc.port);
+                // Review B1: a maintenance hold is always held by a session
+                // of this host process, so any hold that exists before the
+                // endpoint is published (sign-in, the LAN proxy) is stale:
+                // left by a crash, a kill or a power cut during a restore,
+                // an import or a payroll post. Clear it now, on every
+                // engine start, LAN host mode or not (the engine's gate
+                // covers every desktop). Never fatal: an engine without
+                // `maintenance-v1` answers 404.
+                self.clear_stale_maintenance(port, &token);
                 self.log.info("engine ready");
                 let tok = token.clone();
                 let lan_tok = lan_token.clone();
@@ -1157,6 +1214,23 @@ impl Worker {
             }
         });
         self.log.info("host stopped");
+    }
+
+    /// Clears a maintenance hold left from before this engine start (review
+    /// B1). Runs before the endpoint is published, so nothing can sign in
+    /// or reach the LAN proxy first. Failures are logged, never fatal.
+    fn clear_stale_maintenance(&self, port: u16, token: &Secret) {
+        match desktop::maintenance_reset_within(port, token, Duration::from_secs(15)) {
+            Ok(0) => {}
+            Ok(_) => self
+                .log
+                .warn("cleared a maintenance hold left from before this start"),
+            // No `maintenance-v1` (404) or not initialized yet: nothing held.
+            Err(DesktopError::Refused { status, .. }) if status == 404 || status == 409 => {}
+            Err(e) => self.log.warn(&format!(
+                "could not clear an old maintenance hold at start: {e}"
+            )),
+        }
     }
 
     /// Apply the log retention rule (30 days or 100 MB, Q-118).
@@ -1353,6 +1427,26 @@ pub fn in_memory_stores(mut config: HostConfig) -> HostConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review S2: every launch's epoch is above the last one, even within
+    /// the same second or with the clock set back, so `lan_generation`
+    /// after a host app restart is above every generation before it.
+    #[test]
+    fn launch_epochs_only_go_up_and_order_the_lan_generation() {
+        let dir = std::env::temp_dir().join(format!("cl-host-epoch-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = dir.join("engine-epoch");
+        let a = next_boot_epoch(&file);
+        let b = next_boot_epoch(&file);
+        assert!(b > a, "{a} then {b}");
+        // A clock far behind the recorded value: still above it.
+        std::fs::write(&file, "4000000000").unwrap();
+        assert_eq!(next_boot_epoch(&file), 4_000_000_001);
+        // The old run's third engine is below the new run's first.
+        assert!(lan_generation(b, 1) > lan_generation(a, 3));
+        assert_eq!(lan_generation(7, 2), (7 << 32) | 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn backoff_grows_then_repeats_the_last_value() {

@@ -90,7 +90,10 @@ pub fn upstream_of(snap: &cl_host::HostSnapshot) -> Option<Upstream> {
     Some(Upstream {
         port: ep.port,
         lan_token: cl_core::Secret::new(lan.expose()),
-        generation: ep.generation,
+        // Ordered across host app restarts (review S2): a workstation's
+        // uncertain save from before the restart settles, and it reads
+        // `/desktop/info` again.
+        generation: cl_host::lan_generation(snap.boot_epoch, ep.generation),
         engine_commit: snap.status.engine_commit.clone().unwrap_or_default(),
     })
 }
@@ -834,6 +837,7 @@ mod tests {
                 lan_token: lan.map(Secret::new),
             }),
             generation: 3,
+            boot_epoch: 0,
         }
     }
 

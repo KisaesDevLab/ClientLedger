@@ -15,6 +15,7 @@
 //! * `FAKE_HANG_HEALTH=1`: accept connections and never answer
 //! * `FAKE_SUPERUSER=1`: report a superuser database role
 //! * `FAKE_LEAK_TOKEN=1`: print the launch token to stderr before dying
+//! * `FAKE_RESET_LOG=<file>`: append a line per `maintenance/reset` call
 #![forbid(unsafe_code)]
 
 use std::fmt::Write as _;
@@ -142,6 +143,19 @@ fn handle(mut stream: TcpStream, token: &str, port: u16, initialized: &AtomicBoo
                     r#"{{"mode":"desktop","initialized":{init},"workspaceTenantId":{ws},"dbSuperuser":{superuser}}}"#
                 ),
             );
+        }
+        ("POST", "/api/v1/desktop/maintenance/reset") => {
+            // Records each call (with the time it came) so a test can see
+            // it arrived before anything else was let in.
+            if let Some(path) = env("FAKE_RESET_LOG") {
+                let mut f = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .expect("reset log");
+                let _ = writeln!(f, "reset");
+            }
+            respond(&mut stream, "200 OK", r#"{"cleared":false}"#);
         }
         ("POST", "/api/v1/desktop/initialize") => {
             if initialized.swap(true, Ordering::SeqCst) {

@@ -255,6 +255,35 @@ fn an_engine_killed_while_idle_is_restarted() {
     sup.stop();
 }
 
+/// Review B1: every engine start clears a stale maintenance hold before
+/// the endpoint is published (so before any sign-in or LAN proxy), and a
+/// restarted engine gets the same.
+#[test]
+fn every_engine_start_clears_old_maintenance_before_it_is_published() {
+    let scratch = Scratch::new("maintenance-reset");
+    let log = scratch.root.join("resets.txt");
+    let (_db, factory) = fake_db();
+    let cfg = fake_config(&scratch).with_engine_env("FAKE_RESET_LOG", log.to_str().unwrap());
+    let sup = start(cfg, factory).unwrap();
+    let resets = || {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+    // `start` returns once Running: the reset was already done.
+    assert_eq!(resets(), 1, "reset before the first endpoint");
+    common::kill_hard(sup.status().engine_pid.unwrap());
+    assert!(
+        sup.wait_for(Duration::from_secs(30), |s| s.generation == 2
+            && s.state == HostState::Running),
+        "engine was not restarted: {:?}",
+        sup.status()
+    );
+    assert_eq!(resets(), 2, "and again before the restarted engine's");
+    sup.stop();
+}
+
 #[test]
 fn the_reconnect_state_is_visible_while_restarting() {
     let scratch = Scratch::new("reconnect");
