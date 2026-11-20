@@ -669,7 +669,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.transfer.missing_files", "Some attached files are missing or changed on this computer."),
     ("fix.transfer.missing_files", "Open each record below and attach the file again, or remove the attachment. Saving again won't help until every file is fixed."),
     ("error.backup.missing_files", "The backup stopped because some attached files are missing or changed on this computer."),
-    ("fix.backup.missing_files", "Open each record listed and attach the file again, or remove the attachment. Backing up again won't help until every file is fixed."),
+    ("fix.backup.missing_files", "Use File › Back Up Company to see which files are missing, with Open record for each. Attach each file again or remove it; backing up again won't help until every file is fixed."),
     ("error.transfer.not_honoured", "The transfer file could not be made safely, so nothing was saved."),
     ("fix.transfer.not_honoured", "Update ClientLedger, then try again."),
     ("fix.transfer.not_honoured_left", "Update ClientLedger, then try again. A full copy of your books, sign-ins included, may be left in the engine's backup folder: delete it."),

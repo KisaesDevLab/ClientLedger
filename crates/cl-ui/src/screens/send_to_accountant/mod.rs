@@ -11,7 +11,9 @@
 //!   lifecycle queue (the transfer itself); the demo answers at once.
 //! - The passphrase lives in zeroizing [`SecretText`] buffers, cleared on
 //!   save, on cancel and when the window closes; it is never in `state()`,
-//!   logs or settings (Q-P32f).
+//!   logs or settings (Q-P32f). A passphrase made by Make one for me is
+//!   kept once more for the result panel (hidden until Show), and wiped on
+//!   the next Save and when the window closes (QA-2).
 //! - While a transfer runs, Close Company, Restore and Delete are disabled
 //!   (Q-P32u, [`transfer_running`]).
 

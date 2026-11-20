@@ -213,6 +213,13 @@ fn books_changed_elsewhere_read_the_totals_again() {
         4,
         "not while the result shows"
     );
+    // Kept for later: it runs once the result is cleared (the next Save).
+    fill(&mut s, "short");
+    s.save(None);
+    assert_eq!(s.state()["done"], false);
+    s.refresh_if_changed(true);
+    s.poll();
+    assert_eq!(s.state()["unposted_payroll"], 4, "the deferred refresh ran");
 }
 
 /// QA-14: discarding the waiting payroll imports tells other windows.
