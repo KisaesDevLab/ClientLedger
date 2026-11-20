@@ -337,19 +337,23 @@ fn generated(s: &mut SendScreen, ui: &mut Ui) {
     }
 }
 
+/// QA-9: the whole width, so the default name is never cut.
+fn file_name_row(s: &mut SendScreen, ui: &mut Ui) {
+    ui.horizontal(|ui| {
+        let l = ui.add(egui::Label::new(t("send.file_name")).selectable(false));
+        ui.add_sized(
+            [ui.available_width(), 24.0],
+            egui::TextEdit::singleline(&mut s.file_name),
+        )
+        .labelled_by(l.id);
+    });
+}
+
 fn file_card(s: &mut SendScreen, ui: &mut Ui, tokens: &Tokens, act: &mut Option<Act>) {
     let running = s.task.is_some() || s.held.is_some();
     form::card(ui, tokens, |ui| {
         ui.add_enabled_ui(!running, |ui| {
-            // QA-9: the whole width, so the default name is never cut.
-            ui.horizontal(|ui| {
-                let l = ui.add(egui::Label::new(t("send.file_name")).selectable(false));
-                ui.add_sized(
-                    [ui.available_width(), 24.0],
-                    egui::TextEdit::singleline(&mut s.file_name),
-                )
-                .labelled_by(l.id);
-            });
+            file_name_row(s, ui);
             ui.add_space(4.0);
             let a = form::password_secret(ui, &t("send.passphrase"), &mut s.passphrase);
             let b = form::password_secret(ui, &t("send.passphrase_again"), &mut s.again);
