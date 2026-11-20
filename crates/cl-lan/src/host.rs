@@ -535,7 +535,7 @@ async fn handle(
             "This computer is not set up to use the host. Pair it again.",
         );
     }
-    if !path.starts_with("/api/") {
+    if !forwardable(req.method(), &path) {
         return relay::error_response(404, "NOT_FOUND", "Not found.");
     }
     let up = match sh.upstream.state() {
@@ -588,6 +588,15 @@ async fn handle(
             relay::error_response(502, "LAN_UPSTREAM_FAILED", "The host stopped answering.")
         }
     }
+}
+
+/// Paths the proxy relays (Q-P33ae): the engine API, plus the probes
+/// cl-api reads (`GET /health`, `/ping`, `/openapi.json`). Anything else
+/// is answered 404 here and never reaches the engine.
+#[must_use]
+pub fn forwardable(method: &Method, path: &str) -> bool {
+    path.starts_with("/api/")
+        || (method == Method::GET && matches!(path, "/health" | "/ping" | "/openapi.json"))
 }
 
 fn now_ms() -> i64 {
@@ -736,6 +745,16 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_api_and_probes_are_forwarded() {
+        assert!(forwardable(&Method::POST, "/api/v1/transactions"));
+        assert!(forwardable(&Method::GET, "/health"));
+        assert!(forwardable(&Method::GET, "/openapi.json"));
+        assert!(!forwardable(&Method::POST, "/health"));
+        assert!(!forwardable(&Method::GET, "/admin"));
+        assert!(!forwardable(&Method::GET, "/"));
+    }
 
     #[test]
     fn civil_dates() {

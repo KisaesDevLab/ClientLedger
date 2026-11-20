@@ -885,6 +885,19 @@ impl Executor {
                     Step::Done(Err(keyed_give_up(ctx, r, e)))
                 }
             }
+            // LAN (P33): a read that met the host restarting, or a link that
+            // dropped before anything was sent, backs off like a 503. Saves
+            // never do (review S4): those refusals are final for mutations.
+            (
+                RetryClass::Idempotent,
+                ApiError::Lan(crate::LanRefusal::HostEngineDown | crate::LanRefusal::NotSent),
+            ) => {
+                if self.backoff(r, ctx.deadline).await {
+                    Step::Again
+                } else {
+                    Step::Done(Err(e))
+                }
+            }
             (
                 RetryClass::Idempotent,
                 ApiError::RateLimited {
@@ -2782,6 +2795,32 @@ pub(crate) mod tests {
                 .expect_err("refused");
             assert_eq!(e, ApiError::Lan(want), "{code}");
             assert_eq!(count(&server).await, 1, "{code}: sent once");
+        }
+    }
+
+    /// A read that meets a LAN refusal before any handler ran backs off and
+    /// tries again (the heartbeat may not have noticed the host yet).
+    #[tokio::test]
+    async fn lan_not_sent_and_host_restarting_reads_are_retried() {
+        for code in ["LAN_NOT_SENT", "HOST_ENGINE_DOWN"] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(json(
+                    503,
+                    &format!(r#"{{"error":{{"message":"x","code":"{code}"}}}}"#),
+                ))
+                .up_to_n_times(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .respond_with(json(200, "{}"))
+                .mount(&server)
+                .await;
+            let ex = exec_at(server.address().port());
+            ex.run(&get_op(), get_call(), &none(), None)
+                .await
+                .unwrap_or_else(|e| panic!("{code}: {e:?}"));
+            assert_eq!(count(&server).await, 2, "{code}");
         }
     }
 
