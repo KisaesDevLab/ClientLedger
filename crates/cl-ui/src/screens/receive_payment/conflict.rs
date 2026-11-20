@@ -250,10 +250,21 @@ impl ReceivePaymentScreen {
             ConflictChoice::UseTheirs => self.open_saved(open.theirs),
             ConflictChoice::KeepMine(_) => {
                 let c = open.dialog.conflict();
-                let their_apps = c
-                    .field_changes()
-                    .iter()
-                    .any(|f| f.field == "applications" && f.theirs_changed());
+                let changes = c.field_changes();
+                let changed = |name: &str, theirs: bool| {
+                    changes.iter().any(|f| {
+                        f.field == name
+                            && if theirs {
+                                f.theirs_changed()
+                            } else {
+                                f.mine_changed()
+                            }
+                    })
+                };
+                // Their applications, or their amount over my applications,
+                // could misapply money: never merged (Q-P33ao).
+                let their_apps = changed("applications", true)
+                    || (changed("amount", true) && changed("applications", false));
                 let theirs_form = self.form_of(&open.theirs);
                 if their_apps {
                     // Q-P33ao: their applications, my other changes; the
