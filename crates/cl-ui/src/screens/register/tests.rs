@@ -2996,3 +2996,144 @@ fn an_amount_edit_of_a_bank_feed_entry_warns() {
     assert!(s.feed_link_notice().is_some());
     assert!(crate::i18n::has("register.edit.feed_linked"));
 }
+
+// --- P33: someone else saved the edited transaction first -------------------
+
+/// A check entered and opened in the row of `s`, then changed in a second
+/// register window over the same books (their memo); `s` still holds the
+/// version it read.
+fn edited_then_changed_elsewhere(
+    link: &std::sync::Arc<crate::company::CompanyLink>,
+) -> (RegisterScreen, cl_core::ids::TransactionId) {
+    let mut s = screen(link);
+    settle(&mut s, None);
+    let fuel = demo_account(link, "6100");
+    let vendor = demo_contact(link, "Hollister Fuel Stop");
+    s.entry.form.edit_step(|d| {
+        d.payee = Some(vendor);
+        d.account = Some(fuel);
+        d.payment = Some(money("42.10"));
+        d.memo = "old memo".into();
+    });
+    assert!(s.start_record());
+    settle(&mut s, None);
+    let key = last_key(&mut s);
+    s.begin_edit(key, false);
+    let id = s.entry.editing.as_ref().expect("editing").id;
+    let mut other = screen(link);
+    settle(&mut other, None);
+    let key = last_key(&mut other);
+    other.begin_edit(key, false);
+    assert_eq!(other.entry.editing.as_ref().map(|e| e.id), Some(id));
+    other.entry.form.edit_step(|d| d.memo = "their memo".into());
+    assert!(other.start_record(), "their save");
+    (s, id)
+}
+
+/// The row as a fresh register window opens it now.
+fn reopened(link: &std::sync::Arc<crate::company::CompanyLink>) -> cl_model::register::EntryDraft {
+    let mut s = screen(link);
+    settle(&mut s, None);
+    let key = last_key(&mut s);
+    s.begin_edit(key, false);
+    s.entry.draft().clone()
+}
+
+#[test]
+fn p33_a_stale_row_edit_opens_the_dialog_and_keep_mine_merges() {
+    let (_d, link) = link();
+    let (mut s, id) = edited_then_changed_elsewhere(&link);
+    s.entry.form.edit_step(|d| d.payment = Some(money("50.00")));
+    assert!(!s.start_record());
+    assert!(s.txn_conflict.is_open(), "the dialog, not just the notice");
+    assert!(s.state()["conflict"].is_object());
+    let open = s.txn_conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(merge.undone.is_empty(), "{:?}", merge.undone);
+    s.run_txn_choice(
+        open,
+        crate::screens::conflict_dialog::ConflictChoice::KeepMine(merge),
+    );
+    assert!(s.entry.editing.is_none(), "saved: {:?}", s.entry.error);
+    let now = reopened(&link);
+    assert_eq!(now.memo, "their memo");
+    assert_eq!(now.payment, Some(money("50.00")), "my amount");
+    assert!(s.demo_txn(id).is_some());
+}
+
+#[test]
+fn p33_use_theirs_reopens_their_row_and_esc_is_back() {
+    let (_d, link) = link();
+    let (mut s, id) = edited_then_changed_elsewhere(&link);
+    s.entry.form.edit_step(|d| d.memo = "my memo".into());
+    assert!(!s.start_record());
+    assert!(s.txn_conflict.is_open());
+    assert!(s.command(CommandId::new("form.revert")), "Esc is Back");
+    assert!(!s.txn_conflict.is_open());
+    assert_eq!(s.entry.draft().memo, "my memo", "Back keeps mine");
+    assert!(s.stale(), "the changed-elsewhere notice stays");
+    assert!(!s.start_record());
+    let open = s.txn_conflict.open.take().expect("dialog again");
+    s.run_txn_choice(
+        open,
+        crate::screens::conflict_dialog::ConflictChoice::UseTheirs,
+    );
+    assert_eq!(s.entry.draft().memo, "their memo");
+    assert!(!s.entry_dirty());
+    assert!(!s.stale());
+    assert_eq!(s.entry.editing.as_ref().map(|e| e.id), Some(id));
+}
+
+#[test]
+fn p33_a_new_version_with_nothing_editable_changed_saves_without_asking() {
+    let (_d, link) = link();
+    let (mut s, id) = edited_then_changed_elsewhere(&link);
+    // Their save is put back to the memo this row opened with: the
+    // version moved, nothing editable differs.
+    let mut other = screen(&link);
+    settle(&mut other, None);
+    let key = last_key(&mut other);
+    other.begin_edit(key, false);
+    other.entry.form.edit_step(|d| d.memo = "old memo".into());
+    assert!(other.start_record());
+    s.entry.form.edit_step(|d| d.payment = Some(money("50.00")));
+    assert!(s.start_record(), "saved without asking");
+    assert!(!s.txn_conflict.is_open());
+    assert!(s.demo_txn(id).is_some());
+    let now = reopened(&link);
+    assert_eq!(now.payment, Some(money("50.00")));
+    assert_eq!(now.memo, "old memo");
+}
+
+#[test]
+fn p33_a_row_edit_removed_elsewhere_is_never_saved_again() {
+    let (_d, link) = link();
+    let (mut s, id) = edited_then_changed_elsewhere(&link);
+    link.demo_state()
+        .expect("demo")
+        .ledger
+        .void(id)
+        .expect("void");
+    s.entry.form.edit_step(|d| d.memo = "mine".into());
+    assert!(!s.start_record());
+    assert!(s.entry.editing.is_none());
+    assert_eq!(
+        s.entry.problems,
+        vec![cl_grid::TextKey("register.edit.removed_elsewhere")]
+    );
+}
+
+#[test]
+fn p33_the_row_dialog_names_accounts_and_amounts() {
+    let (_d, link) = link();
+    let (mut s, _id) = edited_then_changed_elsewhere(&link);
+    s.entry.form.edit_step(|d| d.memo = "my memo".into());
+    assert!(!s.start_record());
+    let open = s.txn_conflict.open.as_ref().expect("dialog");
+    for x in open.dialog.field_texts() {
+        for v in &x[1..] {
+            assert!(cl_core::ids::AccountId::parse(v).is_err(), "{x:?}");
+            assert!(cl_core::ids::ContactId::parse(v).is_err(), "{x:?}");
+        }
+    }
+}
