@@ -20,6 +20,7 @@
 //!
 //! Every engine call runs on the request queue and is polled each frame.
 
+mod conflict;
 mod form;
 pub mod model;
 mod sales;
@@ -223,6 +224,12 @@ pub struct CenterScreen {
     /// The contacts being read again after a save elsewhere: the cursor
     /// stays where it was and the keyboard is not moved.
     refreshing: bool,
+    /// P33: their contact being read after a stale save, then the dialog.
+    contact_conflict: crate::forms::conflict::ConflictFlow<Versioned<cl_api::Contact>>,
+    /// P33: the contact that read is for.
+    conflict_for: Option<ContactId>,
+    /// P33: one silent re-save per owner save.
+    resave_left: bool,
     /// The engine applies the closing date to merges and takes the
     /// closing-date password for them (`merge-closing-date-v1`, U-47).
     merge_closing: bool,
@@ -303,6 +310,9 @@ impl CenterScreen {
             just_hidden: None,
             bus: crate::data_bus::Subscription::detached(),
             refreshing: false,
+            contact_conflict: crate::forms::conflict::ConflictFlow::default(),
+            conflict_for: None,
+            resave_left: false,
             merge_closing: false,
             set_up: false,
         };
@@ -622,6 +632,7 @@ impl CenterScreen {
         }
         self.warn = None;
         self.panel = Panel::Form(Box::new(FormPanel::new_contact(self.role)));
+        self.contact_conflict.clear();
         self.open_sales(None);
     }
 
@@ -644,6 +655,7 @@ impl CenterScreen {
             .filter(|d| d.id == id)
             .and_then(|d| d.profile_value.clone());
         self.panel = Panel::Form(Box::new(FormPanel::edit(&c, profile.as_ref())));
+        self.contact_conflict.clear();
         self.open_sales(Some(id));
     }
 
@@ -726,6 +738,7 @@ impl CenterScreen {
         }
         self.warn = None;
         self.panel = Panel::None;
+        self.contact_conflict.clear();
         self.tab = Tab::Transactions;
         let reload = self.detail.as_ref().is_none_or(|d| d.id != id || !d.all);
         if reload {
@@ -761,6 +774,7 @@ impl CenterScreen {
             .contacts
             .iter()
             .any(|c| c.id == id && c.fields.is1099_eligible);
+        self.contact_conflict.clear();
         self.panel = Panel::Merge(Box::new(MergePanel {
             source: id,
             source_name: source.name,
@@ -1610,6 +1624,7 @@ impl CenterScreen {
     fn close_panel(&mut self) {
         let keep = self.selected();
         self.panel = Panel::None;
+        self.contact_conflict.clear();
         self.place_cursor(keep);
     }
 }
@@ -1665,6 +1680,7 @@ impl Screen for CenterScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.parts = EnvParts::capture(ui.ctx());
         self.poll();
+        self.poll_contact_conflict();
         self.hear_changes();
         self.sync_compact();
         let tokens = Tokens::of(ui.ctx());
@@ -1718,6 +1734,8 @@ impl Screen for CenterScreen {
             }
         });
         self.layout = frame.end();
+        let ctx = ui.ctx().clone();
+        self.contact_conflict_ui(&ctx);
     }
 
     fn fixed_layout(&self) -> bool {
@@ -1775,6 +1793,12 @@ impl Screen for CenterScreen {
                     p.form.undo();
                 } else {
                     p.form.redo();
+                }
+            }
+            // P33: Esc in the conflict dialog is Back.
+            "form.revert" if self.contact_conflict.is_open() => {
+                if let Some((open, choice)) = self.contact_conflict.take_back() {
+                    self.run_contact_choice(open, choice);
                 }
             }
             "form.revert" => match &mut self.panel {
@@ -1853,6 +1877,7 @@ impl Screen for CenterScreen {
             "error": error,
             "saving": saving,
             "toggling": self.toggle.is_some(),
+            "conflict": self.contact_conflict.state(),
             "warning": self.warn.map(|w| w.rsplit('.').next().unwrap_or_default()),
             "note": self.note.map(|n| n.rsplit('.').next().unwrap_or_default()),
             "balances_loaded": self.model.balances_loaded(),

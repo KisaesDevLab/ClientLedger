@@ -74,6 +74,10 @@ pub(super) struct FormPanel {
     w9_on_file: Option<bool>,
     /// A plain warning (i18n key) inside the panel.
     warn: Option<&'static str>,
+    /// P33: the contact as the panel opened it (an edit is guarded by it).
+    pub(super) opened: Option<Contact>,
+    /// P33: what the save in flight is for.
+    pub(super) intent: SaveIntent,
 }
 
 pub(super) fn kind_of(t: Option<TinType>) -> Option<TaxIdKind> {
@@ -136,6 +140,8 @@ impl FormPanel {
             profile_before: (None, false),
             w9_on_file: None,
             warn: None,
+            opened: None,
+            intent: SaveIntent::Save,
         }
     }
 
@@ -199,7 +205,27 @@ impl FormPanel {
             profile_before: (kind, backup),
             w9_on_file: profile.map(|p| p.w9_on_file),
             warn: None,
+            opened: Some(c.clone()),
+            intent: SaveIntent::Save,
         }
+    }
+
+    /// P33: their contact becomes the panel's as opened and shown; the
+    /// 1099 profile (its own record) and a typed tax ID stay as they were.
+    pub(super) fn take_theirs_record(&mut self, theirs: &Contact) {
+        let mut d = FormPanel::edit(theirs, None).form.current().clone();
+        let cur = self.form.current();
+        d.tax_id_kind = cur.tax_id_kind;
+        d.backup_withholding = cur.backup_withholding;
+        self.form.load(d);
+        self.saved_tax_id = theirs
+            .fields
+            .tax_id
+            .clone()
+            .filter(|x| !x.trim().is_empty());
+        self.error = None;
+        self.warn = None;
+        self.opened = Some(theirs.clone());
     }
 
     /// Esc on a dirty form: back to what was loaded, focus kept.
@@ -280,6 +306,16 @@ impl CenterScreen {
     /// Alt+N / Alt+S / Enter in a field. Returns true when the save
     /// finished at once (demo) or nothing needed saving.
     pub(super) fn save_form(&mut self, intent: SaveIntent) -> bool {
+        // P33: never while their contact is being read or the dialog is open.
+        if self.contact_conflict.busy() || self.contact_conflict.is_open() {
+            return false;
+        }
+        self.resave_left = true;
+        self.save_inner(intent)
+    }
+
+    /// The save itself (also the conflict flow's re-save).
+    pub(super) fn save_inner(&mut self, intent: SaveIntent) -> bool {
         let accounts = &self.accounts;
         let list = self.model.list();
         let Panel::Form(panel) = &mut self.panel else {
@@ -309,6 +345,7 @@ impl CenterScreen {
         };
         panel.problems.clear();
         panel.error = None;
+        panel.intent = intent;
         match panel.form.begin_save(intent) {
             SaveStart::Send(_) => {}
             SaveStart::Skip(after) => {
@@ -321,8 +358,15 @@ impl CenterScreen {
             }
             SaveStart::Busy | SaveStart::Unconfirmed => return false,
         }
+        // P33: an edit is guarded by the contact as the panel opened it,
+        // never by the list as it is now (a refresh would hide their change).
         let editing = panel.editing;
-        let existing = editing.and_then(|id| self.contacts.iter().find(|c| c.id == id).cloned());
+        let existing = editing.and_then(|id| {
+            panel
+                .opened
+                .clone()
+                .or_else(|| self.contacts.iter().find(|c| c.id == id).cloned())
+        });
         let fields = fields_for(&checked, existing.as_ref().map(|c| &c.fields));
         let vendor = checked.roles.has(Role::Vendor);
         let (kind0, backup0) = panel.profile_before;
@@ -337,6 +381,12 @@ impl CenterScreen {
             .door_open(cl_model::permissions::Door::Vendor1099Profile);
         let update = (profile_ok && !update.is_empty()).then_some(update);
         if self.link.is_demo() {
+            if let Some(c) = &existing
+                && let Err(e) = demo_guard_contact(&self.link, c)
+            {
+                self.contact_save_failed(e);
+                return false;
+            }
             let saved = demo_save(&self.link, existing, fields, update.as_ref());
             let Panel::Form(panel) = &mut self.panel else {
                 return false;
@@ -429,13 +479,44 @@ impl CenterScreen {
                 true
             }
             Err(e) => {
-                panel.save_failed(e);
+                self.contact_save_failed(e);
                 false
             }
         }
     }
 
+    /// A refused contact save. P33: someone else saved it first: their
+    /// contact, then the conflict dialog (or a silent re-save); deleted
+    /// elsewhere: never re-created.
+    fn contact_save_failed(&mut self, e: ApiError) {
+        let Panel::Form(panel) = &mut self.panel else {
+            return;
+        };
+        let stale = matches!(
+            e,
+            ApiError::Conflict {
+                reason: cl_api::ConflictReason::Stale,
+                ..
+            }
+        );
+        let gone = matches!(e, ApiError::NotFound { .. });
+        let (editing, intent) = (panel.editing, panel.intent);
+        panel.save_failed(e);
+        match editing {
+            Some(id) if stale => {
+                panel.error = None;
+                self.contact_conflict_start(id, intent);
+            }
+            Some(_) if gone => {
+                panel.error = None;
+                self.warn = Some(crate::forms::conflict::GONE);
+            }
+            _ => {}
+        }
+    }
+
     fn after_save(&mut self, after: AfterSave, saved: Option<ContactId>) {
+        self.contact_conflict.clear();
         match after {
             AfterSave::Stay => {
                 if let Some(c) = saved.and_then(|id| self.contacts.iter().find(|c| c.id == id)) {
@@ -885,6 +966,32 @@ fn address_ui(
                 *get(addr) = v;
             });
         }
+    }
+}
+
+/// P33: the demo's version check (`expectedUpdatedAt`): the stored
+/// contact must still be the one the panel opened.
+fn demo_guard_contact(
+    link: &crate::company::CompanyLink,
+    opened: &Contact,
+) -> Result<(), ApiError> {
+    let mut d = link.demo_state().ok_or(ApiError::NoCompanyOpen)?;
+    let now = d
+        .contacts_mut()
+        .iter()
+        .find(|x| x.id == opened.id)
+        .cloned()
+        .ok_or(ApiError::NotFound { code: None })?;
+    if now.fingerprint() == opened.fingerprint() {
+        Ok(())
+    } else {
+        Err(ApiError::Conflict {
+            reason: cl_api::ConflictReason::Stale,
+            current_version: None,
+            code: None,
+            message: cl_api::UserText::default(),
+            details: cl_api::ConflictDetails::default(),
+        })
     }
 }
 

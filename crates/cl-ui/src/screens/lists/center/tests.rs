@@ -709,3 +709,202 @@ fn only_a_live_payment_row_offers_record_bounced_check() {
     assert!(!can_bounce(&row(T::CustomerPayment, S::Void)));
     assert!(!can_bounce(&row(T::Invoice, S::Posted)));
 }
+
+// --- P33: someone else saved the contact first ------------------------------
+
+use crate::screens::conflict_dialog::ConflictChoice;
+
+fn stored(r: &Rig, id: ContactId) -> cl_api::Contact {
+    let mut d = r.link.demo_state().expect("demo");
+    d.contacts_mut()
+        .iter()
+        .find(|c| c.id == id)
+        .cloned()
+        .expect("contact")
+}
+
+fn change_in_books(r: &Rig, id: ContactId, f: impl FnOnce(&mut cl_api::Contact)) {
+    let mut d = r.link.demo_state().expect("demo");
+    let c = d
+        .contacts_mut()
+        .iter_mut()
+        .find(|c| c.id == id)
+        .expect("contact");
+    f(c);
+}
+
+/// The first active contact of `role`, open in the panel; someone else
+/// then sets its notes in the books, and the list is read again.
+fn opened_then_changed_elsewhere(role: Role) -> (Rig, ContactId) {
+    let mut r = Rig::new(role);
+    let id =
+        r.s.contacts
+            .iter()
+            .find(|c| c.is_active && super::model::roles_of(c.fields.contact_type).has(role))
+            .map(|c| c.id)
+            .expect("a contact");
+    r.s.place_cursor(Some(id));
+    r.frames(2);
+    r.s.open_edit(Some(id));
+    r.frames(1);
+    change_in_books(&r, id, |c| c.fields.notes = Some("theirs".into()));
+    r.s.start_load();
+    r.frames(2);
+    (r, id)
+}
+
+#[test]
+fn p33_an_edit_is_guarded_by_the_contact_as_opened_for_clients_and_vendors() {
+    for role in [Role::Client, Role::Vendor] {
+        let (mut r, id) = opened_then_changed_elsewhere(role);
+        let before = stored(&r, id).fields.display_name;
+        r.form().form.edit_step(|d| d.phone = "555-0100".into());
+        r.s.save_form(SaveIntent::Save);
+        assert!(r.s.contact_conflict.is_open(), "{role:?}: never hidden");
+        assert_eq!(stored(&r, id).fields.display_name, before);
+        assert_ne!(stored(&r, id).fields.phone.as_deref(), Some("555-0100"));
+        assert!(r.s.state()["conflict"].is_object());
+        assert!(!r.s.save_form(SaveIntent::Save), "no save while it is open");
+    }
+}
+
+#[test]
+fn p33_keep_mine_takes_their_notes_and_keeps_my_phone() {
+    for role in [Role::Client, Role::Vendor] {
+        let (mut r, id) = opened_then_changed_elsewhere(role);
+        r.form().form.edit_step(|d| d.phone = "555-0100".into());
+        r.s.save_form(SaveIntent::Save);
+        let open = r.s.contact_conflict.open.take().expect("dialog");
+        let merge = open.dialog.conflict().keep_mine();
+        assert!(merge.undone.is_empty());
+        r.s.run_contact_choice(open, ConflictChoice::KeepMine(merge));
+        let c = stored(&r, id);
+        assert_eq!(c.fields.phone.as_deref(), Some("555-0100"), "{role:?}");
+        assert_eq!(c.fields.notes.as_deref(), Some("theirs"), "{role:?}");
+    }
+}
+
+#[test]
+fn p33_use_theirs_shows_their_contact_and_esc_is_back() {
+    let (mut r, id) = opened_then_changed_elsewhere(Role::Vendor);
+    r.form().form.edit_step(|d| d.notes = "mine".into());
+    r.s.save_form(SaveIntent::Save);
+    assert!(r.s.contact_conflict.is_open());
+    assert!(r.cmd("form.revert"), "Esc is Back");
+    assert!(!r.s.contact_conflict.is_open());
+    assert_eq!(r.form().form.current().notes, "mine", "Back keeps mine");
+    assert_eq!(r.s.state()["warning"], "changed_elsewhere");
+    r.s.save_form(SaveIntent::Save);
+    let open = r.s.contact_conflict.open.take().expect("dialog again");
+    r.s.run_contact_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(r.form().form.current().notes, "theirs");
+    assert!(!r.form().form.is_dirty());
+    assert_eq!(stored(&r, id).fields.notes.as_deref(), Some("theirs"));
+}
+
+#[test]
+fn p33_a_new_version_with_nothing_editable_changed_saves_without_asking() {
+    let mut r = Rig::new(Role::Client);
+    let id =
+        r.s.contacts
+            .iter()
+            .find(|c| c.is_active)
+            .map(|c| c.id)
+            .expect("c");
+    r.s.place_cursor(Some(id));
+    r.frames(2);
+    r.s.open_edit(Some(id));
+    // The panel's copy is older than the books in a field it never edits.
+    if let Some(o) = r.form().opened.as_mut() {
+        o.is_active = false;
+    }
+    r.form().form.edit_step(|d| d.phone = "555-0100".into());
+    r.s.save_form(SaveIntent::Save);
+    assert!(!r.s.contact_conflict.is_open());
+    let c = stored(&r, id);
+    assert_eq!(c.fields.phone.as_deref(), Some("555-0100"));
+    assert!(c.is_active, "their active flag is kept");
+}
+
+#[test]
+fn p33_a_second_stale_save_in_a_row_says_so_instead_of_looping() {
+    let mut r = Rig::new(Role::Client);
+    let id =
+        r.s.contacts
+            .iter()
+            .find(|c| c.is_active)
+            .map(|c| c.id)
+            .expect("c");
+    r.s.place_cursor(Some(id));
+    r.frames(2);
+    r.s.open_edit(Some(id));
+    r.form().form.edit_step(|d| d.phone = "555-0100".into());
+    let theirs = stored(&r, id);
+    r.s.conflict_for = Some(id);
+    r.s.resave_left = false;
+    r.s.contact_conflict_read(
+        Ok(cl_api::Versioned {
+            version: cl_api::RecordVersion::Fingerprint(cl_api::EditableFields::fingerprint(
+                &theirs,
+            )),
+            record: theirs,
+            stock_warnings: Vec::new(),
+        }),
+        SaveIntent::Save,
+    );
+    assert_eq!(r.s.state()["warning"], "changed_elsewhere");
+    assert_ne!(stored(&r, id).fields.phone.as_deref(), Some("555-0100"));
+}
+
+#[test]
+fn p33_a_contact_deleted_elsewhere_is_never_recreated() {
+    let (mut r, id) = opened_then_changed_elsewhere(Role::Client);
+    r.link
+        .demo_state()
+        .expect("demo")
+        .contacts_mut()
+        .retain(|c| c.id != id);
+    r.form().form.edit_step(|d| d.phone = "555-0100".into());
+    r.s.save_form(SaveIntent::Save);
+    assert_eq!(r.s.warn, Some(crate::forms::conflict::GONE));
+    assert!(
+        r.link
+            .demo_state()
+            .expect("demo")
+            .contacts_mut()
+            .iter()
+            .all(|c| c.id != id)
+    );
+}
+
+#[test]
+fn p33_the_dialog_names_roles_terms_and_accounts_never_codes() {
+    let (mut r, id) = opened_then_changed_elsewhere(Role::Vendor);
+    let account = r.s.accounts.first().map(|a| a.id).expect("an account");
+    change_in_books(&r, id, |c| {
+        c.fields.default_payment_terms = Some("net_30".into());
+        c.fields.default_expense_account_id = Some(account);
+        c.fields.contact_type = if c.fields.contact_type == cl_api::ContactType::Both {
+            cl_api::ContactType::Vendor
+        } else {
+            cl_api::ContactType::Both
+        };
+    });
+    r.form().form.edit_step(|d| d.phone = "555-0100".into());
+    r.s.save_form(SaveIntent::Save);
+    let open = r.s.contact_conflict.open.as_ref().expect("dialog");
+    let texts = open.dialog.field_texts();
+    for x in &texts {
+        for v in &x[1..] {
+            assert!(cl_core::ids::AccountId::parse(v).is_err(), "{x:?}");
+            assert!(
+                !["net_30", "both", "vendor", "customer"].contains(&v.as_str()),
+                "{x:?}"
+            );
+        }
+    }
+    let label = |k: &str| crate::i18n::t(&format!("lan.field.{k}"));
+    assert!(texts.iter().any(|x| x[0] == label("terms")));
+    assert!(texts.iter().any(|x| x[0] == label("contactType")));
+    assert!(texts.iter().any(|x| x[0] == label("expenseAccount")));
+}
