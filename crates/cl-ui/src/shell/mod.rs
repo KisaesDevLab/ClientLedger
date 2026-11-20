@@ -1623,7 +1623,11 @@ impl Shell {
         });
         match self.lan.overlay(&ctx, dirty, setup_in_front) {
             crate::lan_status::Overlay::None => {}
-            crate::lan_status::Overlay::Covered => self.pending.clear(),
+            // The demo office network's own link commands (`dev.lan_*`)
+            // still run: they stand for the host answering again.
+            crate::lan_status::Overlay::Covered => {
+                self.pending.retain(|c| c.as_str().starts_with("dev.lan_"))
+            }
             crate::lan_status::Overlay::OpenSetup => {
                 self.pending.clear();
                 self.pending
