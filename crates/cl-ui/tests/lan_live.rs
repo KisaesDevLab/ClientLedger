@@ -455,13 +455,15 @@ fn is_retry(e: &ApiError) -> bool {
     e.to_string().contains("RETRY")
 }
 
-/// Replays a keyed save after a deadlock refusal, at most 3 times.
+/// Replays a keyed save after a deadlock refusal (at most 3 times) or a
+/// 429 (the per-device limit, 1200 a minute: waits as told, at most 20
+/// times). Neither counts as a failure or a lost update.
 fn keyed<T>(
     t: &mut Tally,
     mut save: impl FnMut(IdempotencyKey) -> Result<T, ApiError>,
 ) -> Result<T, ApiError> {
     let k = key();
-    let mut tries = 0;
+    let (mut tries, mut limited) = (0, 0);
     loop {
         match save(k.clone()) {
             Err(e) if is_retry(&e) && tries < 3 => {
@@ -469,10 +471,33 @@ fn keyed<T>(
                 t.deadlock_replays += 1;
                 std::thread::sleep(Duration::from_millis(200 * tries));
             }
+            Err(ApiError::RateLimited { retry_after }) if limited < 20 => {
+                limited += 1;
+                t.rate_limited += 1;
+                std::thread::sleep(retry_after.unwrap_or(Duration::from_secs(1)));
+            }
             other => return other,
         }
     }
 }
+
+/// A read, backing off on 429 like [`keyed`].
+fn read<T>(t: &mut Tally, mut get: impl FnMut() -> Result<T, ApiError>) -> Result<T, ApiError> {
+    for _ in 0..20 {
+        match get() {
+            Err(ApiError::RateLimited { retry_after }) => {
+                t.rate_limited += 1;
+                std::thread::sleep(retry_after.unwrap_or(Duration::from_secs(1)));
+            }
+            other => return other,
+        }
+    }
+    get()
+}
+
+/// Each soak client's pace: about 6 requests a second, well under the
+/// per-device 1200 a minute.
+const PACE: Duration = Duration::from_millis(150);
 
 fn is_stale(e: &ApiError) -> bool {
     matches!(
@@ -832,6 +857,10 @@ struct Tally {
     /// after cl-api's own resend; nothing saved), replayed with the same
     /// idempotency key as the owner's next save would be.
     deadlock_replays: u64,
+    /// 429 answers waited out (the per-device limit), never failures.
+    rate_limited: u64,
+    /// Save round trips (ms), for the Q-P33q budget.
+    save_ms: Vec<u64>,
     /// 5xx answers or other failures (must stay 0).
     failures: Vec<String>,
 }
@@ -868,6 +897,10 @@ static SEEN_READS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashSe
 
 const CLIENTS: usize = 5;
 const SHARED: usize = 3;
+
+fn ms(d: Duration) -> u64 {
+    u64::try_from(d.as_millis()).unwrap_or(u64::MAX)
+}
 
 fn counter_memo(base: &str, n: u64) -> String {
     format!("{base} #{n}")
@@ -936,6 +969,24 @@ fn soak(host: &Host, scratch: &Path, run_for: Duration) {
     let conflicts: u64 = tallies.iter().map(|t| t.conflicts).sum();
     let lost: u64 = tallies.iter().map(|t| t.lost).sum();
     let replays: u64 = tallies.iter().map(|t| t.deadlock_replays).sum();
+    let limited: u64 = tallies.iter().map(|t| t.rate_limited).sum();
+    let mut lat: Vec<u64> = tallies
+        .iter()
+        .flat_map(|t| t.save_ms.iter().copied())
+        .collect();
+    lat.sort_unstable();
+    let pct = |p: usize| {
+        lat.get((lat.len() * p / 100).min(lat.len().saturating_sub(1)))
+            .copied()
+    };
+    eprintln!(
+        "soak: save round trip through the proxy p50 {:?} ms, p95 {:?} ms, p99 {:?} ms, max {:?} ms ({} saves); {limited} 429s waited out",
+        pct(50),
+        pct(95),
+        pct(99),
+        lat.last(),
+        lat.len()
+    );
     let failures: Vec<&String> = tallies.iter().flat_map(|t| &t.failures).collect();
     eprintln!(
         "soak: {CLIENTS} clients, {:?}: {saves} saves, {reads} reads, {conflicts} resolved conflicts, {replays} deadlock replays, {lost} lost, {} failures",
@@ -996,6 +1047,7 @@ fn soak_client(
     let mut n: u64 = 0;
     while Instant::now() < deadline {
         n += 1;
+        std::thread::sleep(PACE);
         // Amounts from integer minor units: 1.00 to 9.99.
         let cents = 100 + (n * 37 + i as u64 * 11) % 900;
         let amount = Money::from_cents(i64::try_from(cents).unwrap_or(100))
@@ -1005,7 +1057,7 @@ fn soak_client(
             // 10%: bump a shared record's counter (read, then save on it).
             let k = (usize::try_from(n).unwrap_or(0) + i) % shared.len();
             loop {
-                let got = match desk.run(s.transactions().get(shared[k])) {
+                let got = match read(&mut t, || desk.run(s.transactions().get(shared[k]))) {
                     Ok(g) => g,
                     Err(e) => {
                         t.failures.push(format!("read shared: {e}"));
@@ -1019,15 +1071,20 @@ fn soak_client(
                 // reconciled as "already saved" from the other's write.
                 let memo = format!("{} by {i}", counter_memo(&format!("shared {k}"), now + 1));
                 let entry = je2(on(), &memo, supplies, cash, "1.00");
+                let mut lat = Vec::new();
                 let saved = keyed(&mut t, |k2| {
-                    desk.run(s.transactions().update_journal_entry(
+                    let at = Instant::now();
+                    let r = desk.run(s.transactions().update_journal_entry(
                         shared[k],
                         &got.version,
                         &entry,
                         &PostingOptions::default(),
                         k2,
-                    ))
+                    ));
+                    lat.push(at.elapsed());
+                    r
                 });
+                t.save_ms.extend(lat.iter().map(|d| ms(*d)));
                 match saved {
                     Ok(saved) => {
                         t.saves += 1;
@@ -1062,20 +1119,25 @@ fn soak_client(
             }
         } else {
             let entry = je2(on(), &unique(&format!("soak {i}")), supplies, cash, &amount);
+            let mut lat = Vec::new();
             let made = keyed(&mut t, |k2| {
-                desk.run(s.transactions().create_journal_entry(
+                let at = Instant::now();
+                let r = desk.run(s.transactions().create_journal_entry(
                     &entry,
                     &PostingOptions::default(),
                     k2,
-                ))
+                ));
+                lat.push(at.elapsed());
+                r
             });
+            t.save_ms.extend(lat.iter().map(|d| ms(*d)));
             match made {
                 Ok(_) => t.saves += 1,
                 Err(e) => t.failures.push(format!("entry: {e}")),
             }
             // The UI's read pattern after a change: the entry list.
             if n.is_multiple_of(3) {
-                match desk.run(s.ledger_version()) {
+                match read(&mut t, || desk.run(s.ledger_version())) {
                     Ok(_) => t.reads += 1,
                     Err(e) => t.failures.push(format!("ledger version: {e}")),
                 }

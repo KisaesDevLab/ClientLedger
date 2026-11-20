@@ -156,30 +156,43 @@ impl Client {
     }
 }
 
-/// Who holds maintenance (U-293, provisional).
+/// Who holds maintenance (U-293, `maintenance-v1`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct MaintenanceState {
     /// Maintenance is on: only the holder may work.
-    pub on: bool,
-    /// The holder is this session.
-    pub mine: bool,
+    pub active: bool,
+    /// The holder's session chain (compare with the signed-in one).
+    pub holder_session: Option<String>,
+    /// The holder's user id.
+    pub holder_user: Option<String>,
     /// When it started (ISO).
-    pub since: Option<String>,
+    pub started_at: Option<String>,
 }
 
-/// One change (U-294, provisional): ids and kinds only.
+/// What happened to one record (U-294).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ChangeOp {
+    /// Created or changed: read it again.
+    Upsert,
+    /// Deleted.
+    Delete,
+    /// Moved out of this viewer's sight (a hidden account): drop it.
+    Left,
+}
+
+/// One change (U-294, `changes-v1`): ids and kinds only.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeItem {
-    /// `transaction`, `account`, `contact`, `item`, `tag`, ...
+    /// The table: `transactions`, `accounts`, `contacts`, `items`,
+    /// `tags`, `companies`, ...
     pub kind: String,
     /// The record's id.
-    #[serde(default)]
-    pub entity_id: Option<String>,
-    /// `insert`, `update`, `delete` or `left` (moved out of sight).
-    #[serde(default)]
-    pub op: Option<String>,
+    pub id: String,
+    /// The latest operation on it.
+    pub op: ChangeOp,
 }
 
 /// One page of the change feed.
@@ -276,7 +289,7 @@ impl Session {
         self.require(Capabilities::MAINTENANCE)?;
         let call = Call::at(Method::Post, MAINTENANCE_START.route())
             .json_body(b"{}".to_vec())
-            .timeout(TimeoutClass::Auth);
+            .timeout(TimeoutClass::Write);
         let reply = self.send(&MAINTENANCE_START, call, None).await?;
         decode(&reply, "maintenance")
     }
@@ -287,9 +300,7 @@ impl Session {
     /// `Local(Unsupported)`; any [`ApiError`].
     pub async fn end_maintenance(&self) -> Result<MaintenanceState, ApiError> {
         self.require(Capabilities::MAINTENANCE)?;
-        let call = Call::at(Method::Post, MAINTENANCE_END.route())
-            .json_body(b"{}".to_vec())
-            .timeout(TimeoutClass::Auth);
+        let call = Call::at(Method::Delete, MAINTENANCE_END.route()).timeout(TimeoutClass::Auth);
         let reply = self.send(&MAINTENANCE_END, call, None).await?;
         decode(&reply, "maintenance")
     }
@@ -480,12 +491,13 @@ mod tests {
             .respond_with(json(
                 200,
                 r#"{"cursor":"9","feedEpoch":"e1","reset":false,
-                   "changes":[{"kind":"transaction","entityId":"t1","op":"update"}]}"#,
+                   "changes":[{"kind":"transactions","id":"t1","op":"upsert"},
+                              {"kind":"accounts","id":"a1","op":"left"}]}"#,
             ))
             .mount(&server)
             .await;
         Mock::given(method("POST"))
-            .and(path("/api/v1/desktop/maintenance/start"))
+            .and(path("/api/v1/desktop/maintenance"))
             .respond_with(json(
                 409,
                 r#"{"error":{"code":"MAINTENANCE_BUSY","message":"busy"}}"#,
@@ -496,7 +508,9 @@ mod tests {
             session_with_caps(&server, &[Capabilities::CHANGES, Capabilities::MAINTENANCE]).await;
         let page = s.changes(Some("8")).await.expect("page");
         assert_eq!(page.cursor.as_deref(), Some("9"));
-        assert_eq!(page.changes[0].kind, "transaction");
+        assert_eq!(page.changes[0].kind, "transactions");
+        assert_eq!(page.changes[0].op, ChangeOp::Upsert);
+        assert_eq!(page.changes[1].op, ChangeOp::Left);
         let g = requests(&server, "GET").await;
         assert!(g.iter().any(|r| query(r) == "cursor=8"));
         assert!(matches!(

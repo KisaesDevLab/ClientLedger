@@ -115,7 +115,7 @@ pub use resources::items::{
     OpeningStock, UNIT_LABEL_MAX_CHARS, UnitPrice,
 };
 pub use resources::lan::{
-    ChangeItem, ChangePage, LanAuditEvent, LanSession, MaintenanceState, is_device_id,
+    ChangeItem, ChangeOp, ChangePage, LanAuditEvent, LanSession, MaintenanceState, is_device_id,
 };
 pub use resources::ledger::LedgerStamp;
 pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, ContactImportRow};

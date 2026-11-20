@@ -695,21 +695,25 @@ pub(crate) const LAN_AUDIT_EVENT: Operation = op(
     TimeoutClass::Auth,
     false,
 );
-/// Maintenance state (U-293, provisional shape).
+/// Maintenance state (U-293).
 pub(crate) const MAINTENANCE_STATUS: Operation = session_read("/api/v1/desktop/maintenance");
-/// Take maintenance (drains, then ends the other sessions). Never retried.
+/// Take maintenance (drains writes up to 30 s, then ends the other
+/// sessions). Never retried.
 pub(crate) const MAINTENANCE_START: Operation = workspace_once(
-    "/api/v1/desktop/maintenance/start",
+    "/api/v1/desktop/maintenance",
+    RouteKind::Session,
+    TimeoutClass::Write,
+);
+/// Give maintenance back (the holder only). Never retried.
+pub(crate) const MAINTENANCE_END: Operation = op(
+    Method::Delete,
+    "/api/v1/desktop/maintenance",
+    RetryClass::Never,
     RouteKind::Session,
     TimeoutClass::Auth,
+    false,
 );
-/// Give maintenance back. Never retried.
-pub(crate) const MAINTENANCE_END: Operation = workspace_once(
-    "/api/v1/desktop/maintenance/end",
-    RouteKind::Session,
-    TimeoutClass::Auth,
-);
-/// The change feed of the open company (U-294, provisional shape).
+/// The change feed of the open company (U-294).
 pub(crate) const CHANGES: Operation = read("/api/v1/changes");
 
 // ---- P11 contacts and centers -----------------------------------------------
@@ -2162,8 +2166,8 @@ const QUERY_POSTS: [(&str, &str); 2] = [
 const NEVER_RETRIED: [(&str, &str); 10] = [
     // P33: one audit row per event; maintenance is never retried (S4).
     ("POST", "/api/v1/desktop/audit-events"),
-    ("POST", "/api/v1/desktop/maintenance/start"),
-    ("POST", "/api/v1/desktop/maintenance/end"),
+    ("POST", "/api/v1/desktop/maintenance"),
+    ("DELETE", "/api/v1/desktop/maintenance"),
     ("POST", "/api/v1/tenants"),
     ("POST", "/api/v1/tenants/{id}/delete"),
     ("POST", "/api/v1/desktop/recover-password"),
