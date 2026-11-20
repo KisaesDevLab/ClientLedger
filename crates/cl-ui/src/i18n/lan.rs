@@ -99,17 +99,11 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lan.status.workstation", "Multi-user: {state}"),
     // Host down overlay.
     ("lan.down.title", "The host computer isn't answering"),
-    ("lan.down.explain", "Your work is safe. Nothing more is sent until the host is back. Unsaved forms stay open on this computer until you close ClientLedger."),
-    ("lan.down.check", "Check again"),
-    ("lan.down.kept", "{n} unsaved forms are kept. Each is offered again when the host answers; nothing is sent until you save it."),
-    ("lan.down.kept.one", "1 unsaved form is kept. It is offered again when the host answers; nothing is sent until you save it."),
     ("lan.down.back", "The host is answering again. Your unsaved forms are still open; review each one and save it yourself."),
     ("lan.down.replay", "A save was on its way when the host stopped answering. Check again first: it asks the host whether that save went through, so it is never saved twice."),
     // Maintenance.
     ("lan.maint.title", "The host computer is doing maintenance"),
     ("lan.maint.explain", "Someone on the host computer is restoring, importing or undoing an import. You can keep reading; saving waits until they finish. Unsaved forms stay open."),
-    ("lan.host_only", "Do this on the host computer."),
-    ("lan.host_only.tip", "Restoring, importing, payroll posting and deleting a company change the whole set of books, so they run only on the host computer, with a backup first."),
     // Conflict dialog.
     ("lan.conflict.title", "Someone else changed this while you were editing"),
     ("lan.conflict.explain", "{who} saved this record after you opened it. Choose what to keep."),
