@@ -605,6 +605,67 @@ fn lane_actions_are_44_points_tall() {
     }
 }
 
+/// QA-7: on a workstation Send to My Accountant is shown but can't be
+/// clicked, with "Do this on the host computer." as visible text Tab
+/// reaches; on the host or alone it is a live button.
+#[test]
+fn a_workstation_shows_host_only_lane_actions_disabled_with_the_reason() {
+    use eframe::egui::{Pos2, RawInput, Rect, accesskit::Action, vec2};
+    let nodes = |h: &mut HomeScreen| {
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        ctx.enable_accesskit();
+        let mut all = std::collections::HashMap::new();
+        for _ in 0..4 {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1440.0, 940.0))),
+                ..RawInput::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| h.ui(ui));
+            });
+            out.textures_delta.clear();
+            if let Some(t) = out.platform_output.accesskit_update {
+                all.extend(t.nodes);
+            }
+        }
+        all.into_values().collect::<Vec<_>>()
+    };
+    let send = lanes::action_label("company.send_to_accountant");
+    let reason = t("lan.host_only");
+    assert_eq!(reason, "Do this on the host computer.");
+    let (_d, link) = demo_link();
+    let mut h = home(&link);
+    let alone = nodes(&mut h);
+    let b = alone
+        .iter()
+        .find(|n| n.role() == Role::Button && n.label() == Some(send.as_str()))
+        .expect("Send to My Accountant");
+    assert!(!b.is_disabled());
+    assert!(!alone.iter().any(|n| n.value() == Some(reason.as_str())));
+
+    assert!(crate::lan_status::LanShell::command(
+        &link,
+        "dev.lan_host_up"
+    ));
+    assert!(h.workstation());
+    let ws = nodes(&mut h);
+    let b = ws
+        .iter()
+        .find(|n| n.role() == Role::Button && n.label() == Some(send.as_str()))
+        .expect("still shown");
+    assert!(b.is_disabled());
+    let r = ws
+        .iter()
+        .find(|n| {
+            n.role() == Role::Label
+                && (n.value() == Some(reason.as_str()) || n.label() == Some(reason.as_str()))
+        })
+        .expect("the reason as text");
+    assert!(r.supports_action(Action::Focus));
+}
+
 #[test]
 fn every_lane_action_opens_its_form_or_a_tracked_placeholder() {
     let (_d, link) = demo_link();

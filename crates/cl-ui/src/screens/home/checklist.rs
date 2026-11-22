@@ -178,14 +178,26 @@ pub(crate) fn line_text(c: &Checklist) -> String {
 }
 
 /// The line at the right end of the title row: "Setup checklist 5 of 6
-/// done · Set up email for invoices". Drawn right to left.
-pub(super) fn top_line(ui: &mut Ui, tokens: &Tokens, c: &Checklist) -> Option<Action> {
+/// done · Set up email for invoices". Drawn right to left. On a
+/// workstation (`ws`) a host-only step is plain text, not a link (QA-7).
+pub(super) fn top_line(ui: &mut Ui, tokens: &Tokens, c: &Checklist, ws: bool) -> Option<Action> {
     let mut action = None;
     ui.spacing_mut().item_spacing.x = 4.0;
     if let Some(item) = c.first_open() {
-        let r = ui.link(RichText::new(label(item)).size(12.0));
-        if activated(&r) {
-            action = Some(Action::Open(item.opens()));
+        if crate::lan_status::host_only(ws, item.opens()) {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(label(item))
+                        .size(12.0)
+                        .color(tokens.text_secondary),
+                )
+                .selectable(false),
+            );
+        } else {
+            let r = ui.link(RichText::new(label(item)).size(12.0));
+            if activated(&r) {
+                action = Some(Action::Open(item.opens()));
+            }
         }
         ui.add(
             egui::Label::new(
@@ -217,8 +229,15 @@ pub(super) fn top_line(ui: &mut Ui, tokens: &Tokens, c: &Checklist) -> Option<Ac
 
 /// The full list: each step with its tick, a link for the open ones, and
 /// Hide checklist (an Admin's: it hides the list for everyone in the
-/// company, P29 QA-5).
-pub(super) fn card(ui: &mut Ui, tokens: &Tokens, c: &Checklist, can_hide: bool) -> Option<Action> {
+/// company, P29 QA-5). On a workstation (`ws`) a host-only step (the first
+/// backup) says "Do this on the host computer." instead of a link (QA-7).
+pub(super) fn card(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    c: &Checklist,
+    can_hide: bool,
+    ws: bool,
+) -> Option<Action> {
     let mut action = None;
     heading(
         ui,
@@ -255,7 +274,19 @@ pub(super) fn card(ui: &mut Ui, tokens: &Tokens, c: &Checklist, can_hide: bool) 
                     };
                     let r = ui.add(egui::Label::new(rich).selectable(false));
                     r.widget_info(|| WidgetInfo::labeled(Role::Label, true, &name));
-                    if !done {
+                    if !done && crate::lan_status::host_only(ws, item.opens()) {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(t("lan.host_only"))
+                                        .size(13.0)
+                                        .color(tokens.text_secondary),
+                                )
+                                .selectable(false)
+                                .sense(Sense::focusable_noninteractive()),
+                            );
+                        });
+                    } else if !done {
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             let r = ui.link(t("home.checklist.do_it"));
                             r.widget_info(|| WidgetInfo::labeled(Role::Link, true, label(item)));

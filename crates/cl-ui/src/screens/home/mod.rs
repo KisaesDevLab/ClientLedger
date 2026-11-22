@@ -641,6 +641,13 @@ impl HomeScreen {
 
     // ------------------------------------------------------------ drawing
 
+    /// This computer uses the host's books (host-only actions show as
+    /// "Do this on the host computer.", QA-7).
+    pub(crate) fn workstation(&self) -> bool {
+        crate::lan_status::state_of(&self.link)
+            .is_some_and(crate::lan_status::LanState::workstation)
+    }
+
     fn draw(&mut self, ui: &mut Ui) {
         let tokens = Tokens::of(ui.ctx());
         let list = self.checklist_shown();
@@ -651,7 +658,13 @@ impl HomeScreen {
             if let Some(c) = list.as_ref().filter(|_| self.checklist_expanded()) {
                 let mut picked = None;
                 card(ui, &tokens, 0.0, |ui| {
-                    picked = checklist::card(ui, &tokens, c, self.link.rights().is_admin());
+                    picked = checklist::card(
+                        ui,
+                        &tokens,
+                        c,
+                        self.link.rights().is_admin(),
+                        self.workstation(),
+                    );
                 });
                 todo = todo.or(picked);
                 ui.add_space(GAP + 6.0);
@@ -730,13 +743,13 @@ impl HomeScreen {
                 }
                 if let Some(c) = list.filter(|_| line_beside) {
                     ui.add_space(4.0);
-                    todo = checklist::top_line(ui, tokens, c);
+                    todo = checklist::top_line(ui, tokens, c, self.workstation());
                 }
             });
         });
         if let Some(c) = list.filter(|_| !line_beside) {
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                todo = checklist::top_line(ui, tokens, c);
+                todo = checklist::top_line(ui, tokens, c, self.workstation());
             });
         }
         if !beside {

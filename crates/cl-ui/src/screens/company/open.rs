@@ -596,7 +596,7 @@ impl OpenCompanyScreen {
         }
     }
 
-    fn header(ui: &mut Ui, tokens: &Tokens) {
+    fn header(ui: &mut Ui, tokens: &Tokens, lines: &PlaceLines) {
         ui.horizontal(|ui| {
             let (rect, _) = ui.allocate_exact_size(Vec2::splat(48.0), egui::Sense::hover());
             ui.painter()
@@ -620,11 +620,17 @@ impl OpenCompanyScreen {
                     .selectable(false),
                 );
                 ui.add(
-                    egui::Label::new(
-                        RichText::new(t("open.subtitle")).color(tokens.text_secondary),
-                    )
-                    .selectable(false),
+                    egui::Label::new(RichText::new(t(lines.subtitle)).color(tokens.text_secondary))
+                        .wrap()
+                        .selectable(false),
                 );
+                if let Some(k) = lines.shared {
+                    ui.add(
+                        egui::Label::new(RichText::new(t(k)).color(tokens.text_secondary))
+                            .wrap()
+                            .selectable(false),
+                    );
+                }
             });
         });
     }
@@ -1131,6 +1137,7 @@ impl OpenCompanyScreen {
 
     fn card(&mut self, ui: &mut Ui, tokens: &Tokens) {
         let tokens = *tokens;
+        let lines = place_lines(&self.link);
         let max = ui.available_width().min(980.0);
         let offset = ((ui.available_width() - max) / 2.0).max(0.0);
         ui.add_space(12.0);
@@ -1144,7 +1151,7 @@ impl OpenCompanyScreen {
                     .corner_radius(CornerRadius::same(8))
                     .inner_margin(Margin::symmetric(32, 24))
                     .show(ui, |ui| {
-                        Self::header(ui, &tokens);
+                        Self::header(ui, &tokens, &lines);
                         ui.add_space(12.0);
                         ui.separator();
                         ui.add_space(12.0);
@@ -1177,7 +1184,7 @@ impl OpenCompanyScreen {
                         ui.separator();
                         // Q-P19ap: the non-affiliation notice lives in Help > About.
                         ui.label(
-                            RichText::new(t("open.footer.offline"))
+                            RichText::new(t(lines.footer))
                                 .size(12.0)
                                 .color(tokens.text_secondary),
                         );
@@ -1202,6 +1209,39 @@ impl OpenCompanyScreen {
             "forgot_open": self.recovery.is_some(),
             "recovery_message": self.recovery.as_ref().and_then(crate::screens::recovery::RecoveryPanel::message),
         })
+    }
+}
+
+/// What Open Company says about where the books are (QA-5, QA-7): alone,
+/// they stay on this computer; a sharing host adds that they are shared with
+/// the office network; a workstation says they are on the host computer.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PlaceLines {
+    /// Under the title.
+    pub subtitle: &'static str,
+    /// The sharing host's extra line.
+    pub shared: Option<&'static str>,
+    /// The footer.
+    pub footer: &'static str,
+}
+
+/// The lines for this computer's place on the office network.
+#[must_use]
+pub(crate) fn place_lines(link: &CompanyLink) -> PlaceLines {
+    use crate::lan_status::{LanState, state_of};
+    let state = state_of(link);
+    if link.is_workstation() || state.is_some_and(LanState::workstation) {
+        PlaceLines {
+            subtitle: "open.subtitle.ws",
+            shared: None,
+            footer: "open.footer.ws",
+        }
+    } else {
+        PlaceLines {
+            subtitle: "open.subtitle",
+            shared: (state == Some(LanState::Host)).then_some("open.host.shared"),
+            footer: "open.footer.offline",
+        }
     }
 }
 
@@ -1361,6 +1401,40 @@ fn setup_error(e: cl_host::HostError) -> CompanyError {
 mod tests {
     use super::*;
     use eframe::egui::accesskit::Role;
+
+    /// QA-5, QA-7: alone the books stay here; a sharing host adds that they
+    /// are shared with the office; a workstation says they are on the host.
+    #[test]
+    fn open_company_says_where_the_books_are_on_the_office_network() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = CompanyLink::demo(dir.path());
+        let alone = place_lines(&link);
+        assert_eq!(alone.subtitle, "open.subtitle");
+        assert_eq!(alone.shared, None);
+        assert_eq!(t(alone.footer), "Works fully offline");
+        if let Some(mut d) = link.demo_state() {
+            d.lan.mode = cl_lan::settings::Mode::Host;
+        }
+        let host = place_lines(&link);
+        assert_eq!(host.subtitle, "open.subtitle");
+        assert_eq!(
+            host.shared.map(t).as_deref(),
+            Some("These books are shared with the other computers on your office network.")
+        );
+        if let Some(mut d) = link.demo_state() {
+            d.lan.mode = cl_lan::settings::Mode::Workstation;
+        }
+        let ws = place_lines(&link);
+        assert_eq!(ws.shared, None);
+        for k in [ws.subtitle, ws.footer] {
+            let s = t(k);
+            assert!(s.contains("host computer"), "{s}");
+            assert!(
+                !s.contains("stay on this computer") && !s.contains("offline"),
+                "{s}"
+            );
+        }
+    }
 
     /// The button labels drawn at `size`.
     fn buttons(s: &mut OpenCompanyScreen, size: Vec2) -> Vec<String> {
