@@ -148,6 +148,41 @@ pub fn workstation_link_key() -> Option<&'static str> {
     running_workstation().map(|w| w.state().key())
 }
 
+/// The status bar's one office-network line (QA-7, DESIGN.md window
+/// anatomy: mode and server). A connected workstation names the host
+/// ("Office network: connected to 192.168.1.20"); otherwise only the
+/// host's message shows, in its precise words when the running link has
+/// them (`link_key`, e.g. the clock being off). The host keeps "Sharing
+/// these books with the office".
+#[must_use]
+pub fn status_text(state: LanState, link_key: Option<&str>, host: Option<&str>) -> String {
+    match state {
+        LanState::Host => t(state.status_key()),
+        LanState::Connected => match host {
+            Some(h) => crate::i18n::t_with("lan.status.workstation", &[("host", h)]),
+            None => t("lan.status.workstation.unknown"),
+        },
+        _ => match link_key.filter(|k| *k != "connected") {
+            Some(k) => t(&format!("lan.link.{k}")),
+            None => t(state.status_key()),
+        },
+    }
+}
+
+/// The paired host's address as the status bar names it (no port).
+#[must_use]
+pub fn host_shown(link: &CompanyLink) -> Option<String> {
+    if link.is_demo() {
+        let d = link.demo_state()?;
+        let a = d.lan.paired_host.clone()?;
+        return Some(
+            a.parse::<std::net::SocketAddr>()
+                .map_or(a, |s| s.ip().to_string()),
+        );
+    }
+    running_workstation().map(|w| w.host_addr().ip().to_string())
+}
+
 /// This computer's place on the office network now; `None` when it is
 /// just this computer.
 #[must_use]
@@ -259,6 +294,8 @@ pub enum Overlay {
 #[derive(Default)]
 pub struct LanShell {
     state: Option<LanState>,
+    /// The paired host's address (a workstation's status bar names it).
+    host: Option<String>,
     /// The host stopped answering since the last time it did.
     was_covered: bool,
     /// "Connected again" shows until dismissed.
@@ -353,9 +390,25 @@ impl LanShell {
         self.state
     }
 
+    /// The status bar's office-network line, if any (QA-7).
+    #[must_use]
+    pub fn status_line(&self) -> Option<String> {
+        self.state.map(|s| {
+            status_text(
+                s,
+                workstation_link_key().filter(|_| s.workstation()),
+                self.host.as_deref(),
+            )
+        })
+    }
+
     /// Reads the state for this frame and runs the refresh poll.
     pub fn tick(&mut self, link: Option<&Arc<CompanyLink>>, now: Instant) {
         let state = link.and_then(|l| state_of(l));
+        self.host = match state {
+            Some(s) if s.workstation() => link.and_then(|l| host_shown(l)),
+            _ => None,
+        };
         WORKSTATION_NOW.store(state.is_some_and(LanState::workstation), Ordering::Relaxed);
         match state {
             Some(s) if s.covered() => self.was_covered = true,
@@ -669,6 +722,45 @@ mod tests {
         s.tick(Some(&link), now);
         assert_eq!(s.state(), None);
         assert!(!LanShell::command(&link, "dev.other"));
+    }
+
+    /// QA-7: one status-bar line per mode: a connected workstation names its
+    /// host; down, only the host's message (the clock's precise words when
+    /// the link has them); the host says it shares.
+    #[test]
+    fn the_status_line_names_the_host_and_only_the_host_message_when_down() {
+        assert_eq!(
+            status_text(LanState::Connected, Some("connected"), Some("192.168.1.20")),
+            "Office network: connected to 192.168.1.20"
+        );
+        assert_eq!(
+            status_text(LanState::Connected, None, None),
+            "Office network: connected to the host"
+        );
+        assert_eq!(
+            status_text(LanState::HostDown, None, Some("192.168.1.20")),
+            t("lan.link.host-down")
+        );
+        assert_eq!(
+            status_text(LanState::HostDown, Some("clock-skew"), None),
+            t("lan.link.clock-skew")
+        );
+        assert_eq!(
+            status_text(LanState::Host, None, None),
+            "Sharing these books with the office"
+        );
+        // The demo's paired host is named without its port.
+        let (_d, link) = demo();
+        assert!(LanShell::command(&link, "dev.lan_host_up"));
+        if let Some(mut d) = link.demo_state() {
+            d.lan.paired_host = Some("192.168.1.20:47615".into());
+        }
+        let mut s = LanShell::default();
+        s.tick(Some(&link), Instant::now());
+        assert_eq!(
+            s.status_line().as_deref(),
+            Some("Office network: connected to 192.168.1.20")
+        );
     }
 
     /// The Office Network window in front uncovers the app, so a host that

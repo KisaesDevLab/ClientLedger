@@ -32,6 +32,9 @@ steps:
   - assert_state: {key: screen.choice, equals: host}
   - assert_exists: {role: radio_button, label: "Ethernet (192.168.1.20)"}
   - assert_exists: {role: radio_button, label: "VPN (100.64.3.9)"}
+  # QA-4: why a connection can't be used is text on the card, not a hover.
+  - assert_exists: {role: label, label: "Can't share on VPN (100.64.3.9): an internet provider or VPN address."}
+  - assert_exists: {role: label, label: "Can't share on Ethernet 2 (203.0.113.5): a public internet address."}
   - screenshot: host-choose
   - click: {role: button, label: Start sharing}
   - assert_state: {key: screen.mode, equals: host}
@@ -101,8 +104,10 @@ steps:
   - assert_state: {key: screen.paired, equals: true}
   - assert_state: {key: screen.mode, equals: workstation}
   - assert_state: {key: screen.link, equals: connected}
-  # The window and the status bar both say so.
-  - assert_count: {target: {role: label, label: "Connected to the host"}, count: 2}
+  # The window says so; the status bar names the host, with no engine line (QA-7).
+  - assert_count: {target: {role: label, label: "Connected to the host"}, count: 1}
+  - assert_exists: {role: label, label: "Office network: connected to 192.168.1.20"}
+  - assert_not_exists: {role: label, label_contains: "Books engine"}
   - assert_state: {key: lan.state, equals: connected}
   - screenshot: workstation-paired
   - click: {role: button, label: Stop using this host}

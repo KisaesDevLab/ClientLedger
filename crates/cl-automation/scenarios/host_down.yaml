@@ -30,7 +30,9 @@ steps:
   - command: dev.lan_host_up
   - assert_state: {key: lan.state, equals: connected}
   - assert_state: {key: lan.covered, equals: false}
-  - assert_exists: {role: label, label: "Connected to the host"}
+  # QA-7: one status line, the mode and the host; no engine line.
+  - assert_exists: {role: label, label: "Office network: connected to 192.168.1.20"}
+  - assert_not_exists: {role: label, label_contains: "Books engine"}
 
   # --- 2. The host stops answering ---------------------------------------------
   - command: dev.lan_host_down
@@ -41,6 +43,9 @@ steps:
   - assert_exists: {role: label, label: "Nothing is sent on its own. If a save was on its way when the connection dropped, its window asks you to check it once the host answers."}
   - assert_exists: {role: button, label: Check again}
   - assert_exists: {role: button, label: "Office Network…"}
+  # Only the host's message in the status bar while it is down.
+  - assert_not_exists: {role: label, label_contains: "Books engine"}
+  - assert_not_exists: {role: label, label_contains: "Office network: connected"}
   - assert_no_clipping: {}
   - screenshot: overlay
   # Nothing underneath is saved while the overlay is up.

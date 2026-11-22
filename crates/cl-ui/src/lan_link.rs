@@ -280,6 +280,7 @@ impl Drop for LanHost {
 pub struct LanWorkstation {
     _rt: tokio::runtime::Runtime,
     link: Workstation,
+    host: SocketAddr,
 }
 
 impl std::fmt::Debug for LanWorkstation {
@@ -315,7 +316,11 @@ impl LanWorkstation {
                 &device,
             ))
             .map_err(|e| LanStartError::Link(e.to_string()))?;
-        Ok(LanWorkstation { _rt: rt, link })
+        Ok(LanWorkstation {
+            _rt: rt,
+            link,
+            host: settings.host,
+        })
     }
 
     /// cl-api's endpoint for this link.
@@ -334,6 +339,12 @@ impl LanWorkstation {
     #[must_use]
     pub fn host(&self, settings: &WorkstationSettings) -> SocketAddr {
         settings.host
+    }
+
+    /// The paired host's address (the status bar names it).
+    #[must_use]
+    pub fn host_addr(&self) -> SocketAddr {
+        self.host
     }
 }
 
