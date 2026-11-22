@@ -35,6 +35,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lan.refusal.loopback", "this computer only"),
     ("lan.refusal.public", "a public internet address"),
     ("lan.refusal.carrier-nat", "an internet provider or VPN address"),
+    ("lan.refusal.link-local-v4", "this connection got no address from your office network, so it reaches no other computer (check the cable or Wi-Fi)"),
     ("lan.refusal.link-local-v6", "a temporary link-only address"),
     ("lan.refusal.special", "a special-purpose address"),
     ("lan.host.iface.refused", "Can't share on {name} ({ip}): {why}."),
@@ -106,7 +107,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lan.link.unpaired", "This computer is no longer paired with the host"),
     ("lan.status.host", "Sharing: {n} computers"),
     ("lan.status.host.one", "Sharing: 1 computer"),
-    ("lan.status.workstation", "Multi-user: {state}"),
+    ("lan.status.workstation", "Office network: connected to {host}"),
+    ("lan.status.workstation.unknown", "Office network: connected to the host"),
     // Host down overlay.
     ("lan.down.title", "The host computer isn't answering"),
     ("lan.down.back", "The host is answering again. Your unsaved forms are still open; review each one and save it yourself."),
@@ -155,6 +157,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("lan.ws.start_failed", "This computer can't reach the host's books. Open Company \u{203a} Office Network to check the host."),
     ("open.ws.host_not_set_up", "The books on the host computer aren't set up yet. Finish setting up ClientLedger on the host computer first."),
     ("open.ws.forgot", "To reset a forgotten password, use ClientLedger on the host computer."),
+    ("open.subtitle.ws", "Your books are on the host computer, and this computer uses them over your office network. Nothing goes to the internet."),
+    ("open.footer.ws", "Using the books on the host computer, on this office network"),
+    ("open.host.shared", "These books are shared with the other computers on your office network."),
     ("open.ws.start_on_host", "This computer uses the host computer's books. Create, restore, import and practice companies on the host computer."),
     ("prefs.ws.host_sets", "The host computer sets these for everyone on the office network. Change them in ClientLedger on the host computer."),
     // Conflict field names for the other forms (P33 D4 step 11, forms lane).

@@ -1,13 +1,14 @@
 //! Which addresses the host may listen on and which peers it may serve
 //! (Q-109, Q-P33c, review M4).
 //!
-//! - **Allowed:** RFC 1918 (10/8, 172.16/12, 192.168/16), IPv4 link-local
-//!   169.254/16 and IPv6 unique-local `fc00::/7`.
+//! - **Allowed:** RFC 1918 (10/8, 172.16/12, 192.168/16) and IPv6
+//!   unique-local `fc00::/7`.
 //! - **Refused:** the unspecified addresses (`0.0.0.0`, `::`), loopback,
 //!   multicast and broadcast, carrier-grade NAT 100.64/10 (often a VPN or a
-//!   provider network, never "this office"), IPv6 link-local `fe80::/10`
-//!   (needs a scope id and reaches every segment the cable does) and every
-//!   public address.
+//!   provider network, never "this office"), IPv4 link-local 169.254/16
+//!   (APIPA: the computer got no address from the network, QA-4), IPv6
+//!   link-local `fe80::/10` (needs a scope id and reaches every segment the
+//!   cable does) and every public address.
 //!
 //! IPv4-mapped IPv6 (`::ffff:a.b.c.d`) is judged as the IPv4 address it
 //! carries, so `::ffff:8.8.8.8` is public and `::ffff:10.0.0.5` private.
@@ -25,6 +26,8 @@ pub enum Refusal {
     Public,
     /// 100.64.0.0/10: shared by internet providers and VPNs.
     CarrierNat,
+    /// 169.254.0.0/16 (APIPA): no address from the network.
+    LinkLocalV4,
     /// `fe80::/10`.
     LinkLocalV6,
     /// Multicast, broadcast or another special-purpose range.
@@ -40,6 +43,7 @@ impl Refusal {
             Refusal::Loopback => "loopback",
             Refusal::Public => "public",
             Refusal::CarrierNat => "carrier-nat",
+            Refusal::LinkLocalV4 => "link-local-v4",
             Refusal::LinkLocalV6 => "link-local-v6",
             Refusal::Special => "special",
         }
@@ -91,7 +95,10 @@ fn check_v4(ip: Ipv4Addr) -> Result<(), Refusal> {
     if o[0] == 100 && (o[1] & 0b1100_0000) == 64 {
         return Err(Refusal::CarrierNat);
     }
-    if ip.is_private() || ip.is_link_local() {
+    if ip.is_link_local() {
+        return Err(Refusal::LinkLocalV4);
+    }
+    if ip.is_private() {
         return Ok(());
     }
     Err(Refusal::Public)
@@ -259,7 +266,6 @@ mod tests {
             "172.16.0.1",
             "172.31.255.1",
             "192.168.1.20",
-            "169.254.10.10",
             "fd12:3456::1",
             "fc00::1",
             "::ffff:10.0.0.5",
@@ -282,6 +288,9 @@ mod tests {
             ("192.169.0.1", Refusal::Public),
             ("100.64.0.1", Refusal::CarrierNat),
             ("100.127.255.254", Refusal::CarrierNat),
+            ("169.254.10.10", Refusal::LinkLocalV4),
+            ("169.254.83.107", Refusal::LinkLocalV4),
+            ("::ffff:169.254.35.240", Refusal::LinkLocalV4),
             ("fe80::1", Refusal::LinkLocalV6),
             ("febf::1", Refusal::LinkLocalV6),
             ("2001:4860::8888", Refusal::Public),

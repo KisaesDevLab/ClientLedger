@@ -43,6 +43,10 @@ const PORT: u16 = cl_lan::host::DEFAULT_PORT;
 
 /// The window for `kind`, if it is this one.
 #[must_use]
+#[allow(
+    clippy::needless_pass_by_value,
+    reason = "the shared MakeScreen signature"
+)]
 pub fn make(
     kind: CommandId,
     link: &Arc<CompanyLink>,
@@ -463,30 +467,23 @@ impl LanSetupScreen {
             if !v.interfaces.iter().any(|c| c.refusal.is_none()) {
                 form::inline_warning(ui, tokens, &t("lan.host.iface.none"));
             }
-            ui.add_enabled_ui(!sharing, |ui| {
-                for (i, c) in v.interfaces.iter().enumerate() {
-                    let text = format!("{} ({})", c.addr.name, c.addr.ip);
-                    match c.refusal {
-                        None => {
-                            if ui.radio(self.pick == Some(i), text).clicked() {
-                                self.pick = Some(i);
-                            }
-                        }
-                        Some(r) => {
-                            let why = t(&format!("lan.refusal.{}", r.key()));
-                            ui.add_enabled(false, egui::RadioButton::new(false, text))
-                                .on_disabled_hover_text(t_with(
-                                    "lan.host.iface.refused",
-                                    &[
-                                        ("name", &c.addr.name),
-                                        ("ip", &c.addr.ip.to_string()),
-                                        ("why", &why),
-                                    ],
-                                ));
+            for (i, c) in v.interfaces.iter().enumerate() {
+                let text = format!("{} ({})", c.addr.name, c.addr.ip);
+                match c.refusal {
+                    None => {
+                        if ui
+                            .add_enabled(
+                                !sharing,
+                                egui::RadioButton::new(self.pick == Some(i), text),
+                            )
+                            .clicked()
+                        {
+                            self.pick = Some(i);
                         }
                     }
+                    Some(r) => refused_row(ui, tokens, c, r, text),
                 }
-            });
+            }
             ui.add_space(6.0);
             if sharing && !v.running {
                 // QA-2: chosen, but nothing listens until the restart.
@@ -861,6 +858,44 @@ impl Screen for LanSetupScreen {
     }
 }
 
+/// A connection that can't be shared on (QA-4, QA-14): a radio that can't
+/// be picked, and under it the reason as text anyone can read without
+/// hovering, which Tab also reaches (a screen reader reads it there). Both
+/// are drawn at full strength in `text.secondary` (4.5:1 on the card in
+/// both themes), not egui's half-faded disabled look.
+fn refused_row(
+    ui: &mut Ui,
+    tokens: &Tokens,
+    c: &Candidate,
+    r: cl_lan::policy::Refusal,
+    text: String,
+) {
+    ui.scope(|ui| {
+        ui.visuals_mut().disabled_alpha = 1.0;
+        ui.add_enabled(
+            false,
+            egui::RadioButton::new(false, RichText::new(text).color(tokens.text_secondary)),
+        );
+    });
+    let why = t(&format!("lan.refusal.{}", r.key()));
+    let line = t_with(
+        "lan.host.iface.refused",
+        &[
+            ("name", &c.addr.name),
+            ("ip", &c.addr.ip.to_string()),
+            ("why", &why),
+        ],
+    );
+    ui.horizontal(|ui| {
+        ui.add_space(ui.spacing().icon_width + ui.spacing().icon_spacing);
+        ui.add(
+            egui::Label::new(RichText::new(line).size(12.0).color(tokens.text_secondary))
+                .wrap()
+                .sense(egui::Sense::focusable_noninteractive()),
+        );
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -936,6 +971,88 @@ mod tests {
             .filter_map(|n| n.label().or_else(|| n.value()))
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    /// QA-4, QA-14: a refused connection says why in text on the card, not
+    /// only on hover; Tab reaches that text; name and reason are painted at
+    /// full strength and meet 4.5:1 on the card, light and dark.
+    #[test]
+    fn a_refused_connection_shows_its_reason_as_readable_text() {
+        use egui::accesskit::{Action, Role};
+        for (choice, tokens) in [
+            (
+                crate::theme::ThemeChoice::Light,
+                crate::theme::Tokens::LIGHT,
+            ),
+            (crate::theme::ThemeChoice::Dark, crate::theme::Tokens::DARK),
+        ] {
+            let (_d, mut s) = screen();
+            s.choice = Mode::Host;
+            let ctx = egui::Context::default();
+            crate::theme::apply(&ctx, choice);
+            crate::fonts::install(&ctx);
+            ctx.enable_accesskit();
+            let mut nodes = Vec::new();
+            let mut shapes = Vec::new();
+            for _ in 0..3 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 940.0),
+                    )),
+                    ..egui::RawInput::default()
+                };
+                let mut out = ctx.run_ui(input, |ui| {
+                    egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+                });
+                out.textures_delta.clear();
+                shapes = out.shapes;
+                nodes = out
+                    .platform_output
+                    .accesskit_update
+                    .map(|u| u.nodes.into_iter().map(|(_, n)| n).collect())
+                    .unwrap_or_default();
+            }
+            let line = t_with(
+                "lan.host.iface.refused",
+                &[
+                    ("name", "VPN"),
+                    ("ip", "100.64.3.9"),
+                    ("why", &t("lan.refusal.carrier-nat")),
+                ],
+            );
+            let node = nodes
+                .iter()
+                .find(|n| n.label() == Some(line.as_str()) || n.value() == Some(line.as_str()))
+                .unwrap_or_else(|| panic!("reason line in the tree: {}", texts(&nodes)));
+            assert_eq!(node.role(), Role::Label);
+            assert!(
+                node.supports_action(Action::Focus),
+                "Tab reaches the reason"
+            );
+            assert!(named(&nodes, Role::RadioButton, "VPN (100.64.3.9)").is_some());
+            // What is painted: the name and the reason, unfaded, in a
+            // colour that meets 4.5:1 on the card.
+            for want in ["VPN (100.64.3.9)", line.as_str()] {
+                let text = shapes
+                    .iter()
+                    .find_map(|c| match &c.shape {
+                        egui::Shape::Text(ts) if ts.galley.text() == want => Some(ts.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("{want} painted"));
+                let colour = text.galley.job.sections[0].format.color;
+                assert!(
+                    (text.opacity_factor - 1.0).abs() < f32::EPSILON,
+                    "{want} faded"
+                );
+                assert_eq!(colour, tokens.text_secondary, "{want}");
+                assert!(
+                    crate::theme::contrast(colour, tokens.surface_subtle) >= 4.5,
+                    "{want} contrast"
+                );
+            }
+        }
     }
 
     /// Review M2: with the host certificate file missing the window says
