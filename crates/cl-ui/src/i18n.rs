@@ -701,7 +701,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("about.version", "Version"),
     ("about.close", "Close"),
     ("about.h.license", "License"),
-    ("about.license.body", "ClientLedger is licensed under the VibeMyFirm Community License 1.0. Keeping the books of a business you own, control, or work for is free, with no key, no user limit and no company limit. Keeping books for clients for pay needs a Pro License Key, and sharing or distributing ClientLedger needs a Developer License Key. There is no activation, seat counting or expiry. Full terms: https://vibemyfirm.com/licenses/community-1.0"),
+    ("about.license.body", "ClientLedger is licensed under the VibeMyFirm Community License 1.0. Keeping the books of a business you own, control, or work for is free, with no key, no user limit and no company limit. Keeping books for clients for pay needs a Pro License Key, and sharing or distributing ClientLedger needs a Developer License Key. Pro and Developer keys never expire: each covers every release of the major version you bought, and a later major version needs an upgrade key. There is no activation or seat counting. Full terms: https://vibemyfirm.com/licenses/community-1.0"),
     ("about.h.engine", "The accounting engine"),
     ("about.engine.body", "ClientLedger keeps your books with the Kisaes GL Engine (the Vibe MyBooks engine). Inside official ClientLedger releases from Kisaes LLC, the engine is licensed to you under the same VibeMyFirm Community License. You may run it unchanged, as Kisaes ships it, for the uses your license allows. You may not change, copy, pass on or host the engine for others. Write to licensing@kisaes.com with questions."),
     ("about.h.components", "Bundled components"),

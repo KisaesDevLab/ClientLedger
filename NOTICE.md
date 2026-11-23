@@ -22,6 +22,14 @@ This is a plain-language summary; the license text is the controlling document.
 - **Clients' books for pay need a Pro License Key** for your firm (License §5.2,
   §6). It covers everyone working for your firm, on any number of computers and
   for any number of clients.
+- **Pro and Developer keys are perpetual for one major version** (License §9A).
+  A key covers every release of the major version it names (for example every
+  1.x release), whenever published. A later major version needs an Upgrade Key;
+  ClientLedger never disables, locks, or deletes your data because a newer major
+  version exists, and your own books never need a key in any version.
+- **Until Pro keys can be bought and entered** (planned for the 1.0 release),
+  Kisaes permits Professional Use of the 0.x test versions without a key.
+  ClientLedger checks nothing.
 - **Distributing ClientLedger, changed or not, needs a Developer License Key**
   (License §5.3, §7). A distribution may never include the engine, must keep
   the notices, must not use the ClientLedger, Vibe, VibeMyFirm, MyBooks or
@@ -41,7 +49,8 @@ Grantee Product under the Kisaes Engine Product Grant
 (`licensing/KISAES-GL-ENGINE-LICENSE-AND-GRANT.md`).
 
 Inside an **official ClientLedger build** (built, signed, and published by
-Kisaes LLC), the engine is licensed to you under the VibeMyFirm Community
+Kisaes LLC; until 1.0, the unsigned test versions Kisaes publishes with their
+checksums on its release page also count as official builds), the engine is licensed to you under the VibeMyFirm Community
 License. You may run that engine unchanged, as Kisaes ships it, for your
 permitted purpose. You may not change, distribute, or host the engine for
 others; that needs a Kisaes GL Engine OEM License

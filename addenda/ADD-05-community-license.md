@@ -14,7 +14,7 @@ Owner request, 2026-11-06: the build-plan addendum "ClientLedger: VibeMyFirm Com
 ## What the license texts settle (read 2026-11-06)
 
 - **Own-Entity Use has no fee and no key** (§5.1: no limit on users or entities) — matches Q-337. Pro and Developer use need a valid key (§5.2, §5.3).
-- **Pro key term** is "the term stated in the Commercial Terms" (§6.2); the brief says Pro keys are perpetual (`exp: null`). The app accepts `exp: null` and also honours a dated `exp` if a key carries one (never locking data; Q-344).
+- **Pro key term** (licence revised 2026-11-22, Q-369): Pro and Developer keys are perpetual for the major version in the key's `major` claim (§9A); `exp` is always null. A key with a dated `exp` is refused as malformed in L2. A release with a higher major is refused per §9A.4 (read-only with backup and export, never a data lock). Supersedes the dated-`exp` rule in Q-344.
 - **Developer builds** (§7.2): never include the engine; About states "Based on software © Kisaes LLC, licensed under the VibeMyFirm Community License."; no Kisaes marks as the brand; no embedded keys; no bypass of key checks.
 - **Engine** (§8, grant Part B.3): the engine inside an Official Build is licensed to the user under the Community License; the engine checks the signature of the host that launches it, and an unsigned or third-party host runs it in **internal mode** (no distribution, no remote users). Official Build = built, signed and published by Kisaes (§18).
 - **Required Notice** for source headers (L1): `Required Notice: Copyright © 2026 Kisaes LLC. Licensed under the VibeMyFirm Community License 1.0, https://vibemyfirm.com/licenses/community-1.0`.
