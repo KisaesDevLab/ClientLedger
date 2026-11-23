@@ -108,8 +108,8 @@ impl CrashRecoveryScreen {
             link,
             info,
             chosen: None,
-            // The full database backup window arrives with A4; until then
-            // no full backup is ever recorded.
+            // The full database backup window arrives in P37 (Q-P34y);
+            // until then no full backup is ever recorded.
             has_full_backup: false,
         }
     }

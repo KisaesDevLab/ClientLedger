@@ -21,13 +21,20 @@ steps:
   - assert_exists: {label_contains: "Next backup:"}
   - assert_no_clipping: {}
   - screenshot: schedule
-  - click: {role: button, label: History}
+  - assert_exists: {role: button, label: "Browse…"}
+  - click: {role: tab, label: History}
   - assert_state: {key: screen.tab, equals: history}
   - assert_state: {key: screen.backups, equals: 2}
   - assert_exists: {label_contains: "the folder couldn't be reached"}
   - screenshot: history
+  - assert_exists: {role: button, label_contains: ".clbackup…", index: 0}
   - click: {role: button, label_contains: "Test restore", index: 0}
   - assert_state: {key: screen.tested, equals: 1}
   - assert_exists: {label_contains: "Restores cleanly"}
+  - assert_no_clipping: {}
   - screenshot: tested
+  - resize: {width: 960, height: 640}
+  - assert_no_clipping: {}
+  - screenshot: history-min
+  - resize: {width: 1440, height: 940}
   - command: file.close_window

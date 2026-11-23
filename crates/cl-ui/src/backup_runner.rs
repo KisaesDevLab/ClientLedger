@@ -26,6 +26,9 @@ use crate::company::{CompanyEvent, CompanyLink};
 
 static HOLD: AtomicBool = AtomicBool::new(false);
 
+/// Automatic test restores stopped after a passphrase mismatch (review M5).
+static AUTO_TESTS_OFF: AtomicBool = AtomicBool::new(false);
+
 /// "Check My Books" in the crash recovery window: a quick check runs
 /// after the next company opens, whatever the weekly rule says.
 static CHECK_AFTER_OPEN: AtomicBool = AtomicBool::new(false);
@@ -155,14 +158,28 @@ impl RunnerHost for Host {
             let Some(path) = path else {
                 return;
             };
+            // Review M5: after a passphrase mismatch, automatic tests stop
+            // for this run of the app (they would feed the engine's
+            // passphrase limiter and could lock out a real restore).
+            if AUTO_TESTS_OFF.load(Ordering::SeqCst) {
+                return;
+            }
             let Some(pending) = self.send_test(path) else {
                 return;
             };
             let mut pending = pending;
             loop {
                 if let Some(r) = pending.try_take() {
-                    if !matches!(r, Ok(Ok(_))) {
-                        tracing::warn!("scheduled test restore could not run");
+                    match r {
+                        Ok(Ok(out))
+                            if out.test.reason.as_deref()
+                                == Some(cl_company::verify::reason::PASSPHRASE) =>
+                        {
+                            AUTO_TESTS_OFF.store(true, Ordering::SeqCst);
+                            tracing::warn!("automatic test restores stopped: passphrase mismatch");
+                        }
+                        Ok(Ok(_)) => {}
+                        _ => tracing::warn!("scheduled test restore could not run"),
                     }
                     return;
                 }
@@ -177,9 +194,19 @@ impl RunnerHost for Host {
         now: Timestamp,
     ) -> Pin<Box<dyn Future<Output = JobResult> + Send + 'a>> {
         Box::pin(async move {
-            let Some(pending) = self.send(job, now) else {
-                // No session or queue now: the next tick tries again.
+            let Some(link) = self.link.upgrade() else {
                 return JobResult::GateBusy;
+            };
+            if link.session().is_none() {
+                // Signed out since the plan: the next tick records the skip.
+                return JobResult::GateBusy;
+            }
+            let Some(pending) = self.send(job, now) else {
+                // Review M4: signed in but the request queue is gone; a
+                // failure uses the slot instead of retrying every tick.
+                return JobResult::Failed {
+                    code: "ENGINE_UNAVAILABLE".into(),
+                };
             };
             wait(pending).await
         })
@@ -269,12 +296,21 @@ pub fn weekly_check(link: &Arc<CompanyLink>) -> Option<WeeklyCheck> {
     {
         return None;
     }
+    if force {
+        // QA-17: the owner asked to check the books, so the answer is
+        // shown: Verify Data opens and runs the quick check itself.
+        crate::screens::company::verify_data::request_quick_check_on_open();
+        link.push(CompanyEvent::OpenWindow(cl_model::CommandId::new(
+            crate::screens::company::verify_data::KIND,
+        )));
+        return None;
+    }
     let session = link.session()?;
     let group = link.group()?.ok()?;
     let pending = group
         .read(&session, move |s| async move {
             let summary = s.integrity().summary().await?;
-            if force || cl_company::health::quick_check_due(&summary, cl_settings::recent::now()) {
+            if cl_company::health::quick_check_due(&summary, cl_settings::recent::now()) {
                 let run = s.integrity().check(cl_api::IntegrityLevel::Quick).await?;
                 tracing::info!(findings = run.findings.len(), "weekly quick check done");
                 Ok(true)
@@ -356,7 +392,14 @@ pub fn on_close_backup(
     let secrets = link.secrets();
     let link = Arc::clone(link);
     Some(Box::pin(async move {
-        let r = cl_company::backup::backup_with(
+        // Review M1: never wait for a running backup or test restore here
+        // (the close would wait, or be cut at quit).
+        let Some(gate) = cl_company::backup::try_gate() else {
+            link.push(CompanyEvent::Toast("backup.on_close.busy"));
+            return;
+        };
+        let r = cl_company::backup::backup_holding(
+            gate,
             &session,
             &store,
             secrets.as_ref(),

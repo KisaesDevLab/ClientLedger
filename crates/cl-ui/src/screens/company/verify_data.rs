@@ -27,13 +27,22 @@ use serde_json::{Value, json};
 
 use super::form;
 use crate::company::{CompanyEvent, CompanyLink, Task, spawn_lifecycle};
-use crate::i18n::{t, t_with};
+use crate::i18n::{t, t_count, t_with};
 use crate::screens::invoice::engine::{self, Job};
 use crate::theme::Tokens;
 use crate::windows::Screen;
 
 /// The command that opens it.
 pub const KIND: &str = "file.verify_data";
+
+/// "Check My Books" (crash recovery): the next Verify Data window runs a
+/// quick check as it opens (QA-17).
+static QUICK_ON_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Ask the next Verify Data window to start with a quick check.
+pub fn request_quick_check_on_open() {
+    QUICK_ON_OPEN.store(true, std::sync::atomic::Ordering::SeqCst);
+}
 
 /// The engine's finding as the model shows it.
 #[must_use]
@@ -63,6 +72,22 @@ pub fn view_of(f: &cl_api::Finding) -> FindingView {
     }
 }
 
+/// "Found 1 problem and 2 things to look at." with each count's own
+/// singular (QA-5).
+#[must_use]
+pub fn summary_text(errors: usize, warnings: usize) -> String {
+    t_with(
+        "verify.summary",
+        &[
+            ("errors", &t_count("verify.summary.errors", errors, &[])),
+            (
+                "warnings",
+                &t_count("verify.summary.warnings", warnings, &[]),
+            ),
+        ],
+    )
+}
+
 /// How the last fix ended.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum FixEnd {
@@ -87,6 +112,8 @@ pub struct VerifyDataScreen {
     fix: Option<Task<Result<FixOutcome, CompanyError>>>,
     fix_end: Option<FixEnd>,
     error: Option<ApiError>,
+    /// Start a quick check on the first frame (QA-17).
+    quick_on_open: bool,
 }
 
 impl VerifyDataScreen {
@@ -105,6 +132,7 @@ impl VerifyDataScreen {
             fix: None,
             fix_end: None,
             error: None,
+            quick_on_open: QUICK_ON_OPEN.swap(false, std::sync::atomic::Ordering::SeqCst),
         }
     }
 
@@ -286,19 +314,30 @@ impl VerifyDataScreen {
 
     fn finding_row(&mut self, ui: &mut Ui, tokens: &Tokens, f: &FindingView) {
         let style = MoneyStyle::default();
-        ui.horizontal(|ui| {
+        ui.horizontal_top(|ui| {
             if f.fixable && self.may_fix() {
                 let mut on = self.model.is_selected(&f.id);
-                if ui
-                    .checkbox(&mut on, t_with("verify.select", &[("name", &f.label)]))
-                    .changed()
-                {
+                // QA-9: the name is said once on screen; the box's
+                // screen-reader name still says which account it fixes.
+                let r = ui.checkbox(&mut on, "");
+                let name = t_with("verify.select", &[("name", &f.label)]);
+                r.widget_info(|| {
+                    eframe::egui::WidgetInfo::selected(
+                        eframe::egui::Role::CheckBox,
+                        true,
+                        on,
+                        &name,
+                    )
+                });
+                if r.changed() {
                     self.model.toggle(&f.id);
                 }
             }
+            // QA-4: everything wraps in the row's width; the Open button
+            // sits under the text, never past the window's edge.
             ui.vertical(|ui| {
-                ui.label(RichText::new(&f.label).strong());
-                ui.label(t(code_key(&f.code)));
+                ui.add(eframe::egui::Label::new(RichText::new(&f.label).strong()).wrap());
+                ui.add(eframe::egui::Label::new(t(code_key(&f.code))).wrap());
                 if let Some(fig) = &f.figures {
                     ui.label(
                         RichText::new(t_with(
@@ -327,20 +366,24 @@ impl VerifyDataScreen {
                                 ),
                             ],
                         ))
+                        .monospace()
                         .color(tokens.text_secondary),
                     );
                 }
                 if !f.fixable {
                     form::hint(ui, tokens, &t("verify.report_only"));
                 }
+                if open_target(f).is_some()
+                    && ui
+                        .add(
+                            eframe::egui::Button::new(t_with("verify.open", &[("name", &f.label)]))
+                                .wrap(),
+                        )
+                        .clicked()
+                {
+                    self.open(f);
+                }
             });
-            if open_target(f).is_some()
-                && ui
-                    .button(t_with("verify.open", &[("name", &f.label)]))
-                    .clicked()
-            {
-                self.open(f);
-            }
         });
         ui.add_space(4.0);
     }
@@ -357,6 +400,9 @@ impl Screen for VerifyDataScreen {
 
     #[allow(clippy::too_many_lines, reason = "one screen, top to bottom")]
     fn ui(&mut self, ui: &mut Ui) {
+        if std::mem::take(&mut self.quick_on_open) {
+            self.start_check(IntegrityLevel::Quick);
+        }
         self.poll();
         let tokens = Tokens::of(ui.ctx());
         if self.check.is_some() || self.fix.is_some() {
@@ -395,11 +441,7 @@ impl Screen for VerifyDataScreen {
         }
         match &self.fix_end {
             Some(FixEnd::Fixed(n)) => {
-                form::inline_note(
-                    ui,
-                    &tokens,
-                    &t_with("verify.fixed", &[("n", &n.to_string())]),
-                );
+                form::inline_success(ui, &tokens, &t_count("verify.fixed", *n, &[]));
             }
             Some(FixEnd::Stale) => form::inline_warning(ui, &tokens, &t("verify.stale")),
             Some(FixEnd::Failed(why)) => {
@@ -413,19 +455,10 @@ impl Screen for VerifyDataScreen {
                 form::hint(ui, &tokens, &t("verify.empty"));
             }
         } else if self.model.is_clean() {
-            form::inline_note(ui, &tokens, &t("verify.clean"));
+            form::inline_success(ui, &tokens, &t("verify.clean"));
         } else {
             let (errors, warnings) = self.model.counts();
-            ui.label(
-                RichText::new(t_with(
-                    "verify.summary",
-                    &[
-                        ("errors", &errors.to_string()),
-                        ("warnings", &warnings.to_string()),
-                    ],
-                ))
-                .strong(),
-            );
+            ui.label(RichText::new(summary_text(errors, warnings)).strong());
             if self.run.as_ref().is_some_and(|r| r.truncated) {
                 form::hint(ui, &tokens, &t("verify.truncated"));
             }
@@ -471,11 +504,7 @@ impl Screen for VerifyDataScreen {
             let n = self.model.selected_ids().len();
             form::card(ui, &tokens, |ui| {
                 form::heading(ui, &tokens, &t("verify.confirm.title"));
-                form::hint(
-                    ui,
-                    &tokens,
-                    &t_with("verify.confirm.body", &[("n", &n.to_string())]),
-                );
+                form::hint(ui, &tokens, &t_count("verify.confirm.body", n, &[]));
                 match form::actions(ui, &t("verify.confirm.go"), &[&t("verify.confirm.cancel")]) {
                     Some(0) => self.start_fix(),
                     Some(_) => self.confirm = false,

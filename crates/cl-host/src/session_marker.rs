@@ -25,13 +25,16 @@
 //! idempotent) on every orderly end:
 //! - normal quit;
 //! - closing the headless LAN host (`--lan-serve`), including the hand-over;
-//! - the operating system's end-of-session or termination signal (`SIGTERM`,
-//!   `SIGHUP`, a macOS quit at log-out).
+//! - on Linux and macOS, the termination signals `SIGTERM` and `SIGHUP`
+//!   (the desktop app installs a handler that marks clean, then closes the
+//!   window).
 //!
-//! Windows does not tell a winit window about log-off (winit 0.30 does not
-//! handle `WM_ENDSESSION`). A restart or shut-down is caught by the boot
-//! check above. A log-off without a restart still reads as `Unclean`: the
-//! database server is stopped the same way then.
+//! Known gaps (Q-P34w). Windows does not tell a winit window about log-off
+//! (winit 0.30 does not handle `WM_ENDSESSION`), and a macOS log-out quits
+//! the app through `NSApplication terminate:`, which winit does not hand to
+//! the app (reaching it needs Objective-C glue this workspace keeps out).
+//! A restart or shut-down is caught by the boot check above; a log-off
+//! without a restart can still read as `Unclean` on Windows and macOS.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};

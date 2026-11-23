@@ -73,6 +73,40 @@ impl Drop for Running {
     }
 }
 
+/// What the operating system's termination request does (review S4): the
+/// session ends in order, so it is marked clean at once (the OS may kill
+/// the process a few seconds later, before the window finishes closing),
+/// then the window is asked to close the usual way (unsaved forms still
+/// prompt). Platform-neutral so it is tested everywhere.
+fn termination_handler(
+    marker: Option<cl_host::SessionMarker>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+) -> impl Fn() + Send + 'static {
+    move || {
+        if let Some(m) = &marker
+            && let Err(e) = m.mark_clean()
+        {
+            tracing::warn!(error = %e, "the session marker could not be marked clean");
+        }
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// `SIGTERM`, `SIGHUP` (log-out, `systemctl`, `kill`) and `SIGINT` run
+/// [`termination_handler`] instead of ending the process on the spot. On
+/// Windows a GUI app gets no console events; nothing is installed.
+#[cfg(unix)]
+fn on_termination(handler: impl Fn() + Send + 'static) {
+    if let Err(e) = ctrlc::set_handler(handler) {
+        tracing::warn!(error = %e, "the termination handler could not be installed");
+    }
+}
+
+#[cfg(not(unix))]
+fn on_termination(handler: impl Fn() + Send + 'static) {
+    drop(handler);
+}
+
 /// Host mode turns automatic sign-in off and forgets the saved password:
 /// the books are open to the office network (plan D2 step 5).
 fn clear_auto_sign_in(paths: &AppPaths) {
@@ -182,6 +216,7 @@ fn lan_serve(paths: &AppPaths, args: &args::Args, lan: &LanSettings) -> Result<(
     cfg.lan_host = true;
     let link = HostLink::start_tagged(cfg, guard, Some(cl_host::service::BACKGROUND_TAG));
     let lan_host = start_lan_host(&link, paths, lan);
+    on_termination(termination_handler(None, Arc::clone(&link.stop)));
     while !link.stop.load(std::sync::atomic::Ordering::SeqCst) {
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
@@ -285,6 +320,7 @@ fn main() -> Result<()> {
             }
             shell.host = Some(link.probe());
             shell.company = Some(company_link(&link, &paths)?);
+            on_termination(termination_handler(marker.clone(), Arc::clone(&link.stop)));
             options.focus_request = Some(Arc::clone(&link.focus));
             options.stop_request = Some(Arc::clone(&link.stop));
             // Dropped when the window closes, which stops the engine and the
@@ -313,7 +349,21 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::start_control;
+    use super::{start_control, termination_handler};
+
+    /// Review S4: a termination request marks the session clean and asks
+    /// the window to close, so the next start shows no crash window.
+    #[test]
+    fn termination_marks_clean_and_asks_to_stop() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = cl_host::AppPaths::at(dir.path().to_path_buf()).unwrap();
+        let (marker, _) = cl_host::begin_session(&paths).unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        termination_handler(Some(marker), std::sync::Arc::clone(&stop))();
+        assert!(stop.load(std::sync::atomic::Ordering::SeqCst));
+        let (_, last) = cl_host::begin_session(&paths).unwrap();
+        assert_eq!(last, cl_host::LastExit::Clean);
+    }
 
     #[test]
     fn no_flag_means_no_server_and_no_file() {

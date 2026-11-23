@@ -1108,6 +1108,7 @@ dependencies = [
  "cl-lan",
  "cl-settings",
  "cl-ui",
+ "ctrlc",
  "tempfile",
  "tracing",
 ]

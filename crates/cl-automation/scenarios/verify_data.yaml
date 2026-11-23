@@ -23,8 +23,13 @@ steps:
   - assert_state: {key: screen.selected, equals: 1}
   - assert_exists: {label_contains: "doesn't match its entries"}
   - assert_exists: {role: button, label: "Open 1010 · Operating Checking"}
+  - assert_exists: {label_contains: "Found 1 problem and 1 thing to look at."}
   - assert_no_clipping: {}
   - screenshot: findings
+  - resize: {width: 960, height: 640}
+  - assert_no_clipping: {}
+  - screenshot: findings-min
+  - resize: {width: 1440, height: 940}
   - click: {role: button, label: "Fix selected…"}
   - assert_state: {key: screen.confirm_open, equals: true}
   - assert_exists: {label_contains: "makes a backup of this company"}
@@ -33,6 +38,6 @@ steps:
   - assert_state: {key: screen.fixed, equals: 1}
   - assert_state: {key: screen.warnings, equals: 0}
   - assert_state: {key: screen.errors, equals: 1}
-  - assert_exists: {label_contains: "A backup was made first"}
+  - assert_exists: {role: label, label_contains: "Fixed 1 item. A backup was made first"}
   - screenshot: fixed
   - command: file.close_window

@@ -55,6 +55,8 @@ pub enum PickUse {
     SaveTransfer,
     /// Where to save an IIF file (P32).
     SaveIif,
+    /// The folder scheduled backups go to (P34 QA-6).
+    BackupFolder,
 }
 
 impl PickUse {
@@ -72,6 +74,7 @@ impl PickUse {
             PickUse::TxnImportFile => "picker.title.txn_import_file",
             PickUse::SaveTransfer => "picker.title.save_transfer",
             PickUse::SaveIif => "picker.title.save_iif",
+            PickUse::BackupFolder => "picker.title.backup_folder",
         }
     }
 }

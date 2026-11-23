@@ -243,7 +243,9 @@ pub const COMMANDS: &[Command] = &[
     built("file.export_iif", "Export IIF File", Some(Menu::File), 1, None),
     // P31 D5 (Q-125): invoices, bills and journal entries from a spreadsheet.
     built("file.import_transactions", "Import Transactions from a Spreadsheet", Some(Menu::File), 1, None),
-    screen("file.full_backup", "Full Database Backup (Utilities)", Some(Menu::File), 1, None, "P34"),
+    // P34 built the cold-copy plumbing (`cl_host::cluster_ops`); the window
+    // needs the supervisor handed over and re-attached live (Q-P34y).
+    screen("file.full_backup", "Full Database Backup (Utilities)", Some(Menu::File), 1, None, "P37"),
     // P31: bring the books over from another program (Admins only; no
     // submenus, so a group of its own under File).
     built("file.import_qbd", "Import from QuickBooks Desktop", Some(Menu::File), 6, None),

@@ -303,7 +303,11 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
             }
             AttentionKind::HealthCheck => match item.count {
                 Some(n) if item.available && n > 0 => out.push(Line::task(
-                    t_with("home.attention.health_check", &[("n", &n.to_string())]),
+                    t_count(
+                        "home.attention.health_check",
+                        usize::try_from(n).unwrap_or(usize::MAX),
+                        &[],
+                    ),
                     "home.attention.health_check.open",
                     opens,
                 )),
@@ -433,6 +437,13 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
         out.push(Line::muted(t("home.attention.later")));
     }
     let local = home.local;
+    if local.last_test_failed {
+        out.push(Line::task(
+            t("home.attention.test_failed"),
+            "home.attention.test_failed.open",
+            Some(crate::screens::company::backup_settings::KIND),
+        ));
+    }
     let when = local
         .last_backup
         .map(|b| when_text(b, local.zone, home.today));

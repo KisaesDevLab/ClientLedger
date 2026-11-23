@@ -38,8 +38,7 @@ fn the_demo_needs_attention_shows_the_mockup() {
         assert!(
             nodes
                 .iter()
-                .any(|(r, n)| *r == Role::Label
-                    && n.starts_with("To-dos and the weekly health check"))
+                .any(|(r, n)| *r == Role::Label && n.starts_with("To-dos arrive"))
         );
         for link_name in ["Review", "Resume", "Open aging", "Pay bills", "Import"] {
             assert!(has(Role::Link, link_name), "{link_name}");
@@ -365,7 +364,7 @@ fn attention_lines_show_dashes_and_the_later_note() {
     assert!(
         lines
             .iter()
-            .any(|l| l.muted && l.text.starts_with("To-dos and the weekly"))
+            .any(|l| l.muted && l.text.starts_with("To-dos arrive"))
     );
     assert!(
         !h.attention().iter().any(AttentionItem::needs_attention),

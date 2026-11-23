@@ -162,7 +162,7 @@ Format: `Pxx — blocked by U-xx/Q-xx — what is pending — workaround in plac
 
 - P08 Delete Company (Q-185) — blocked by U-05 E5b (`tenant-delete-v1`) — `lifecycle::safe_delete_e5b` is PENDING — in place: the window explains it and keeps the button off; cl-company refuses without a before-delete backup path and SHA-256 (nothing sent) and removes the local record only after the engine's receipt.
 - P08 Recovery key (Q-210) — blocked by U-23 (`recovery-key-v1`) — `lifecycle::recovery_key_u23` is PENDING — in place: the screen (show once, copy, save, confirm) runs on the key `/desktop/initialize` returns or a rotated one; without the capability it says so.
-- P08 Full Database Backup (File > Utilities) — needs a supervisor-side `pg_dump` API while the cluster runs — placeholder window; P34 (Q-P08l).
+- P08 Full Database Backup (File > Utilities) — P34 built the cold copy and restore (`cl_host::cluster_ops`, tested on the real engine); the window needs the running app to hand its shared supervisor over and re-attach the engine link, session and LAN host — placeholder window; re-targeted to P37 (Q-P08l, Q-P34y).
 - P11 Chart of Accounts merge — blocked by U-31 (engine merge moves no journal lines; `/accounts/:id/ledger` empty) — merge not built — in place: merge hidden (`merge_available: false`), QuickReport uses `/reports/account-report` (Q-P11a, Q-P11i).
 - P11 parent-plus-sub-account balance — blocked by U-32 — PENDING — in place: each account's own engine balance only, with a note under the chart; `parentId` checked in `cl_model::lists::accounts::check` (Q-P11b).
 - P11 sensitive accounts enforcement — blocked by U-33 (and P29) — PENDING — in place: the mark is stored locally in `CompanyPrefs.sensitive_accounts` and shown (Q-P11c). Done in P29 (U-33, engine `568b1f69`; the engine enforces it and the desktop hides the refused doors).
@@ -271,6 +271,13 @@ Fixed on `phase/P05-engine-client`: scope pinning (both reviews), Retry-After ov
 10. Load more after a Refresh with the same stamp is not refetched (Q-A07t).
 11. The detail tab's date controls are inert (the drill fixes the dates).
 12. Memorize is disabled for builder reports until A08.
+
+## Follow-ups from P34
+
+1. Full Database Backup window (review S5): re-targeted to P37 (Q-P34y). `cluster_ops::full_backup` / `full_restore` take the `Supervisor` by value, while the app shares it (`Arc`) between `HostLink`, `CompanyLink`, the status probe and the LAN host, and a restore restarts the engine on other users and sessions. P37 adds a swappable supervisor slot, then the window (Back Up Now, Restore, typed "I trust this file" only after `Unregistered`, LAN-disconnect warning, host app only) and `has_full_backup` in the crash window.
+2. Review S6 / P33 follow-up 5 (QA-10): the QA practice company's good backup still fails the engine restore check (`ARCHIVE_VERIFY_FAILED`); P34 added only `verifyFailureSummary` logging. Reproduce with the job `details`, fix in the engine, and add a synthetic regression test.
+3. Review M10: the crash window's "engine failed to start" trigger (`engine_failed`) is never set (Q-P34bn), and Copy Details has no scrubbed log excerpt (Q-119).
+4. Crash marker on log-off (Q-P34w): Linux/macOS `SIGTERM`/`SIGHUP` now mark the session clean; a Windows log-off (no `WM_ENDSESSION` in winit) and a macOS log-out (`terminate:`) without a restart can still open the crash window.
 
 ## Follow-ups from PR-8
 

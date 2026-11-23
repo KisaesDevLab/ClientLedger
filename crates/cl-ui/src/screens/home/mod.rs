@@ -265,6 +265,9 @@ pub(crate) struct Local {
     pub checks_unconfirmed: bool,
     /// The company's last scheduled backup failed (Q-217, P34).
     pub last_schedule_failed: bool,
+    /// The newest tested scheduled backup did not pass its test restore
+    /// (P34 review S3).
+    pub last_test_failed: bool,
 }
 
 /// The clock Home shows a time in.
@@ -1021,6 +1024,22 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
                 .find(|x| x.outcome.consumes_slot())
                 .is_some_and(|x| matches!(x.outcome, cl_settings::RunOutcome::Failed { .. }))
     });
+    // Review S3: the newest scheduled backup that was tested failed it.
+    let last_test_failed = record.as_ref().is_some_and(|r| {
+        r.backups
+            .iter()
+            .filter(|b| {
+                matches!(
+                    b.trigger,
+                    Some(
+                        cl_settings::BackupTrigger::Scheduled | cl_settings::BackupTrigger::Missed
+                    )
+                )
+            })
+            .filter_map(|b| b.tested.as_ref().map(|t| (b.created_at, t.passed)))
+            .max_by_key(|(at, _)| *at)
+            .is_some_and(|(_, passed)| !passed)
+    });
     let last = record.and_then(|r| r.last_backup);
     let checks_unconfirmed =
         tenant.is_some_and(|(id, _)| crate::screens::print_forms::waiting_answer(link, *id));
@@ -1034,6 +1053,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
             checklist_dismissed,
             checks_unconfirmed,
             last_schedule_failed,
+            last_test_failed,
         };
     }
     let now = chrono::Utc::now();
@@ -1047,6 +1067,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
         checklist_dismissed,
         checks_unconfirmed,
         last_schedule_failed,
+        last_test_failed,
     }
 }
 

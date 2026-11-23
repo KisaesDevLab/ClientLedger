@@ -1,6 +1,6 @@
 # Crash recovery (P34 B4, Q-P34o) against `clientledger --demo`: the
 # window an unclean start opens (dev.crash_demo_unclean marks it), with the
-# journal sentence (the demo says the database replayed it), the secrets
+# recovery sentence (the demo says the database replayed its journal), the secrets
 # note, and its actions; Continue closes it. Local only: nothing here asks
 # the engine.
 name: crash_recovery
@@ -12,8 +12,8 @@ steps:
   - assert_state: {key: screen.screen, equals: crash_recovery}
   - assert_state: {key: screen.unclean, equals: true}
   - assert_state: {key: screen.journal_replayed, equals: true}
-  - assert_exists: {label_contains: "didn't close normally"}
-  - assert_exists: {label_contains: "replayed its journal"}
+  - assert_exists: {role: tab, label: "ClientLedger didn't close normally"}
+  - assert_exists: {role: label, label_contains: "finished saving the changes that were in progress"}
   - assert_exists: {role: button, label: Check My Books}
   - assert_exists: {role: button, label: Restore a Company Backup}
   - assert_exists: {role: button, label: Copy Details}
@@ -21,4 +21,4 @@ steps:
   - assert_no_clipping: {}
   - screenshot: unclean
   - click: {role: button, label: Continue}
-  - assert_not_exists: {role: tab, label: Didn't Close Normally}
+  - assert_not_exists: {role: tab, label: "ClientLedger didn't close normally"}

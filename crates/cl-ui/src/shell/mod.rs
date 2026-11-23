@@ -1235,6 +1235,14 @@ impl Shell {
                 {
                     d.integrity.reset();
                 }
+                // QA-1: an open Verify Data window keeps the last run;
+                // the next scenario starts from a fresh one.
+                if let Some(id) = self
+                    .windows
+                    .find_kind(CommandId::new(crate::screens::company::verify_data::KIND))
+                {
+                    self.windows.close_now(id);
+                }
             }
             "file.restore" => {
                 let open = CommandId::new("file.open_company");

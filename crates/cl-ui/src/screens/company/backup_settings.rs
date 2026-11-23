@@ -33,6 +33,9 @@ use crate::windows::Screen;
 /// The command that opens it.
 pub const KIND: &str = "file.backup_settings";
 
+/// The message shown when no backup passphrase is set (with its button).
+const NO_PASSPHRASE: &str = "backups.no_passphrase";
+
 /// Which tab shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tab {
@@ -99,18 +102,21 @@ impl Draft {
             }
             _ => Frequency::Daily,
         };
+        // Review M11: bounded so the kept files always fit the history.
         let keep_last: usize = self
             .keep_last
             .trim()
             .parse()
             .ok()
-            .filter(|n| *n >= 1)
+            .filter(|n| (1..=MAX_KEEP_LAST).contains(n))
             .ok_or("backups.bad_keep")?;
         let keep_months: u32 = self
             .keep_months
             .trim()
             .parse()
-            .map_err(|_| "backups.bad_keep")?;
+            .ok()
+            .filter(|n| *n <= MAX_KEEP_MONTHS)
+            .ok_or("backups.bad_keep")?;
         Ok(BackupSchedule {
             enabled: self.enabled,
             frequency,
@@ -124,6 +130,21 @@ impl Draft {
     }
 }
 
+/// Most newest backups a schedule keeps (the history holds 200).
+const MAX_KEEP_LAST: usize = 100;
+/// Most months a schedule keeps one backup for.
+const MAX_KEEP_MONTHS: u32 = 60;
+
+/// How often an open window rereads the history (a scheduled run or a
+/// test restore elsewhere shows without reopening, QA-13).
+const REFRESH: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// True when turning a schedule on must be refused: it could never run
+/// without a backup passphrase (QA-12). The demo has none and runs nothing.
+fn passphrase_missing(enabled: bool, demo: bool, secrets: &dyn cl_settings::SecretStore) -> bool {
+    enabled && !demo && !cl_company::backup::has_passphrase(secrets)
+}
+
 /// The Scheduled Backups and History window.
 pub struct BackupSettingsScreen {
     link: Arc<CompanyLink>,
@@ -135,17 +156,42 @@ pub struct BackupSettingsScreen {
     message: Option<(&'static str, bool)>,
     testing: Option<(PathBuf, Task<Result<TestOutcome, CompanyError>>)>,
     test_error: Option<CompanyError>,
+    browsing: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
+    refreshed: std::time::Instant,
 }
 
+/// Weekday names (i18n keys), Monday first.
 const WEEKDAYS: [&str; 7] = [
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
+    "backups.weekday.0",
+    "backups.weekday.1",
+    "backups.weekday.2",
+    "backups.weekday.3",
+    "backups.weekday.4",
+    "backups.weekday.5",
+    "backups.weekday.6",
 ];
+
+/// A button whose screen-reader name says which file it acts on, while
+/// the visible text stays short (QA-3).
+fn named_button(ui: &mut Ui, enabled: bool, text: &str, name: &str) -> eframe::egui::Response {
+    let r = ui.add_enabled(enabled, eframe::egui::Button::new(text));
+    let name = name.to_string();
+    r.widget_info(|| eframe::egui::WidgetInfo::labeled(eframe::egui::Role::Button, enabled, &name));
+    r
+}
+
+/// A tab the screen reader announces as one (QA-8).
+fn tab(ui: &mut Ui, current: &mut Tab, value: Tab, text: &str) -> bool {
+    let on = *current == value;
+    let r = ui.selectable_label(on, text);
+    let label = text.to_string();
+    r.widget_info(|| eframe::egui::WidgetInfo::selected(eframe::egui::Role::Tab, true, on, &label));
+    if r.clicked() {
+        *current = value;
+        return true;
+    }
+    false
+}
 
 impl BackupSettingsScreen {
     /// The window over the open company.
@@ -161,6 +207,8 @@ impl BackupSettingsScreen {
             message: None,
             testing: None,
             test_error: None,
+            browsing: None,
+            refreshed: std::time::Instant::now(),
         };
         // The demo: each opening starts from no schedule (light and dark run
         // in one demo app).
@@ -188,6 +236,20 @@ impl BackupSettingsScreen {
             .to_string()
     }
 
+    /// Rereads the company's record only (the form being edited stays).
+    fn refresh_record(&mut self) {
+        self.refreshed = std::time::Instant::now();
+        let Some((id, _)) = self.tenant.clone() else {
+            return;
+        };
+        self.record = self
+            .link
+            .store()
+            .load()
+            .ok()
+            .and_then(|l| l.get(id).cloned());
+    }
+
     fn reload(&mut self) {
         let Some((id, name)) = self.tenant.clone() else {
             return;
@@ -195,12 +257,7 @@ impl BackupSettingsScreen {
         if self.link.is_demo() {
             seed_demo(&self.link, id, &name);
         }
-        self.record = self
-            .link
-            .store()
-            .load()
-            .ok()
-            .and_then(|l| l.get(id).cloned());
+        self.refresh_record();
         let folder = self.default_folder();
         self.draft = Draft::of(
             self.record.as_ref().and_then(|r| r.schedule.as_ref()),
@@ -230,6 +287,15 @@ impl BackupSettingsScreen {
         // Q-P34bg: the folder must exist (never made, never replaced).
         if schedule.enabled && !self.link.is_demo() && !schedule.folder.is_dir() {
             self.message = Some(("backups.folder_missing", false));
+            return;
+        }
+        // QA-12: a schedule that could never run is not saved.
+        if passphrase_missing(
+            schedule.enabled,
+            self.link.is_demo(),
+            self.link.secrets().as_ref(),
+        ) {
+            self.message = Some((NO_PASSPHRASE, false));
             return;
         }
         let old = self.record.as_ref().and_then(|r| r.schedule.clone());
@@ -328,6 +394,14 @@ impl BackupSettingsScreen {
     }
 
     fn poll(&mut self) {
+        if let Some(chosen) = crate::widgets::file_picker::poll(&mut self.browsing)
+            && let Some(dir) = chosen
+        {
+            self.draft.folder = dir.display().to_string();
+        }
+        if self.refreshed.elapsed() >= REFRESH {
+            self.refresh_record();
+        }
         if let Some((_, task)) = self.testing.as_mut()
             && let Some(r) = task.poll_result()
         {
@@ -349,6 +423,21 @@ impl BackupSettingsScreen {
             form::hint(ui, tokens, &t("backups.enabled.hint"));
             ui.add_space(6.0);
             form::field_wide(ui, &t("backups.folder"), &mut self.draft.folder);
+            let browse = ui
+                .add_enabled(
+                    self.browsing.is_none(),
+                    eframe::egui::Button::new(t("backups.browse")),
+                )
+                .on_hover_text(t("backups.browse.tip"));
+            if browse.clicked() {
+                let typed = PathBuf::from(self.draft.folder.trim());
+                let start = typed.is_dir().then_some(typed);
+                self.browsing = Some(crate::widgets::file_picker::pick_folder(
+                    ui.ctx(),
+                    crate::widgets::file_picker::PickUse::BackupFolder,
+                    start.as_deref(),
+                ));
+            }
             form::hint(ui, tokens, &t("backups.folder.hint"));
             ui.add_space(6.0);
             ui.label(t("backups.frequency"));
@@ -364,11 +453,11 @@ impl BackupSettingsScreen {
             match self.draft.frequency {
                 1 => {
                     eframe::egui::ComboBox::from_label(t("backups.weekday"))
-                        .selected_text(WEEKDAYS[usize::from(self.draft.weekday.min(6))])
+                        .selected_text(t(WEEKDAYS[usize::from(self.draft.weekday.min(6))]))
                         .show_ui(ui, |ui| {
                             for (i, d) in WEEKDAYS.iter().enumerate() {
                                 let i = u8::try_from(i).unwrap_or(0);
-                                ui.selectable_value(&mut self.draft.weekday, i, *d);
+                                ui.selectable_value(&mut self.draft.weekday, i, t(d));
                             }
                         });
                 }
@@ -388,9 +477,13 @@ impl BackupSettingsScreen {
         }
         if let Some((key, ok)) = self.message {
             if ok {
-                form::inline_note(ui, tokens, &t(key));
+                form::inline_success(ui, tokens, &t(key));
             } else {
                 form::inline_warning(ui, tokens, &t(key));
+            }
+            if key == NO_PASSPHRASE && ui.button(t("backups.set_passphrase")).clicked() {
+                self.link
+                    .push(CompanyEvent::OpenWindow(CommandId::new("file.backup")));
             }
         }
         if form::actions(ui, &t("backups.save"), &[]).is_some() {
@@ -405,7 +498,13 @@ impl BackupSettingsScreen {
         if let Some(e) = &self.test_error {
             form::inline_error(ui, tokens, e);
         }
-        for r in rec.schedule_runs.iter().rev().take(10) {
+        // QA-15: only failures since the last run that worked.
+        let since_done = rec
+            .schedule_runs
+            .iter()
+            .rposition(|r| matches!(r.outcome, RunOutcome::Done { .. }))
+            .map_or(0, |i| i + 1);
+        for r in rec.schedule_runs[since_done..].iter().rev().take(10) {
             let line = match &r.outcome {
                 RunOutcome::Failed { code } => {
                     t_with("backups.run.failed", &[("why", &reason_text(code))])
@@ -429,7 +528,7 @@ impl BackupSettingsScreen {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                ui.label(RichText::new(&name).strong());
+                ui.add(eframe::egui::Label::new(RichText::new(&name).strong()).wrap());
                 ui.label(format!(
                     "{} · {}",
                     when_text(b.created_at),
@@ -440,28 +539,34 @@ impl BackupSettingsScreen {
                 ui.horizontal(|ui| {
                     if testing {
                         ui.label(t("backups.test.running"));
-                    } else if ui
-                        .add_enabled(
-                            self.testing.is_none(),
-                            eframe::egui::Button::new(t_with(
-                                "backups.test.go.named",
-                                &[("name", &name)],
-                            )),
-                        )
-                        .clicked()
+                    } else if named_button(
+                        ui,
+                        self.testing.is_none(),
+                        &t("backups.test.go"),
+                        &t_with("backups.test.go.named", &[("name", &name)]),
+                    )
+                    .clicked()
                     {
                         action = Some((0, b.path.clone()));
                     }
-                    if ui
-                        .button(t_with("backups.show.named", &[("name", &name)]))
-                        .clicked()
+                    if named_button(
+                        ui,
+                        true,
+                        &t("backups.show"),
+                        &t_with("backups.show.named", &[("name", &name)]),
+                    )
+                    .clicked()
                     {
                         action = Some((1, b.path.clone()));
                     }
-                    if ui
-                        .button(t_with("backups.restore.named", &[("name", &name)]))
-                        .on_hover_text(t("backups.restore.hint"))
-                        .clicked()
+                    if named_button(
+                        ui,
+                        true,
+                        &t("backups.restore"),
+                        &t_with("backups.restore.named", &[("name", &name)]),
+                    )
+                    .on_hover_text(t("backups.restore.hint"))
+                    .clicked()
                     {
                         action = Some((2, b.path.clone()));
                     }
@@ -631,9 +736,11 @@ impl Screen for BackupSettingsScreen {
 
     fn ui(&mut self, ui: &mut Ui) {
         self.poll();
-        if self.testing.is_some() {
+        if self.testing.is_some() || self.browsing.is_some() {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(100));
+        } else {
+            ui.ctx().request_repaint_after(REFRESH);
         }
         let tokens = Tokens::of(ui.ctx());
         ui.add_space(8.0);
@@ -644,8 +751,10 @@ impl Screen for BackupSettingsScreen {
         };
         ui.label(RichText::new(t_with("backup.company", &[("name", &name)])).strong());
         ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.tab, Tab::Schedule, t("backups.tab.schedule"));
-            ui.selectable_value(&mut self.tab, Tab::History, t("backups.tab.history"));
+            tab(ui, &mut self.tab, Tab::Schedule, &t("backups.tab.schedule"));
+            if tab(ui, &mut self.tab, Tab::History, &t("backups.tab.history")) {
+                self.refresh_record();
+            }
         });
         ui.separator();
         match self.tab {
@@ -693,7 +802,12 @@ mod tests {
         d.at = "07:05".into();
         d.keep_last = "0".into();
         assert_eq!(d.schedule(), Err("backups.bad_keep"));
+        d.keep_last = "101".into();
+        assert_eq!(d.schedule(), Err("backups.bad_keep"), "review M11");
         d.keep_last = "5".into();
+        d.keep_months = "61".into();
+        assert_eq!(d.schedule(), Err("backups.bad_keep"));
+        d.keep_months = "12".into();
         let s = d.schedule().expect("ok");
         assert_eq!(s.frequency, Frequency::Monthly { day: 28 });
         assert_eq!(s.keep_last, 5);
@@ -718,5 +832,23 @@ mod tests {
         s.test(p);
         assert_eq!(s.state()["tested"], 1);
         assert_eq!(s.draft, first);
+    }
+
+    /// QA-12: turning a schedule on without a backup passphrase is refused
+    /// (outside the demo); with one, or turned off, it saves.
+    #[test]
+    fn a_schedule_without_a_passphrase_is_refused() {
+        use cl_settings::SecretStore as _;
+        let none = cl_settings::MemorySecrets::default();
+        assert!(passphrase_missing(true, false, &none));
+        assert!(!passphrase_missing(false, false, &none));
+        assert!(!passphrase_missing(true, true, &none));
+        let set = cl_settings::MemorySecrets::default();
+        set.set(
+            cl_settings::secrets::BACKUP_PASSPHRASE,
+            &cl_core::Secret::new("a long synthetic passphrase"),
+        )
+        .expect("set");
+        assert!(!passphrase_missing(true, false, &set));
     }
 }

@@ -253,6 +253,13 @@ pub(crate) fn passphrase(secrets: &dyn SecretStore) -> Result<cl_core::Secret, C
         .ok_or(CompanyError::NoPassphrase)
 }
 
+/// True when a backup passphrase is set in the keychain (a schedule
+/// without one could never run, QA-12).
+#[must_use]
+pub fn has_passphrase(secrets: &dyn SecretStore) -> bool {
+    passphrase(secrets).is_ok()
+}
+
 /// Polls an archive job (export or import) to its end, reporting the
 /// engine's progress and step. A job the engine no longer knows (it
 /// restarted) is `JobFailed { JOB_UNKNOWN }`: start again.
@@ -659,6 +666,23 @@ pub async fn backup_with(
     progress: &ProgressSink,
 ) -> Result<BackupOutcome, CompanyError> {
     let _gate = GATE.lock().await;
+    backup_ungated(session, store, secrets, req, opts, progress).await
+}
+
+/// [`backup_with`] for a caller that took [`GATE`] with [`try_gate`] (the
+/// backup on close, which never waits for a running test restore).
+///
+/// # Errors
+/// As [`backup`].
+pub async fn backup_holding(
+    _gate: GateGuard,
+    session: &Session,
+    store: &RecentStore,
+    secrets: &dyn SecretStore,
+    req: &BackupRequest,
+    opts: &BackupOptions,
+    progress: &ProgressSink,
+) -> Result<BackupOutcome, CompanyError> {
     backup_ungated(session, store, secrets, req, opts, progress).await
 }
 
