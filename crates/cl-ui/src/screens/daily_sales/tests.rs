@@ -1346,7 +1346,9 @@ fn an_unkeyed_probe_leaves_another_users_draft_alone() {
     for commits in [false, true] {
         let (books, owners, plan) = two_computers();
         let api = LosesReply::new(Arc::clone(&books), false, commits);
-        let e = at_once(super::save::flow(&api, plan)).expect_err("could not tell");
+        let Err(e) = at_once(super::save::flow(&api, plan)) else {
+            panic!("could not tell");
+        };
         assert!(
             matches!(e, ApiError::OutcomeUnknown { keyed: false, .. }),
             "{e:?}"
