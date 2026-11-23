@@ -176,7 +176,7 @@ impl Screen for CrashRecoveryScreen {
             form::hint(ui, &tokens, &t("crash.body"));
         }
         if self.info.recovered {
-            form::inline_note(ui, &tokens, &t("crash.journal"));
+            form::inline_success(ui, &tokens, &t("crash.journal"));
         }
         if self.info.engine_failed {
             form::inline_warning(ui, &tokens, &t("crash.engine_failed"));
