@@ -309,6 +309,7 @@ Status values: `Planned`, `In progress`, `Done (branch)`, `Merged (MyBooks vX.Y)
 | U-292 | Stale-required `stale-required-v1` (428 STALE_REQUIRED in LAN mode) | P33 | — | Planned |
 | U-293 | Maintenance mode `maintenance-v1` (stored in the DB, drain, reset) | P33 | — | Planned |
 | U-294 | Change feed `changes-v1` (xid8 horizon, desktop-gated triggers) | P33 | — | Planned |
+| U-295 | Maintenance hold that keeps sessions `maintenance-sessions-v1` (PR-8 S6): `POST /desktop/maintenance/start` takes optional `keepSessions`; routine holds (payroll post, spreadsheet import/undo, QuickBooks import) leave workstations signed in, a restore still signs everyone out; no migration | PR-8 | clientledger/pr8-hold-sessions | Merged (engine main, PR #101, e51d7615) |
 Engine issue #162 (flaky pgboss-owner-role test) is open; not caused by PR #160 or #161.
 
 Add rows as capability checks find gaps (credit memos, statements, finance charges, sales tax, average-cost inventory, reconciliation, permissions granularity, optimistic concurrency, change notifications for LAN mode; post-beta: estimates, sales orders, POs, assemblies, custom fields, form templates).
