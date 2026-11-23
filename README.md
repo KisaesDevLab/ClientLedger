@@ -38,7 +38,9 @@ In plain language (not part of the license): you may use and modify this
 software for free to keep the books of entities you own, control, or work for.
 If you are paid to work on someone else's books, you need a Pro License Key. If
 you want to distribute the software or a modified version, you need a Developer
-License Key. The accounting engine inside is licensed separately and may only be
+License Key. Pro and Developer keys are perpetual for the major version you bought
+(for example, every 1.x release); moving to the next major version requires an
+upgrade key. The accounting engine inside is licensed separately and may only be
 run as Kisaes ships it. See [NOTICE.md](NOTICE.md).
 
 ## Contributing

@@ -4,7 +4,7 @@
 **Software:** the ClientLedger, ClientLedger Trial Balance, and Vibe MyBooks applications, and any other software Kisaes distributes under these terms, including source code, binaries, documentation, and any updates Kisaes provides under these terms.
 **Version:** 1.0, effective 2026-11-06
 
-> Plain-language summary (not part of the license): You may use and modify this software for free to keep the books of entities you own, control, or work for. If you are paid to work on someone else's books, you need a Pro License Key. If you want to distribute the software or a modified version, you need a Developer License Key. The accounting engine inside is licensed separately and may only be run as Kisaes ships it.
+> Plain-language summary (not part of the license): You may use and modify this software for free to keep the books of entities you own, control, or work for. If you are paid to work on someone else's books, you need a Pro License Key. If you want to distribute the software or a modified version, you need a Developer License Key. Pro and Developer keys are perpetual for the major version you bought (for example, every 1.x release); moving to the next major version requires an upgrade key. The accounting engine inside is licensed separately and may only be run as Kisaes ships it.
 
 ## 1. Acceptance
 
@@ -48,7 +48,7 @@ Use of the Software for any purpose that is not Own-Entity Use, Professional Use
 
 ### 6.2 Scope of a Pro License Key
 
-A Pro License Key is issued to one Company. It covers every individual working for that Company (employees and contractors), on any number of computers, for any number of client entities, for the term stated in the Commercial Terms under which it was purchased. A Pro License Key does not permit Distribution.
+A Pro License Key is issued to one Company. It covers every individual working for that Company (employees and contractors), on any number of computers, for any number of client entities. It is perpetual for the Major Version it names, as Section 9A provides. A Pro License Key does not permit Distribution.
 
 ### 6.3 Examples
 
@@ -85,6 +85,28 @@ The Software includes or depends on the Kisaes GL Engine (the "Engine"), which i
 ## 9. License Keys and No Circumvention
 
 License Keys are issued by Kisaes through its licensing service under separate Commercial Terms, which state price, term, and scope. You may not remove, disable, bypass, or interfere with any License Key check or license notice in the Software, and you may not share a key outside your Company.
+
+## 9A. Term, Major Versions, and Upgrades
+
+### 9A.1 Perpetual keys
+
+A Pro License Key and a Developer License Key are perpetual: they do not expire, require no renewal, and are not revoked except under Section 14. Each key names a Major Version.
+
+### 9A.2 What a key covers
+
+A key covers every release of the Software whose Major Version equals the Major Version named in the key, including all minor and patch releases of that Major Version, whenever published. Kisaes may, in its discretion, extend a key to a later Major Version without charge, but is not obliged to.
+
+### 9A.3 New Major Versions
+
+A release with a higher Major Version than your key names is not covered by your key. Professional Use or Developer Use of such a release requires an Upgrade Key or a new key purchased under the then-current Commercial Terms. Own-Entity Use requires no key for any version.
+
+### 9A.4 Continued use
+
+After a new Major Version ships, you may continue to use every release your key covers, perpetually. The Software will not disable, lock, or delete your data because a newer Major Version exists or because your key does not cover it; at most it will decline to open a release it does not cover and direct you to the upgrade page.
+
+### 9A.5 Pack subscriptions
+
+Where a product offers subscription feature packs (for example the Vibe MyBooks Client Portal and Advisory packs), those packs are licensed for the term stated in their Commercial Terms and are independent of the perpetual key for the product itself.
 
 ## 10. Notices
 
@@ -128,7 +150,9 @@ These terms are governed by the laws of the State of Missouri, USA, without rega
 
 **Official Build** means a binary or container image built, signed, and published by Kisaes.
 
-**License Key, Pro License Key, Developer License Key** mean the respective keys issued by Kisaes under its Commercial Terms.
+**License Key, Pro License Key, Developer License Key, Upgrade Key** mean the respective keys issued by Kisaes under its Commercial Terms. An Upgrade Key replaces an existing Pro or Developer License Key with one naming a higher Major Version.
+
+**Major Version** means the first number of a release's version identifier (for example, "1" in 1.4.2), as published by Kisaes in the release notes.
 
 **Commercial Terms** means the terms presented and accepted at `https://licensing.kisaes.com` when a License Key is issued, as amended for renewals.
 

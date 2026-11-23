@@ -97,7 +97,7 @@ ClientLedger/
 ├── .claude/
 │   ├── agents/               # subagent definitions (models, tools, effort)
 │   └── settings.json         # max 4 concurrent subagents
-├── LICENSE                   # PolyForm Internal Use 1.0.0 — ClientLedger code only (Q-303)
+├── LICENSE.md                # VibeMyFirm Community License 1.0 — ClientLedger code only (Q-336, Q-369)
 ├── NOTICE.md                 # what LICENSE covers; the engine's included commercial license (Q-303, Q-316)
 ├── CONTRIBUTING.md           # issues welcome; pull requests not accepted (Q-32)
 ├── ATTRIBUTION.md            # every bundled font, icon, binary, and license

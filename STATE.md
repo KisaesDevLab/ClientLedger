@@ -105,7 +105,7 @@
 | I08 | Wizard, extractor packaging, help | M | |
 | PR-I1 | Checkpoint: QuickBooks SDK import (process review) | — | |
 
-**ADD-09 — Private development repo, public release repo** (`addenda/ADD-09-private-dev-public-release.md`, revision 2, owner 2026-11-21; Q-ADD9a–Q-ADD9m). Proposed scheduling (Q-ADD9a; default until the owner says otherwise): **R0 done 2026-11-22**; R1–R5 and R8 are built inside P35/P36 with ADD-04, after Q-ADD9b–Q-ADD9e are answered (they block R3 and must be settled before P35 starts); R6 (cutover) and R7 (source requests, collaborators) are owner steps after the beta build. The phase loop continues with P33.
+**ADD-09 — Private development repo, public release repo** (`addenda/ADD-09-private-dev-public-release.md`, revision 2, owner 2026-11-21; Q-ADD9a–Q-ADD9m). Proposed scheduling (Q-ADD9a; default until the owner says otherwise): **R0 done 2026-11-22**; R1–R5 and R8 are built inside P35/P36 with ADD-04 (Q-ADD9b–e, j, l, m answered 2026-11-22 from the TB decisions: Inno Setup per-user plus zip replaces the MSI, local release script, Windows only, browser-open update check, support@kisaes.com); R6 (cutover) and R7 (source requests, collaborators) are owner steps after the beta build. The phase loop continues with P33.
 
 R0 inventory (2026-11-22, `main` at d693a32f):
 
