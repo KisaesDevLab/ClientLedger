@@ -26,6 +26,21 @@ use crate::company::{CompanyEvent, CompanyLink};
 
 static HOLD: AtomicBool = AtomicBool::new(false);
 
+/// "Check My Books" in the crash recovery window: a quick check runs
+/// after the next company opens, whatever the weekly rule says.
+static CHECK_AFTER_OPEN: AtomicBool = AtomicBool::new(false);
+
+/// Ask for a quick check after the next company opens.
+pub fn request_check_after_open() {
+    CHECK_AFTER_OPEN.store(true, Ordering::SeqCst);
+}
+
+/// Takes the request (once).
+#[must_use]
+pub fn take_check_after_open() -> bool {
+    CHECK_AFTER_OPEN.swap(false, Ordering::SeqCst)
+}
+
 /// A maintenance hold starts or ends on this computer: scheduled backups
 /// wait meanwhile (`with_maintenance` calls this).
 pub fn set_hold(on: bool) {
@@ -125,6 +140,37 @@ impl RunnerHost for Host {
         self.inputs.running.store(job.is_some(), Ordering::Relaxed);
     }
 
+    fn after_backup<'a>(
+        &'a self,
+        job: &'a Job,
+        sha256: &'a str,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        Box::pin(async move {
+            // "Test each backup": the file just written, through the queue.
+            let path = self.store.load().ok().and_then(|l| {
+                l.get(job.tenant_id)
+                    .and_then(|c| c.backup_by_sha256(sha256))
+                    .map(|b| b.path.clone())
+            });
+            let Some(path) = path else {
+                return;
+            };
+            let Some(pending) = self.send_test(path) else {
+                return;
+            };
+            let mut pending = pending;
+            loop {
+                if let Some(r) = pending.try_take() {
+                    if !matches!(r, Ok(Ok(_))) {
+                        tracing::warn!("scheduled test restore could not run");
+                    }
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(250)).await;
+            }
+        })
+    }
+
     fn execute<'a>(
         &'a self,
         job: &'a Job,
@@ -140,7 +186,35 @@ impl RunnerHost for Host {
     }
 }
 
+/// A test restore's answer through the queue.
+type TestAnswer = Result<cl_company::verify::TestOutcome, cl_company::CompanyError>;
+
 impl Host {
+    fn send_test(&self, path: std::path::PathBuf) -> Option<cl_api::Pending<TestAnswer>> {
+        let link = self.link.upgrade()?;
+        let session = link.session()?;
+        let client = link.client()?.clone();
+        let group = link.group()?.ok()?;
+        let store = self.store.clone();
+        let secrets = Arc::clone(&self.secrets);
+        let label = cl_api::OrphanLabel {
+            what: "orphan.lifecycle",
+            key: None,
+        };
+        group
+            .write(&client, label, move |_c| async move {
+                Ok(cl_company::verify::test_restore(
+                    &session,
+                    &store,
+                    secrets.as_ref(),
+                    &path,
+                    &cl_company::backup::silent(),
+                )
+                .await)
+            })
+            .ok()
+    }
+
     fn send(&self, job: &Job, now: Timestamp) -> Option<cl_api::Pending<JobResult>> {
         let link = self.link.upgrade()?;
         let session = link.session()?;
@@ -178,6 +252,40 @@ async fn wait(mut pending: cl_api::Pending<JobResult>) -> JobResult {
     }
 }
 
+/// The weekly quick check in flight (its group keeps it from being
+/// cancelled).
+pub type WeeklyCheck = (cl_api::RequestGroup, cl_api::Pending<bool>);
+
+/// Q-171 / Q-P34f: after a company opens, for an owner or Admin on an
+/// engine with `integrity-v1`, run a quick check in the background when the
+/// company's last quick run is 7 or more days old (or "Check My Books" asked
+/// for one). Answers `true` when a check ran.
+#[must_use]
+pub fn weekly_check(link: &Arc<CompanyLink>) -> Option<WeeklyCheck> {
+    let force = take_check_after_open();
+    if link.is_demo()
+        || !link.rights().is_admin()
+        || !link.capabilities().has(cl_api::Capabilities::INTEGRITY)
+    {
+        return None;
+    }
+    let session = link.session()?;
+    let group = link.group()?.ok()?;
+    let pending = group
+        .read(&session, move |s| async move {
+            let summary = s.integrity().summary().await?;
+            if force || cl_company::health::quick_check_due(&summary, cl_settings::recent::now()) {
+                let run = s.integrity().check(cl_api::IntegrityLevel::Quick).await?;
+                tracing::info!(findings = run.findings.len(), "weekly quick check done");
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        })
+        .ok()?;
+    Some((group, pending))
+}
+
 /// Starts the scheduler thread for a live app on this computer (not the
 /// demo, not a workstation). `None` when it does not run.
 #[must_use]
@@ -211,12 +319,11 @@ pub fn start(link: &Arc<CompanyLink>) -> Option<Arc<RunnerInputs>> {
                 move || stop_inputs.stop.load(Ordering::Relaxed) || weak.strong_count() == 0,
             ));
         });
-    match spawned {
-        Ok(_) => Some(inputs),
-        Err(_) => {
-            tracing::warn!("scheduled backups could not start");
-            None
-        }
+    if spawned.is_ok() {
+        Some(inputs)
+    } else {
+        tracing::warn!("scheduled backups could not start");
+        None
     }
 }
 

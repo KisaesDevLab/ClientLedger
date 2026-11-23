@@ -994,7 +994,11 @@ pub fn need(id: CommandId) -> Option<Need> {
         | "file.printer_setup" | "file.close_window" | "file.quit" => Always,
         // Q-P32i: an IIF file needs the backup right (and sight of every
         // hidden account, checked by the screen).
-        "file.backup" | "file.export_all" | "file.export_iif" => Read(R::CompanySettings),
+        "file.backup" | "file.export_all" | "file.export_iif" | "file.backup_settings" => {
+            Read(R::CompanySettings)
+        }
+        // P34 (Q-P34e): checks and fixes are the owner's or an Admin's.
+        "file.verify_data" => AdminOnly,
         // P31 (S4): commit, undo and verify are the Admin's; the wizards are too
         // (D5: the spreadsheet import's commit and undo, U-263).
         "file.full_backup"

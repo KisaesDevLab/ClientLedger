@@ -189,7 +189,9 @@ impl AttentionKind {
     /// unavailable otherwise.
     #[must_use]
     pub const fn supported(self) -> bool {
-        !matches!(self, AttentionKind::ToDos | AttentionKind::HealthCheck)
+        // P34: the health check counts with `integrity-v1`; the UI marks it
+        // unavailable on an engine without it.
+        !matches!(self, AttentionKind::ToDos)
     }
 
     /// The command its link opens (a placeholder window until its screen
@@ -208,7 +210,8 @@ impl AttentionKind {
             AttentionKind::Backup => Some("file.backup"),
             // Items to Reorder (P24).
             AttentionKind::Reorder => Some("vendors.items_to_reorder"),
-            AttentionKind::ToDos | AttentionKind::HealthCheck => None,
+            AttentionKind::HealthCheck => Some("file.verify_data"),
+            AttentionKind::ToDos => None,
         }
     }
 }
@@ -272,6 +275,27 @@ pub fn backup_due(last: Option<Timestamp>, now: Timestamp, days: u16) -> bool {
     };
     let window = i64::from(days) * 86_400_000;
     now.unix_millis().saturating_sub(last.unix_millis()) >= window
+}
+
+/// The Home backup line (Q-217, P34): due by age, or the last scheduled
+/// run failed (it uses its slot, so it would otherwise stay quiet until
+/// the next one).
+#[must_use]
+pub fn backup_line_due(age_due: bool, last_scheduled_failed: bool) -> bool {
+    age_due || last_scheduled_failed
+}
+
+/// The once-a-day prompt at open (Q-217): a backup is due by age, no
+/// schedule is on, and the owner was not asked yet on `today` (the local
+/// date as `YYYY-MM-DD`).
+#[must_use]
+pub fn backup_prompt_due(
+    age_due: bool,
+    has_schedule: bool,
+    last_asked: Option<&str>,
+    today: &str,
+) -> bool {
+    age_due && !has_schedule && last_asked != Some(today)
 }
 
 /// One step of the setup checklist (Q-63).
@@ -483,7 +507,25 @@ mod tests {
         );
         assert!(AttentionItem::counted(AttentionKind::Reorder, 2).needs_attention());
         assert!(!AttentionItem::counted(AttentionKind::Reorder, 0).needs_attention());
-        assert!(!AttentionKind::HealthCheck.supported());
+        // P34: counted with integrity-v1, opening Verify Data.
+        assert!(AttentionKind::HealthCheck.supported());
+        assert_eq!(AttentionKind::HealthCheck.opens(), Some("file.verify_data"));
+        assert!(backup_line_due(false, true));
+        assert!(!backup_line_due(false, false));
+        assert!(backup_prompt_due(
+            true,
+            false,
+            Some("2026-11-03"),
+            "2026-11-04"
+        ));
+        assert!(!backup_prompt_due(
+            true,
+            false,
+            Some("2026-11-04"),
+            "2026-11-04"
+        ));
+        assert!(!backup_prompt_due(true, true, None, "2026-11-04"));
+        assert!(!backup_prompt_due(false, false, None, "2026-11-04"));
 
         let bank = AttentionItem::counted(AttentionKind::BankWaiting, 37);
         assert!(bank.needs_attention());

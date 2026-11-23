@@ -1,0 +1,38 @@
+# Verify Data (P34 B3, U-12) against `clientledger --demo`: a full check
+# finds one fixable cached-balance drift and one report-only unbalanced
+# entry; the drift is selected, the confirmation names the automatic
+# backup, Back Up and Fix runs, and the check after it finds only the
+# report-only entry. Light and dark run in one app, so the demo fault is
+# put back first (dev.integrity_demo_reset). All data is synthetic.
+name: verify_data
+description: Run a full check, select the fixable finding, confirm the backup-first fix, check again.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: dev.integrity_demo_reset
+  - command: file.verify_data
+  - assert_exists: {role: tab, label: Verify Data}
+  - assert_state: {key: screen.screen, equals: verify_data}
+  - assert_state: {key: screen.ran, equals: false}
+  - assert_exists: {label_contains: "Run your first check"}
+  - screenshot: empty
+  - click: {role: button, label: Full check}
+  - assert_state: {key: screen.ran, equals: true}
+  - assert_state: {key: screen.errors, equals: 1}
+  - assert_state: {key: screen.warnings, equals: 1}
+  - assert_state: {key: screen.selected, equals: 1}
+  - assert_exists: {label_contains: "doesn't match its entries"}
+  - assert_exists: {role: button, label: "Open 1010 · Operating Checking"}
+  - assert_no_clipping: {}
+  - screenshot: findings
+  - click: {role: button, label: "Fix selected…"}
+  - assert_state: {key: screen.confirm_open, equals: true}
+  - assert_exists: {label_contains: "makes a backup of this company"}
+  - screenshot: confirm
+  - click: {role: button, label: Back Up and Fix}
+  - assert_state: {key: screen.fixed, equals: 1}
+  - assert_state: {key: screen.warnings, equals: 0}
+  - assert_state: {key: screen.errors, equals: 1}
+  - assert_exists: {label_contains: "A backup was made first"}
+  - screenshot: fixed
+  - command: file.close_window

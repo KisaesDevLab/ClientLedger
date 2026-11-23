@@ -57,6 +57,20 @@ struct Running {
     /// (`set_running_host`), so dropping this stops the proxy first.
     _lan: Option<Arc<cl_ui::lan_link::LanHost>>,
     _link: HostLink,
+    /// P34 (Q-P34o): `running` until this orderly end marks it clean.
+    marker: Option<cl_host::SessionMarker>,
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        // A panic is not an orderly end: the next start offers recovery.
+        if !std::thread::panicking()
+            && let Some(m) = &self.marker
+            && let Err(e) = m.mark_clean()
+        {
+            tracing::warn!(error = %e, "the session marker could not be marked clean");
+        }
+    }
 }
 
 /// Host mode turns automatic sign-in off and forgets the saved password:
@@ -245,6 +259,23 @@ fn main() -> Result<()> {
             // starts, even when the link can't (never an empty local book).
             start_workstation(&paths, &lan, guard, &mut shell, &mut options)?;
         } else if let Some(exe) = find_engine_exe(args.engine_exe.as_deref()) {
+            // P34 (Q-P34o): how did the last run end? Read before this run
+            // writes `running`.
+            let (marker, last_exit) = match cl_host::begin_session(&paths) {
+                Ok((m, e)) => (Some(m), e),
+                Err(e) => {
+                    tracing::warn!(error = %e, "the session marker could not be read");
+                    (None, cl_host::LastExit::Unknown)
+                }
+            };
+            cl_ui::screens::company::crash_recovery::set_info(
+                cl_ui::screens::company::crash_recovery::CrashInfo {
+                    unclean: last_exit == cl_host::LastExit::Unclean,
+                    recovered: false,
+                    engine_failed: false,
+                    log_dir: Some(paths.logs_dir()),
+                },
+            );
             let mut cfg = HostConfig::new(paths.clone(), exe);
             cfg.lan_host = lan.mode == Mode::Host && lan.host.is_some();
             let link = HostLink::start(cfg, guard);
@@ -261,6 +292,7 @@ fn main() -> Result<()> {
             options.keep_alive = Some(Box::new(Running {
                 _lan: lan_host,
                 _link: link,
+                marker,
             }));
         } else {
             // Still hold the single-instance lock for this run.

@@ -635,6 +635,9 @@ pub async fn run_loop(
     stop: impl Fn() -> bool + Send,
 ) {
     let mut runner = Runner::new();
+    // One tick of grace first: at launch nobody is signed in yet, and a
+    // missed slot must not be recorded as skipped every time the app starts.
+    clock.sleep(TICK).await;
     while !stop() {
         tick(&mut runner, clock.as_ref(), zone.as_ref(), host.as_ref()).await;
         clock.sleep(TICK).await;

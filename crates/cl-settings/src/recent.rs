@@ -205,6 +205,10 @@ pub struct CompanyRecord {
         deserialize_with = "crate::backup_schedule::lenient_vec"
     )]
     pub schedule_runs: Vec<crate::ScheduleRun>,
+    /// The local date (`YYYY-MM-DD`) the owner was last asked to back up
+    /// at open (Q-217: once a day).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_prompted: Option<String>,
 }
 
 /// How many transfer files a company remembers.
@@ -292,6 +296,7 @@ impl CompanyRecord {
             transfers: Vec::new(),
             schedule: None,
             schedule_runs: Vec::new(),
+            backup_prompted: None,
         }
     }
 

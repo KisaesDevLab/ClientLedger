@@ -80,7 +80,10 @@ fn recovers_after_the_server_is_killed() {
     let restarted = cluster.start().unwrap();
     eprintln!("restart after kill took {:?}", t0.elapsed());
     assert!(!restarted.reused);
-    assert!(restarted.recovered, "P34: the start after a kill replays the log");
+    assert!(
+        restarted.recovered,
+        "P34: the start after a kill replays the log"
+    );
     let mut db = common::connect(&cluster, restarted.port, "postgres");
     let n: i64 = db.query_one("select count(*) from t", &[]).unwrap().get(0);
     assert_eq!(n, 1000, "committed rows survive the crash");

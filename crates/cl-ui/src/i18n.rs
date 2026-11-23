@@ -172,11 +172,13 @@ mod sensitive;
 // P32: Send to My Accountant and the IIF export.
 mod send_to_accountant;
 // P33: the office network.
+pub(crate) mod backups;
 pub(crate) mod lan;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 63] = [
+const TABLES: [&[(&str, &str)]; 64] = [
     lan::ENGLISH,
+    backups::ENGLISH,
     send_to_accountant::ENGLISH,
     audit::ENGLISH,
     auth::ENGLISH,

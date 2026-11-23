@@ -37,7 +37,7 @@ libc = "0.2.190"
 [dev-dependencies]
 cl-api = { path = "../cl-api", features = ["test-support"] }
 # The practice-company test against the real engine (tests/practice_live.rs).
-cl-host = { path = "../cl-host" }
+cl-host = { path = "../cl-host", features = ["test-support"] }
 # The golden-report harness (tests/report_golden.rs): options to requests.
 cl-model = { path = "../cl-model" }
 # A09: builder export goldens are written as the desktop writes the file.
