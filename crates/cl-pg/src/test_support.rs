@@ -20,6 +20,20 @@ use crate::{PgError, Result, Secret};
 /// [`PgError::Sql`] when the URL is not a `postgres://` URL, the server
 /// cannot be reached or a statement fails.
 pub fn exec_sql_for_tests(url: &Secret, sql: &str) -> Result<()> {
+    // The blocking client starts its own runtime: on a thread of its own it
+    // also works from inside an async test.
+    let (url, sql) = (url.clone(), sql.to_string());
+    std::thread::spawn(move || run(&url, &sql))
+        .join()
+        .unwrap_or_else(|_| {
+            Err(PgError::Sql {
+                context: "test SQL".into(),
+                detail: "the SQL thread panicked".into(),
+            })
+        })
+}
+
+fn run(url: &Secret, sql: &str) -> Result<()> {
     let mut cfg = Config::from_str(url.expose()).map_err(|_| PgError::Sql {
         context: "test SQL".into(),
         detail: "not a database URL".into(),
