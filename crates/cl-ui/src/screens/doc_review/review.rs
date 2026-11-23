@@ -1460,8 +1460,8 @@ impl DraftSession {
         }
     }
 
-    fn key_for(&mut self, id: Identity) -> IdempotencyKey {
-        self.key.key_for(&id)
+    fn key_for(&mut self, id: &Identity) -> IdempotencyKey {
+        self.key.key_for(id)
     }
 
     /// Sends the convert (or the identical request again).
@@ -1469,7 +1469,7 @@ impl DraftSession {
         let Some(expected) = self.draft.as_ref().map(|d| d.updated_at.clone()) else {
             return;
         };
-        let key = self.key_for(Identity {
+        let key = self.key_for(&Identity {
             body: a.body.clone(),
             expected: expected.clone(),
             ack: ack.clone(),

@@ -64,17 +64,21 @@ impl<I: Clone + PartialEq> HeldKey<I> {
     /// The key for the request `id`: the held one while the very same
     /// request goes again or while the key is pinned, a fresh one
     /// otherwise.
-    pub fn key_for(&mut self, id: &I) -> IdempotencyKey {
+    pub fn key_for<Q>(&mut self, id: &Q) -> IdempotencyKey
+    where
+        I: std::borrow::Borrow<Q>,
+        Q: PartialEq + ToOwned<Owned = I> + ?Sized,
+    {
         if let Some((d, k)) = &mut self.held
-            && (self.pin != Pin::Free || *d == *id)
+            && (self.pin != Pin::Free || (*d).borrow() == id)
         {
-            if *d != *id {
-                d.clone_from(id);
+            if (*d).borrow() != id {
+                *d = id.to_owned();
             }
             return k.clone();
         }
         let k = IdempotencyKey::new();
-        self.held = Some((id.clone(), k.clone()));
+        self.held = Some((id.to_owned(), k.clone()));
         k
     }
 

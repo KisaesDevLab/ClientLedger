@@ -268,7 +268,7 @@ impl EmailFlow {
             "{what}|{:?}|{:?}|{:?}|{}|{}",
             msg.to, msg.cc, msg.bcc, msg.subject, msg.body
         );
-        self.key.key_for(&identity)
+        self.key.key_for(identity.as_str())
     }
 }
 

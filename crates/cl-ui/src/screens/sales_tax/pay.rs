@@ -482,8 +482,8 @@ impl PayScreen {
     /// The key of a write: reused only for the same write (a retry after a
     /// transport failure or through the closing-date password), never for
     /// another payment's void or another link (review nit).
-    fn key_for(&mut self, what: KeyFor) -> IdempotencyKey {
-        self.key.key_for(&what)
+    fn key_for(&mut self, what: &KeyFor) -> IdempotencyKey {
+        self.key.key_for(what)
     }
 
     fn send(&mut self, pending: Pending, password: Option<Secret>) {
@@ -499,7 +499,7 @@ impl PayScreen {
             Pending::MarkPaid(a, d) => KeyFor::MarkPaid(*a, *d),
             Pending::UndoMark(run) => KeyFor::UndoMark(run.clone()),
         };
-        let key = self.key_for(what);
+        let key = self.key_for(&what);
         let demo_key = key.as_header();
         let label = OrphanLabel {
             what: "orphan.sales_tax_pay",

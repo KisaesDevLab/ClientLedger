@@ -44,7 +44,7 @@ pub(crate) struct Plan {
 pub(crate) enum Outcome {
     /// Posted, with the engine's expected tax when the typed tax differs
     /// from it (`TAX_DIFFERS`, a warning: the typed tax posts).
-    Posted(DailyEntry, Option<Money>),
+    Posted(Box<DailyEntry>, Option<Money>),
     /// The engine's preview disagreed with the form (the layout changed
     /// elsewhere) or a line is unmapped: nothing posted; the draft is kept.
     Mismatch {
@@ -79,7 +79,7 @@ pub(crate) async fn flow<A: DailyApi>(api: &A, plan: Plan) -> Result<Outcome, Ap
             Err(ApiError::Validation(v)) => {
                 let e = api.entry(id).await?;
                 if e.status == EntryStatus::Posted {
-                    return Ok(Outcome::Posted(e, None));
+                    return Ok(Outcome::Posted(Box::new(e), None));
                 }
                 return Err(ApiError::Validation(v));
             }
@@ -116,7 +116,7 @@ pub(crate) async fn flow<A: DailyApi>(api: &A, plan: Plan) -> Result<Outcome, Ap
     }
     match api.post(entry.id, plan.password).await {
         Ok(posted) => Ok(Outcome::Posted(
-            posted,
+            Box::new(posted),
             preview
                 .tax_differs()
                 .then_some(preview.expected_tax)

@@ -1141,7 +1141,7 @@ fn p33_the_dialog_names_layouts_and_sales_tax_and_shows_quantity_and_rate() {
 fn a_lost_reply_then_a_fixed_memo_saves_under_the_same_key() {
     use crate::forms::held_key::keyed_unknown;
     let (_d, mut s) = screen();
-    let k = s.key_for("invoice|memo: Spring order".into());
+    let k = s.key_for("invoice|memo: Spring order");
     s.save_failed(keyed_unknown(&k));
-    assert_eq!(s.key_for("invoice|memo: Spring order, 2".into()), k);
+    assert_eq!(s.key_for("invoice|memo: Spring order, 2"), k);
 }

@@ -263,7 +263,7 @@ impl InvoiceScreen {
                 .map(|(id, r)| (id.to_string(), r.txn.updated_at)),
             password.is_some()
         );
-        let key = self.key_for(identity);
+        let key = self.key_for(&identity);
         let pw = password.clone();
         let new2 = new.clone();
         self.save_job = Some(engine::write(
@@ -318,8 +318,8 @@ impl InvoiceScreen {
 
     /// The key for this save: the stored one when the same save goes again
     /// after an unknown outcome, a fresh one otherwise.
-    pub(crate) fn key_for(&mut self, identity: String) -> IdempotencyKey {
-        self.key.key_for(&identity)
+    pub(crate) fn key_for(&mut self, identity: &str) -> IdempotencyKey {
+        self.key.key_for(identity)
     }
 
     /// The problems of a refused save; the first one's field gets the
