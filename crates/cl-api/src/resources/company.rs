@@ -631,8 +631,12 @@ impl Session {
         if !crate::resources::versioning::engine_checks_stamps(self) {
             return Ok(None);
         }
+        // P33 QA-6 (PR-8 S4): the owner pressed Save just now; a read that
+        // waited for the host makes the press stale, so the write is not sent.
+        let asked = std::time::Instant::now();
         let call = Call::at(Method::Get, COMPANY_GET.route());
         let reply = self.send(&COMPANY_GET, call, None).await?;
+        self.lan_save_check(asked)?;
         let v: Value = decode(&reply, "company")?;
         Ok(v.get("company").and_then(RecordStamp::of_record))
     }
@@ -746,8 +750,11 @@ impl Session {
         key: IdempotencyKey,
     ) -> Result<CompanySettings, ApiError> {
         self.closing_date_allowed()?;
+        let asked = std::time::Instant::now();
         let call = Call::at(Method::Get, COMPANY_GET.route());
         let reply = self.send(&COMPANY_GET, call, None).await?;
+        // PR-8 S4: never sent after a read that waited for the host.
+        self.lan_save_check(asked)?;
         let v: Value = decode(&reply, "company")?;
         let row = v.get("company");
         let now =
@@ -1524,6 +1531,44 @@ mod tests {
             .await
             .expect_err("month");
         assert_eq!(e, ApiError::Local(LocalValidation::InvalidValue));
+    }
+
+    /// PR-8 S4 (QA-6): on a workstation, the company-stamp read before a
+    /// settings write waited for the host past the press: the write is not
+    /// sent on its own (`Lan(NotSent)`), the owner saves again.
+    #[tokio::test]
+    async fn a_settings_save_is_not_sent_after_a_stamp_read_that_waited() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/company"))
+            .respond_with(
+                json(
+                    200,
+                    r#"{"company":{"id":"c0000000-0000-4000-8000-000000000001","updatedAt":"2026-10-01T10:00:00.000Z"}}"#,
+                )
+                .set_delay(std::time::Duration::from_millis(1300)),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v1/company/settings"))
+            .respond_with(json(200, r#"{"settings":{"fiscalYearStartMonth":7}}"#))
+            .mount(&server)
+            .await;
+        let s = crate::resources::testkit::workstation_session(&server, &[Capabilities::STALE_ALL])
+            .await;
+        let e = s
+            .update_company_settings(
+                &CompanySettingsUpdate {
+                    fiscal_year_start_month: Some(7),
+                    ..CompanySettingsUpdate::default()
+                },
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect_err("a stale press");
+        assert_eq!(e, ApiError::Lan(crate::LanRefusal::NotSent));
+        assert!(requests(&server, "PUT").await.is_empty(), "nothing sent");
     }
 
     #[tokio::test]

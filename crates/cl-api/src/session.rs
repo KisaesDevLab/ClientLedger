@@ -40,7 +40,12 @@ use crate::wire::{Capabilities, DesktopInfo, Health};
 
 /// A LAN save whose preparation waited longer than this is refused as not
 /// sent: the owner's press is stale (P33 QA-6).
+#[cfg(not(test))]
 const STALE_PRESS: std::time::Duration = std::time::Duration::from_secs(3);
+/// Unit tests: under the stub client's 2 s read attempt, so a slow pre-read
+/// can outlast it without timing out.
+#[cfg(test)]
+const STALE_PRESS: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Refresh when the access token has less than this many seconds left.
 const REFRESH_MARGIN_SECS: u64 = 60;
@@ -1088,7 +1093,11 @@ impl Session {
         if lan_save && transport.write_held() {
             return Err(ApiError::Lan(crate::LanRefusal::NotSent));
         }
-        let asked = std::time::Instant::now();
+        // PR-8 S4: a probe built before the send (its stamp read may have
+        // waited for the host) carries the press time.
+        let asked = reconciler
+            .and_then(Reconciler::pressed)
+            .unwrap_or_else(std::time::Instant::now);
         self.client().refresh_after_restart().await;
         if lan_save && (transport.write_held() || asked.elapsed() > STALE_PRESS) {
             return Err(ApiError::Lan(crate::LanRefusal::NotSent));

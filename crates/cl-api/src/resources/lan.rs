@@ -558,7 +558,6 @@ mod tests {
     /// this app's sharing started; never on a workstation's link.
     #[tokio::test]
     async fn the_engine_lan_flag_decides_the_hold_on_the_host_only() {
-        use crate::endpoint::{EndpointSource, EndpointState, FixedEndpoint};
         let server = MockServer::start().await;
         Mock::given(method("GET"))
             .and(path("/api/v1/desktop/info"))
@@ -573,26 +572,7 @@ mod tests {
         s.client().desktop_info().await.expect("info");
         assert!(s.client().lan_host_engine());
         // The same engine seen through a workstation's link (saves never wait).
-        struct NoWait(std::sync::Arc<FixedEndpoint>);
-        impl EndpointSource for NoWait {
-            fn current(&self) -> EndpointState {
-                self.0.current()
-            }
-            fn writes_wait(&self) -> bool {
-                false
-            }
-        }
-        let port = server.address().port();
-        let fixed = std::sync::Arc::new(FixedEndpoint::new(
-            port,
-            cl_core::Secret::new("t".repeat(64)),
-            1,
-        ));
-        let ws = crate::session::tests::session_with(
-            std::sync::Arc::new(NoWait(fixed)),
-            crate::session::Scope::Workspace,
-        );
-        ws.client().desktop_info().await.expect("info");
+        let ws = crate::resources::testkit::workstation_session(&server, &[]).await;
         assert!(!ws.client().lan_host_engine());
     }
 }

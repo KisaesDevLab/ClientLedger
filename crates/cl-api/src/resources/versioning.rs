@@ -843,6 +843,40 @@ mod tests {
         assert_eq!(gets, 0, "server versions need no pre-read");
     }
 
+    /// PR-8 S4 (QA-6): on a workstation, a posting edit's probe reads the
+    /// ledger stamp after the pre-read; when that read waited for the host
+    /// past the press, the edit is not sent on its own.
+    #[tokio::test]
+    async fn a_posting_edit_is_not_sent_after_a_probe_read_that_waited() {
+        let server = MockServer::start().await;
+        let rec = sample_json(("l1", "l2"), (0, 1), "rent", "x");
+        Mock::given(method("GET"))
+            .and(path(PATH))
+            .respond_with(json(200, &wrap(&rec)))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/ledger-version"))
+            .respond_with(
+                json(200, r#"{"stamp":4}"#).set_delay(std::time::Duration::from_millis(1300)),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .respond_with(json(200, &wrap(&rec)))
+            .mount(&server)
+            .await;
+        let s = crate::resources::testkit::workstation_session(&server, &[]).await;
+        let mut u = update(r#"{"memo":"m"}"#);
+        u.stamp_covered = true;
+        let e = update_guarded::<Sample>(&s, &RecordVersion::Fingerprint(fp(&rec)), u)
+            .await
+            .expect_err("a stale press");
+        assert_eq!(e, ApiError::Lan(crate::LanRefusal::NotSent));
+        let reqs = server.received_requests().await.expect("r");
+        assert!(reqs.iter().all(|r| r.method.as_str() != "PUT"), "nothing sent");
+    }
+
     #[tokio::test]
     async fn interim_fingerprint_check_blocks_a_stale_save_without_sending_it() {
         let server = MockServer::start().await;
