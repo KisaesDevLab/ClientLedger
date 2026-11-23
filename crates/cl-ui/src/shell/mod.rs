@@ -189,6 +189,9 @@ pub struct Shell {
     demo: bool,
     /// The open company's templates catch-up (P15).
     runner: crate::templates_runner::TemplatesRunner,
+    /// The scheduled-backup thread's inputs (P34; `None` in the demo and
+    /// on a workstation).
+    backups: Option<Arc<crate::backup_runner::RunnerInputs>>,
     /// The pop-out document viewer window (A02).
     doc_viewer: crate::windows::doc_viewer::DocViewerWindow,
     /// The window the document viewer followed last.
@@ -301,8 +304,14 @@ impl Shell {
             close_company_after_prompt: false,
             closing: None,
             runner: crate::templates_runner::TemplatesRunner::default(),
+            backups: None,
         };
         shell.palette.include_dev = options.demo;
+        // P34: scheduled backups (live, on this computer only).
+        shell.backups = shell
+            .company_link
+            .as_ref()
+            .and_then(crate::backup_runner::start);
         if options.demo {
             shell.load_demo();
         } else if shell.company_link.is_some() {
@@ -1495,6 +1504,10 @@ impl Shell {
         if !self.idle.locked() {
             self.handle_keys(ctx);
         }
+        // P34: a locked app skips its scheduled backups (caught up later).
+        if let Some(b) = &self.backups {
+            b.set_locked(self.idle.locked());
+        }
         if let Some(toast) = &self.toast
             && ctx.input(|i| i.time) > toast.until
         {
@@ -2250,21 +2263,33 @@ fn start_close(link: &Arc<CompanyLink>) -> Option<Closing> {
     let session = link.session()?;
     let client = link.client()?.clone();
     let group = link.group()?.ok()?;
-    let pending = send_close(&group, &client, session).ok()?;
+    // P34: "Back up when I close a company" runs first, in the same write;
+    // it never stops the close.
+    let before = link
+        .open_tenant()
+        .and_then(|t| crate::backup_runner::on_close_backup(link, t));
+    let pending = send_close(&group, &client, session, before).ok()?;
     Some((group, crate::company::Task::Pending(pending)))
 }
+
+/// What runs before the close (the on-close backup).
+type BeforeClose = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>;
 
 /// The close itself: a write (never aborted with its group).
 fn send_close(
     group: &cl_api::RequestGroup,
     client: &cl_api::Client,
     session: cl_api::Session,
+    before: Option<BeforeClose>,
 ) -> Result<cl_api::Pending<Result<(), cl_company::CompanyError>>, cl_api::QueueError> {
     let label = cl_api::OrphanLabel {
         what: "orphan.lifecycle",
         key: None,
     };
     group.write(client, label, move |_c| async move {
+        if let Some(b) = before {
+            b.await;
+        }
         Ok(cl_company::close_company(&session).await)
     })
 }

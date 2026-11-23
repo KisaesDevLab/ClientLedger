@@ -538,11 +538,35 @@ pub trait RunnerHost: Send + Sync {
     fn recorded(&self, _tenant: TenantId, _run: &ScheduleRun) {}
     /// A job starts or ends (the UI may show a status line).
     fn running(&self, _job: Option<&Job>) {}
+    /// Makes the backup. The default calls [`run_job`] with
+    /// [`RunnerHost::session`] on the caller's runtime; the desktop sends
+    /// it through its request queue instead.
+    fn execute<'a>(
+        &'a self,
+        job: &'a Job,
+        now: Timestamp,
+    ) -> Pin<Box<dyn Future<Output = JobResult> + Send + 'a>> {
+        Box::pin(async move {
+            let Some(session) = self.session() else {
+                return JobResult::GateBusy;
+            };
+            let store = self.store();
+            let secrets = self.secrets();
+            run_job(
+                &session,
+                &store,
+                secrets.as_ref(),
+                job,
+                now,
+                &crate::backup::silent(),
+            )
+            .await
+        })
+    }
     /// After a scheduled backup is written: a test restore when the
     /// schedule asks for it (B2 wires this).
     fn after_backup<'a>(
         &'a self,
-        _session: &'a Session,
         _job: &'a Job,
         _sha256: &'a str,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
@@ -568,20 +592,8 @@ pub async fn tick(
     let Some(job) = plan.run else {
         return;
     };
-    let Some(session) = host.session() else {
-        return;
-    };
     host.running(Some(&job));
-    let secrets = host.secrets();
-    let result = run_job(
-        &session,
-        &store,
-        secrets.as_ref(),
-        &job,
-        now,
-        &crate::backup::silent(),
-    )
-    .await;
+    let result = host.execute(&job, now).await;
     host.running(None);
     let done_sha = match &result {
         JobResult::Done { sha256 } => Some(sha256.clone()),
@@ -593,7 +605,7 @@ pub async fn tick(
     if let Some(sha) = done_sha
         && job.schedule.test_each
     {
-        host.after_backup(&session, &job, &sha).await;
+        host.after_backup(&job, &sha).await;
     }
 }
 

@@ -314,11 +314,14 @@ where
     session.start_maintenance(hold == Hold::Routine).await?;
     // QA-9: the workstations' heartbeat says "maintenance" while it lasts.
     crate::lan_link::set_host_maintenance(true);
+    // P34: scheduled backups wait while a hold is on.
+    crate::backup_runner::set_hold(true);
     let r = work.await;
     if let Err(e) = session.end_maintenance().await {
         tracing::warn!(error = %e, "maintenance could not be ended; it ends when this sign-in does");
     }
     crate::lan_link::set_host_maintenance(false);
+    crate::backup_runner::set_hold(false);
     r
 }
 
