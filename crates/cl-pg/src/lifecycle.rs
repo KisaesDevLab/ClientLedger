@@ -45,6 +45,15 @@ enum Owner {
     Unknown,
 }
 
+/// What [`Cluster::adopt_existing`] found.
+enum Adopted {
+    /// A healthy server for this data directory, adopted as is.
+    Running(Running),
+    /// Nothing to adopt: start one. `crashed` when a dead server's pid file
+    /// was left behind.
+    Fresh { crashed: bool },
+}
+
 /// A started server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Running {
@@ -54,6 +63,11 @@ pub struct Running {
     pub pid: u32,
     /// True when a server was already running and was adopted as is.
     pub reused: bool,
+    /// True when this start found a crashed server's `postmaster.pid` (no
+    /// server alive for it), so `PostgreSQL` replayed its write-ahead log
+    /// before accepting connections. A clean stop removes the file, so an
+    /// orderly shutdown never sets it.
+    pub recovered: bool,
 }
 
 /// How to reach the server. The password is a [`Secret`].
@@ -181,9 +195,10 @@ impl Cluster {
     pub fn start_on_ports(&self, candidates: impl IntoIterator<Item = u16>) -> Result<Running> {
         crate::check_data_dir(&self.data_dir).map_err(|issue| PgError::DataDir { issue })?;
         self.write_static_config()?;
-        if let Some(running) = self.adopt_existing()? {
-            return Ok(running);
-        }
+        let recovered = match self.adopt_existing()? {
+            Adopted::Running(running) => return Ok(running),
+            Adopted::Fresh { crashed } => crashed,
+        };
         let mut attempts = 0u32;
         let mut leftover_waits = 0u32;
         let mut last_detail = String::from("no free port was available");
@@ -194,7 +209,7 @@ impl Cluster {
             self.write_overrides(p)?;
             let _ = fs::remove_file(self.startup_log());
             let err = match self.pg_ctl_start(p) {
-                Ok(()) => return self.finish_start(p),
+                Ok(()) => return self.finish_start(p, recovered),
                 Err(e) => e,
             };
             let log = self.settled_log_tail();
@@ -266,7 +281,7 @@ impl Cluster {
         }
     }
 
-    fn finish_start(&self, port: u16) -> Result<Running> {
+    fn finish_start(&self, port: u16, recovered: bool) -> Result<Running> {
         if !wait_ready(port, READY_TIMEOUT) {
             return Err(PgError::StartFailed {
                 attempts: 1,
@@ -274,11 +289,12 @@ impl Cluster {
             });
         }
         let pid = pidfile::read(&self.data_dir).map_or(0, |p| p.pid);
-        tracing::info!(port, "database server started");
+        tracing::info!(port, recovered, "database server started");
         Ok(Running {
             port,
             pid,
             reused: false,
+            recovered,
         })
     }
 
@@ -312,19 +328,21 @@ impl Cluster {
 
     /// If a server for this data directory is up (or coming up), return it.
     /// A pid file whose process now belongs to another program is deleted.
-    fn adopt_existing(&self) -> Result<Option<Running>> {
+    /// Otherwise say whether the fresh start follows a crash (a leftover pid
+    /// file with no server alive for it).
+    fn adopt_existing(&self) -> Result<Adopted> {
         let Some(pf) = pidfile::read(&self.data_dir) else {
-            return Ok(None);
+            return Ok(Adopted::Fresh { crashed: false });
         };
         if !self.is_running()? {
             // Stale file from a crash: PostgreSQL replaces it itself and
             // replays its write-ahead log.
-            return Ok(None);
+            return Ok(Adopted::Fresh { crashed: true });
         }
         if self.owner_of(&pf) == Owner::Foreign {
             // A crash or reboot left the file and another program reused the pid.
             self.remove_foreign_pid_file();
-            return Ok(None);
+            return Ok(Adopted::Fresh { crashed: true });
         }
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
@@ -334,12 +352,13 @@ impl Cluster {
                     // wider settings: restart it with ours.
                     tracing::warn!("restarting a database server that was not loopback-only");
                     self.stop()?;
-                    return Ok(None);
+                    return Ok(Adopted::Fresh { crashed: false });
                 }
-                return Ok(Some(Running {
+                return Ok(Adopted::Running(Running {
                     port,
                     pid: pf.pid,
                     reused: true,
+                    recovered: false,
                 }));
             }
             if Instant::now() >= deadline || !self.is_running()? {
@@ -348,7 +367,8 @@ impl Cluster {
             std::thread::sleep(Duration::from_millis(250));
         }
         if !self.is_running()? {
-            return Ok(None);
+            // It died while we waited: a crash.
+            return Ok(Adopted::Fresh { crashed: true });
         }
         Err(PgError::StuckProcess { pid: pf.pid })
     }
