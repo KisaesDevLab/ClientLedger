@@ -162,6 +162,17 @@ impl BackupSettingsScreen {
             testing: None,
             test_error: None,
         };
+        // The demo: each opening starts from no schedule (light and dark run
+        // in one demo app).
+        if s.link.is_demo()
+            && let Some((id, _)) = s.tenant
+        {
+            let _ = s.link.store().update(|l| {
+                if let Some(c) = l.get_mut(id) {
+                    c.schedule = None;
+                }
+            });
+        }
         s.reload();
         s
     }

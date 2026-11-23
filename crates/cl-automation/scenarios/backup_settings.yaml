@@ -26,7 +26,7 @@ steps:
   - assert_state: {key: screen.backups, equals: 2}
   - assert_exists: {label_contains: "the folder couldn't be reached"}
   - screenshot: history
-  - click: {role: button, label_contains: "Test restore Ozark"}
+  - click: {role: button, label_contains: "Test restore", index: 0}
   - assert_state: {key: screen.tested, equals: 1}
   - assert_exists: {label_contains: "Restores cleanly"}
   - screenshot: tested
