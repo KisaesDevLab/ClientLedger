@@ -103,7 +103,7 @@ pub struct PayScreen {
     write_job: Option<Job<Wrote>>,
     /// The write's key, reused through the prompt and on a retry of the
     /// same write.
-    pub(crate) key: Option<(KeyFor, IdempotencyKey)>,
+    pub(crate) key: crate::forms::held_key::HeldKey<KeyFor>,
     pub(crate) closing_prompt: ClosingPrompt<Pending>,
     /// The change in flight (for the closing-date password).
     pending_kept: Option<Pending>,
@@ -230,7 +230,7 @@ impl PayScreen {
             history_job: None,
             preview_job: None,
             write_job: None,
-            key: None,
+            key: crate::forms::held_key::HeldKey::default(),
             closing_prompt: ClosingPrompt::default(),
             pending_kept: None,
             linking: None,
@@ -482,15 +482,8 @@ impl PayScreen {
     /// The key of a write: reused only for the same write (a retry after a
     /// transport failure or through the closing-date password), never for
     /// another payment's void or another link (review nit).
-    fn key_for(&mut self, what: KeyFor) -> IdempotencyKey {
-        match &self.key {
-            Some((a, k)) if *a == what => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((what, k.clone()));
-                k
-            }
-        }
+    fn key_for(&mut self, what: &KeyFor) -> IdempotencyKey {
+        self.key.key_for(what)
     }
 
     fn send(&mut self, pending: Pending, password: Option<Secret>) {
@@ -506,7 +499,7 @@ impl PayScreen {
             Pending::MarkPaid(a, d) => KeyFor::MarkPaid(*a, *d),
             Pending::UndoMark(run) => KeyFor::UndoMark(run.clone()),
         };
-        let key = self.key_for(what);
+        let key = self.key_for(&what);
         let demo_key = key.as_header();
         let label = OrphanLabel {
             what: "orphan.sales_tax_pay",
@@ -682,7 +675,7 @@ impl PayScreen {
 
     fn wrote(&mut self, w: Wrote) {
         self.closing_prompt.saved();
-        self.key = None;
+        self.key.clear();
         self.pending_kept = None;
         match w {
             Wrote::Paid(r) => {
@@ -738,12 +731,12 @@ impl PayScreen {
                 // What is owed moved: the figures are previewed again and
                 // the owner checks them before paying.
                 self.notice = Some("sales_tax.pay.owed_changed");
-                self.key = None;
+                self.key.clear();
                 self.form.changed();
                 self.preview();
             }
             Some(r) => {
-                self.key = None;
+                self.key.clear();
                 self.problem = Some(match r {
                     PaySalesTaxRefusal::TotalNotPositive => "pay_sales_tax.problem.nothing_to_pay",
                     PaySalesTaxRefusal::TaxItemNotForAgency => {

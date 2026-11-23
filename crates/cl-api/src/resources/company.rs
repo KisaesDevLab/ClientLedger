@@ -631,8 +631,12 @@ impl Session {
         if !crate::resources::versioning::engine_checks_stamps(self) {
             return Ok(None);
         }
+        // P33 QA-6 (PR-8 S4): the owner pressed Save just now; a read that
+        // waited for the host makes the press stale, so the write is not sent.
+        let asked = std::time::Instant::now();
         let call = Call::at(Method::Get, COMPANY_GET.route());
         let reply = self.send(&COMPANY_GET, call, None).await?;
+        self.lan_save_check(asked)?;
         let v: Value = decode(&reply, "company")?;
         Ok(v.get("company").and_then(RecordStamp::of_record))
     }
@@ -723,6 +727,83 @@ impl Session {
         change: &ClosingDateChange,
         key: IdempotencyKey,
     ) -> Result<CompanySettings, ApiError> {
+        self.closing_date_allowed()?;
+        let stamp = self.company_row_stamp().await?;
+        self.send_closing_date(change, stamp, key).await
+    }
+
+    /// [`Self::set_closing_date`] from a screen that showed `shown` as the
+    /// closing date (PR-8 S3). The company row read for the stamp also
+    /// carries the closing date; when it is no longer `shown` (changed on
+    /// another computer since the screen read it), nothing is sent and the
+    /// answer is `Conflict { Stale }`, so the owner sees the new date
+    /// before changing it.
+    ///
+    /// # Errors
+    /// `Conflict { Stale }` when the closing date is no longer `shown`
+    /// (nothing sent); `Decode` for a closing date the engine sent in
+    /// another form; as [`Self::set_closing_date`].
+    pub async fn set_closing_date_from(
+        &self,
+        shown: Option<CalendarDate>,
+        change: &ClosingDateChange,
+        key: IdempotencyKey,
+    ) -> Result<CompanySettings, ApiError> {
+        self.closing_date_allowed()?;
+        let asked = std::time::Instant::now();
+        let call = Call::at(Method::Get, COMPANY_GET.route());
+        let reply = self.send(&COMPANY_GET, call, None).await?;
+        // PR-8 S4: never sent after a read that waited for the host.
+        self.lan_save_check(asked)?;
+        let v: Value = decode(&reply, "company")?;
+        let row = v.get("company");
+        let now =
+            match row.and_then(|c| c.get("lockDate")) {
+                None | Some(Value::Null) => None,
+                Some(d) => Some(serde_json::from_value::<CalendarDate>(d.clone()).map_err(
+                    |_| ApiError::Decode {
+                        what: "company lockDate",
+                    },
+                )?),
+            };
+        if now != shown {
+            return Err(ApiError::Conflict {
+                reason: crate::ConflictReason::Stale,
+                current_version: None,
+                code: None,
+                message: crate::UserText::default(),
+                details: crate::ConflictDetails::default(),
+            });
+        }
+        let stamp = if crate::resources::versioning::engine_checks_stamps(self) {
+            row.and_then(RecordStamp::of_record)
+        } else {
+            None
+        };
+        self.send_closing_date(change, stamp, key).await
+    }
+
+    fn closing_date_allowed(&self) -> Result<(), ApiError> {
+        self.require_company()?;
+        if self
+            .client()
+            .capabilities()
+            .has(Capabilities::CLOSING_PASSWORD)
+        {
+            Ok(())
+        } else {
+            Err(ApiError::Local(
+                LocalValidation::ClosingDateWriteUnavailable,
+            ))
+        }
+    }
+
+    async fn send_closing_date(
+        &self,
+        change: &ClosingDateChange,
+        stamp: Option<RecordStamp>,
+        key: IdempotencyKey,
+    ) -> Result<CompanySettings, ApiError> {
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Body<'a> {
@@ -732,17 +813,6 @@ impl Session {
             #[serde(skip_serializing_if = "Option::is_none")]
             expected_updated_at: Option<String>,
         }
-        self.require_company()?;
-        if !self
-            .client()
-            .capabilities()
-            .has(Capabilities::CLOSING_PASSWORD)
-        {
-            return Err(ApiError::Local(
-                LocalValidation::ClosingDateWriteUnavailable,
-            ));
-        }
-        let stamp = self.company_row_stamp().await?;
         let body = json_body(&Body {
             lock_date: change.closing_date.map(CalendarDate::to_wire),
             closing_password: change.closing_password.as_ref().map(Secret::expose),
@@ -1463,6 +1533,44 @@ mod tests {
         assert_eq!(e, ApiError::Local(LocalValidation::InvalidValue));
     }
 
+    /// PR-8 S4 (QA-6): on a workstation, the company-stamp read before a
+    /// settings write waited for the host past the press: the write is not
+    /// sent on its own (`Lan(NotSent)`), the owner saves again.
+    #[tokio::test]
+    async fn a_settings_save_is_not_sent_after_a_stamp_read_that_waited() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/company"))
+            .respond_with(
+                json(
+                    200,
+                    r#"{"company":{"id":"c0000000-0000-4000-8000-000000000001","updatedAt":"2026-10-01T10:00:00.000Z"}}"#,
+                )
+                .set_delay(std::time::Duration::from_millis(1300)),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v1/company/settings"))
+            .respond_with(json(200, r#"{"settings":{"fiscalYearStartMonth":7}}"#))
+            .mount(&server)
+            .await;
+        let s = crate::resources::testkit::workstation_session(&server, &[Capabilities::STALE_ALL])
+            .await;
+        let e = s
+            .update_company_settings(
+                &CompanySettingsUpdate {
+                    fiscal_year_start_month: Some(7),
+                    ..CompanySettingsUpdate::default()
+                },
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect_err("a stale press");
+        assert_eq!(e, ApiError::Lan(crate::LanRefusal::NotSent));
+        assert!(requests(&server, "PUT").await.is_empty(), "nothing sent");
+    }
+
     #[tokio::test]
     async fn closing_date_is_refused_locally_without_the_capability() {
         let server = MockServer::start().await;
@@ -1487,6 +1595,65 @@ mod tests {
             closing_password: Some(Secret::new("closing-canary")),
         };
         assert!(!format!("{change:?}").contains("canary"));
+    }
+
+    /// PR-8 S3: the closing-date screen read 12/31/2024; another computer
+    /// moved it to 12/31/2025 since. The change is refused as stale and
+    /// nothing is written; when it is still the date shown it goes.
+    #[tokio::test]
+    async fn a_closing_date_changed_elsewhere_since_it_was_shown_is_refused() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/company"))
+            .respond_with(json(
+                200,
+                r#"{"company":{"id":"c0000000-0000-4000-8000-000000000001","lockDate":"2025-12-31","updatedAt":"2026-10-01T10:00:00.000Z"}}"#,
+            ))
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/v1/company/settings"))
+            .respond_with(json(200, r#"{"settings":{"lockDate":"2026-06-30"}}"#))
+            .mount(&server)
+            .await;
+        let s = crate::resources::testkit::session_with_caps(
+            &server,
+            &[Capabilities::CLOSING_PASSWORD],
+        )
+        .await;
+        let change = ClosingDateChange {
+            closing_date: CalendarDate::from_ymd(2026, 6, 30).ok(),
+            closing_password: Some(Secret::new("closing-canary")),
+        };
+        let e = s
+            .set_closing_date_from(
+                CalendarDate::from_ymd(2024, 12, 31).ok(),
+                &change,
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect_err("changed elsewhere");
+        assert!(
+            matches!(
+                e,
+                ApiError::Conflict {
+                    reason: crate::ConflictReason::Stale,
+                    ..
+                }
+            ),
+            "{e:?}"
+        );
+        assert!(requests(&server, "PUT").await.is_empty(), "nothing sent");
+        let st = s
+            .set_closing_date_from(
+                CalendarDate::from_ymd(2025, 12, 31).ok(),
+                &change,
+                IdempotencyKey::new(),
+            )
+            .await
+            .expect("still the date shown");
+        assert_eq!(st.lock_date, CalendarDate::from_ymd(2026, 6, 30).ok());
+        assert_eq!(requests(&server, "PUT").await.len(), 1);
     }
 
     #[tokio::test]

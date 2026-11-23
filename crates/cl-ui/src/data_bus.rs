@@ -48,6 +48,14 @@ pub enum Change {
     /// Bills or vendor credits of this vendor were saved, voided or deleted
     /// (P17): its vendor panel and open-bill lists read them again.
     Bills(ContactId),
+    /// Bills of some vendor may have changed on another computer (the
+    /// change feed names transactions, not vendors; PR-8 S1): every vendor
+    /// panel checks its duplicate ref again.
+    BillsAll,
+    /// The company's settings or closing date changed on another computer
+    /// (the change feed's `companies` and `tenants`; PR-8 S2): an open
+    /// Preferences window with nothing unsaved reads them again.
+    Company,
     /// Printed checks were recorded, answered or put off (P19): Home's
     /// "Did all checks print correctly?" reminder reads its file again.
     Printing,
@@ -125,6 +133,8 @@ pub struct Changes {
     pub backup_passphrase: bool,
     /// Every unposted payroll import was discarded (P32 QA-14).
     pub payroll_discarded: bool,
+    /// The company's settings (PR-8 S2).
+    pub company: bool,
 }
 
 impl Changes {
@@ -149,6 +159,7 @@ impl Changes {
             // Never guessed: a subscriber that fell behind must not throw
             // away a live import on a maybe.
             payroll_discarded: false,
+            company: true,
         }
     }
 
@@ -218,6 +229,8 @@ impl Changes {
             Change::Bills(vendor) => {
                 self.bill_vendors.insert(*vendor);
             }
+            Change::BillsAll => self.bills_all = true,
+            Change::Company => self.company = true,
         }
     }
 }

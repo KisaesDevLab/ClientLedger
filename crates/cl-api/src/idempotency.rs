@@ -177,6 +177,13 @@ impl Ambiguity {
 /// Resolves an ambiguous mutation (implemented per operation in step 20).
 pub(crate) trait Reconciler: Send + Sync {
     fn reconcile<'a>(&'a self, ambiguity: &'a Ambiguity) -> BoxFuture<'a, Reconciled<EngineReply>>;
+
+    /// When the save this reconciles was asked for, if before the send
+    /// (the probe's own reads ran since): a LAN workstation's save is not
+    /// sent after reads that waited for the host (P33 QA-6, PR-8 S4).
+    fn pressed(&self) -> Option<std::time::Instant> {
+        None
+    }
 }
 
 /// Credentials used for one attempt.

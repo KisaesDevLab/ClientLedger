@@ -623,15 +623,8 @@ impl EnterBillScreen {
         false
     }
 
-    fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
-        match &self.save.key {
-            Some((d, k)) if d == id => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.save.key = Some((id.clone(), k.clone()));
-                k
-            }
-        }
+    pub(crate) fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
+        self.save.key.key_for(id)
     }
 
     fn demo_save(
@@ -798,7 +791,7 @@ impl EnterBillScreen {
             id: s.record.record.txn.id,
         });
         self.save.last_action = Some("save");
-        self.save.key = None;
+        self.save.key.clear();
         self.save.problems.clear();
         self.save.error = None;
         self.save.attach_failed = s.attach_failed;
@@ -896,9 +889,7 @@ impl EnterBillScreen {
 
     pub(crate) fn save_failed(&mut self, e: ApiError) {
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
-        if !crate::screens::register::keeps_key(&e) {
-            self.save.key = None;
-        }
+        self.save.key.failed(&e);
         let failure = SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
@@ -1021,7 +1012,7 @@ impl EnterBillScreen {
         if let LostEvent::Saved(found) = ev {
             let vendor = self.vendor();
             self.publish(vendor);
-            self.save.key = None;
+            self.save.key.clear();
             self.save.count += 1;
             self.save.last_action = Some("save");
             let lists = Arc::clone(&self.lists);

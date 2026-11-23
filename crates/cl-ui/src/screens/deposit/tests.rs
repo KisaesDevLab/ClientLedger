@@ -891,3 +891,19 @@ fn p33_a_deposit_deleted_elsewhere_is_never_saved_again() {
     assert_eq!(s.save.notice, Some(crate::forms::conflict::GONE));
     assert!(!s.conflict.is_open());
 }
+
+/// PR-8 B1: a keyed unknown outcome on a new deposit, the memo fixed,
+/// Save: the same key goes (never a second deposit).
+#[test]
+fn a_lost_reply_then_a_fixed_memo_saves_under_the_same_key() {
+    use crate::forms::held_key::{keyed_unknown, posting_with_memo};
+    let (mut s, _log, _dir) = screen(all_caps());
+    let id = |memo: &str| super::save::SaveIdentity {
+        posting: posting_with_memo(memo),
+        edit: None,
+        password: false,
+    };
+    let k = s.key_for(&id("Market day"));
+    s.save_failed(keyed_unknown(&k));
+    assert_eq!(s.key_for(&id("Market day, Sat")), k);
+}

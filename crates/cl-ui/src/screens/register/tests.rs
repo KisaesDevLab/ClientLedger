@@ -1961,7 +1961,8 @@ fn the_idempotency_key_follows_the_request_sent() {
     let first = transfer_identity("10.00", Some(1), false);
     let k = s.entry.key_for(&first);
     assert_eq!(s.entry.key_for(&first), k, "the same request: the same key");
-    // Anything the request sends changes the key.
+    // Anything the request sends changes the key, also after a definitive
+    // failure (nothing was saved).
     for other in [
         transfer_identity("10.01", Some(1), false),
         transfer_identity("10.00", Some(2), false),
@@ -1971,6 +1972,27 @@ fn the_idempotency_key_follows_the_request_sent() {
         let mut s2 = screen(&link);
         let k1 = s2.entry.key_for(&first);
         assert_ne!(s2.entry.key_for(&other), k1);
+        let k1 = s2.entry.key_for(&first);
+        s2.record_failed(cl_api::ApiError::RateLimited { retry_after: None });
+        assert_ne!(s2.entry.key_for(&other), k1, "a definitive failure");
+    }
+    // PR-8 B1: not after a keyed unknown outcome. The first save may be in
+    // the books, so a changed request goes under the held key: the engine
+    // refuses it (422) if the first went through, else posts it once.
+    for other in [
+        transfer_identity("10.01", None, false),
+        transfer_identity("10.00", None, true),
+    ] {
+        let mut s2 = screen(&link);
+        let new = transfer_identity("10.00", None, false);
+        let k1 = s2.entry.key_for(&new);
+        s2.record_failed(crate::forms::held_key::keyed_unknown(&k1));
+        assert_eq!(s2.entry.key_for(&other), k1, "keyed unknown: pinned");
+        // A refusal of the changed request keeps it pinned.
+        s2.record_failed(cl_api::ApiError::ClosingPasswordRejected);
+        assert_eq!(s2.entry.key_for(&new), k1);
+        s2.record_failed(cl_api::ApiError::IdempotencyKeyReused { entity: None });
+        assert_eq!(s2.entry.key_for(&other), k1, "went through: still pinned");
     }
 }
 

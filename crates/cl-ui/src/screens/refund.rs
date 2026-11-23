@@ -132,7 +132,7 @@ pub struct RefundScreen {
     pub(crate) nav_job: Option<(bool, Job<Vec<TransactionId>>)>,
     pub(crate) open_job: Option<Job<RefundRecord>>,
     /// The key of the save attempt in flight or undecided.
-    pub(crate) key: Option<(u64, IdempotencyKey)>,
+    pub(crate) key: crate::forms::held_key::HeldKey<u64>,
     pub(crate) saved: Option<RefundRecord>,
     /// The refund saved last in this window (Prev reopens it).
     pub(crate) last: Option<RefundRecord>,
@@ -227,7 +227,7 @@ impl RefundScreen {
             void_job: None,
             nav_job: None,
             open_job: None,
-            key: None,
+            key: crate::forms::held_key::HeldKey::default(),
             saved: None,
             last: None,
             closing_prompt: ClosingPrompt::default(),
@@ -448,7 +448,7 @@ impl RefundScreen {
         self.sources.clear();
         self.sources_for = None;
         self.saved = None;
-        self.key = None;
+        self.key.clear();
         self.problems.clear();
         self.error = None;
         self.notice = None;
@@ -495,14 +495,7 @@ impl RefundScreen {
         self.problems.clear();
         let new = new_refund(&plan);
         // One key per attempt: a retry of the same refund replays.
-        let key = match &self.key {
-            Some((a, k)) if *a == plan.attempt => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((plan.attempt, k.clone()));
-                k
-            }
-        };
+        let key = self.key.key_for(&plan.attempt);
         let label = engine::label("orphan.refund_save", Some(key.clone()));
         let demo = new.clone();
         let demo_pw = password.clone();
@@ -530,7 +523,7 @@ impl RefundScreen {
 
     fn saved(&mut self, rec: RefundRecord, after: After) {
         self.closing_prompt.saved();
-        self.key = None;
+        self.key.clear();
         self.saved_count += 1;
         let accounts: Vec<AccountId> = self.from.into_iter().collect();
         crate::forms::publish_saved(&self.link, &self.bus, &accounts);
@@ -561,9 +554,7 @@ impl RefundScreen {
     }
 
     fn save_failed(&mut self, e: &ApiError, after: After) {
-        if !crate::screens::register::keeps_key(e) {
-            self.key = None;
-        }
+        self.key.failed(e);
         if self
             .closing_prompt
             .failed(e, Pending::Save(after), true, self.books.closing)

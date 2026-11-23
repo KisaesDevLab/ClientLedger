@@ -1088,3 +1088,21 @@ fn p33_a_charge_deleted_elsewhere_is_never_saved_again() {
     a.conflict_read(Err(ApiError::NotFound { code: None }), SaveIntent::Save);
     assert_eq!(a.state()["notice"], crate::forms::conflict::GONE);
 }
+
+/// PR-8 B1, for every helper form on the shared save flow (Card Charge,
+/// Owner Money, Personal Funds, Loan Payment): a keyed unknown outcome on
+/// a new record, the memo fixed, Save: the same key goes.
+#[test]
+fn a_lost_reply_then_a_fixed_memo_saves_under_the_same_key() {
+    use crate::forms::held_key::{keyed_unknown, posting_with_memo};
+    let (_d, link) = link();
+    let mut f = super::kit::SaveFlow::default();
+    let id = |memo: &str| super::kit::SaveIdentity {
+        posting: posting_with_memo(memo),
+        edit: None,
+        password: false,
+    };
+    let k = f.key_for(&id("Fuel"));
+    f.failed(&link, keyed_unknown(&k), None);
+    assert_eq!(f.key_for(&id("Fuel, truck")), k);
+}

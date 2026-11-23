@@ -141,6 +141,8 @@ pub(crate) enum OutcomeMatcher {
 /// never reads the other company's ledger.
 pub(crate) struct Probe {
     session: Session,
+    /// When it was built: just after the owner's press, before its reads.
+    pressed: std::time::Instant,
     stamp_before: Option<u64>,
     /// Client clock (Unix ms), same machine as the engine (P33 revisits).
     sent_at_ms: i64,
@@ -201,6 +203,7 @@ impl Probe {
         matcher: OutcomeMatcher,
         stamp_covered: bool,
     ) -> Probe {
+        let pressed = std::time::Instant::now();
         let session = session.pinned();
         let stamp_before = if stamp_covered {
             read_stamp(&session).await.ok()
@@ -209,6 +212,7 @@ impl Probe {
         };
         Probe {
             session,
+            pressed,
             stamp_before,
             sent_at_ms: now_ms(),
             matcher,
@@ -657,6 +661,7 @@ impl Session {
         }
         let probe = Probe {
             session,
+            pressed: std::time::Instant::now(),
             stamp_before: lost.stamp_before,
             sent_at_ms: lost.sent_at_ms,
             matcher: lost.matcher.clone(),
@@ -694,6 +699,10 @@ impl Session {
 mod recheck_tests;
 
 impl Reconciler for Probe {
+    fn pressed(&self) -> Option<std::time::Instant> {
+        Some(self.pressed)
+    }
+
     fn reconcile<'a>(&'a self, ambiguity: &'a Ambiguity) -> BoxFuture<'a, Reconciled<EngineReply>> {
         Box::pin(async move {
             let r = self.run(ambiguity).await;

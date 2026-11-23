@@ -140,7 +140,7 @@ pub struct TransferScreen {
     load_task: Option<Task<Versioned<Transaction>>>,
     save_task: Option<Task<(TransactionId, RecordVersion)>>,
     intent: Option<SaveIntent>,
-    pub(crate) key: Option<(SaveIdentity, IdempotencyKey)>,
+    pub(crate) key: crate::forms::held_key::HeldKey<SaveIdentity>,
     pub(crate) problems: Vec<TransferProblem>,
     pub(crate) error: Option<ApiError>,
     /// A save whose outcome is unknown (B2).
@@ -264,7 +264,7 @@ impl TransferScreen {
             load_task: None,
             save_task: None,
             intent: None,
-            key: None,
+            key: crate::forms::held_key::HeldKey::default(),
             problems: Vec::new(),
             error: None,
             notice: None,
@@ -676,14 +676,7 @@ impl TransferScreen {
     /// posting, same record version, same password-or-not) goes again
     /// after an unknown outcome, a fresh one otherwise.
     pub(crate) fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
-        match &self.key {
-            Some((d, k)) if d == id => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((id.clone(), k.clone()));
-                k
-            }
-        }
+        self.key.key_for(id)
     }
 
     fn closing_failed(&mut self, e: &ApiError, pending: Pending) -> bool {
@@ -697,7 +690,7 @@ impl TransferScreen {
     pub(crate) fn lost_event(&mut self, ev: crate::forms::lost_save::LostEvent) {
         if let crate::forms::lost_save::LostEvent::Saved(found) = ev {
             crate::forms::publish_saved(&self.link, &self.bus, &self.published);
-            self.key = None;
+            self.key.clear();
             self.saved_count += 1;
             self.last_action = Some("save");
             let f = self.form.current().clone();
@@ -724,7 +717,7 @@ impl TransferScreen {
         self.saved_count += 1;
         self.last_action = Some("save");
         self.last_saved = Some(id);
-        self.key = None;
+        self.key.clear();
         let f = self.form.current().clone();
         self.form.save_ok(f.clone());
         let now: Vec<AccountId> = [f.from, f.to].into_iter().flatten().collect();
@@ -765,9 +758,7 @@ impl TransferScreen {
     pub(crate) fn save_failed(&mut self, e: ApiError) {
         let intent = self.intent.take().unwrap_or(SaveIntent::Save);
         self.after_save_nav = None;
-        if !crate::screens::register::keeps_key(&e) {
-            self.key = None;
-        }
+        self.key.failed(&e);
         let failure = cl_model::forms::SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),

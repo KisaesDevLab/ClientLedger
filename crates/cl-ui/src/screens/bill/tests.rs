@@ -1307,3 +1307,32 @@ fn p33_vendor_credit_keep_mine_use_theirs_and_silent_resave() {
     assert!(!s.conflict.is_open());
     assert_eq!(stored(&link, id).txn.memo.as_deref(), Some("mine"));
 }
+
+/// PR-8 B1: a keyed unknown outcome on a new bill, the memo fixed, Save:
+/// the same key goes (A/P never carries the bill twice).
+#[test]
+fn a_lost_reply_then_a_fixed_memo_saves_under_the_same_key() {
+    use crate::forms::held_key::keyed_unknown;
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let id = |memo: &str| super::save::SaveIdentity {
+        draft: super::save::Draft::Bill(cl_api::BillDraft {
+            vendor: cl_core::ids::ContactId::parse("d0000000-0000-4000-8000-c00000000001")
+                .expect("id"),
+            date: cl_core::CalendarDate::from_ymd(2026, 8, 14).expect("date"),
+            vendor_invoice_number: Some("1042".into()),
+            terms: None,
+            due_date: None,
+            memo: Some(memo.into()),
+            amount_due: cl_core::Money::parse_wire("1250.00").expect("money"),
+            lines: Vec::new(),
+            received: true,
+            draft_attachment: None,
+        }),
+        edit: None,
+        password: false,
+    };
+    let k = s.key_for(&id("Feed"));
+    s.save_failed(keyed_unknown(&k));
+    assert_eq!(s.key_for(&id("Feed, Oct")), k);
+}

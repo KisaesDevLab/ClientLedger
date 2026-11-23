@@ -263,7 +263,7 @@ impl InvoiceScreen {
                 .map(|(id, r)| (id.to_string(), r.txn.updated_at)),
             password.is_some()
         );
-        let key = self.key_for(identity);
+        let key = self.key_for(&identity);
         let pw = password.clone();
         let new2 = new.clone();
         self.save_job = Some(engine::write(
@@ -318,15 +318,8 @@ impl InvoiceScreen {
 
     /// The key for this save: the stored one when the same save goes again
     /// after an unknown outcome, a fresh one otherwise.
-    pub(crate) fn key_for(&mut self, identity: String) -> IdempotencyKey {
-        match &self.key {
-            Some((d, k)) if *d == identity => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((identity, k.clone()));
-                k
-            }
-        }
+    pub(crate) fn key_for(&mut self, identity: &str) -> IdempotencyKey {
+        self.key.key_for(identity)
     }
 
     /// The problems of a refused save; the first one's field gets the
@@ -349,7 +342,7 @@ impl InvoiceScreen {
         use crate::forms::lost_save::LostEvent;
         if let LostEvent::Saved(found) = ev {
             crate::forms::publish_saved(&self.link, &self.bus, &[]);
-            self.key = None;
+            self.key.clear();
             self.saved_count += 1;
             self.last_action = Some("save");
             let header = self.header.current().clone();
@@ -367,7 +360,7 @@ impl InvoiceScreen {
             // Print (S6): only the print-later mark changed; no "send the
             // updated copy?" banner, and Print Forms opens once it is saved.
             self.intent = None;
-            self.key = None;
+            self.key.clear();
             self.lost.saved();
             self.closing_prompt.saved();
             crate::forms::publish_saved(&self.link, &self.bus, &[]);
@@ -400,7 +393,7 @@ impl InvoiceScreen {
         self.last_saved = Some(v.id());
         self.apply_open = None;
         self.apply_cells.clear();
-        self.key = None;
+        self.key.clear();
         self.problems.clear();
         if self.header.is_saving() {
             let h = self.header.current().clone();
@@ -438,8 +431,8 @@ impl InvoiceScreen {
         let intent = self.intent.take().unwrap_or(SaveIntent::Save);
         // 409 RETRY: the same save goes again with the same key.
         let retry = invoice_refusal(&e) == Some(InvoiceRefusal::Retry);
-        if !crate::screens::register::keeps_key(&e) && !retry {
-            self.key = None;
+        if !retry {
+            self.key.failed(&e);
         }
         self.print_after_save = false;
         let failure = cl_model::forms::SaveFailure {
@@ -656,7 +649,7 @@ impl InvoiceScreen {
         self.apply_cells.clear();
         self.focused = None;
         self.stale = false;
-        self.key = None;
+        self.key.clear();
         self.problems.clear();
         self.error = None;
         self.void_open = false;

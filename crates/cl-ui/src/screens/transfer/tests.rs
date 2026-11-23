@@ -445,3 +445,19 @@ fn a_matched_transfers_change_says_the_line_waits() {
     s.set_account(false, account(2050));
     assert_eq!(s.state_json()["feed"]["notice"], true, "another account");
 }
+
+/// PR-8 B1: a keyed unknown outcome on a new transfer, the memo fixed,
+/// Save: the same key goes (never a second transfer).
+#[test]
+fn a_lost_reply_then_a_fixed_memo_saves_under_the_same_key() {
+    use crate::forms::held_key::{keyed_unknown, posting_with_memo};
+    let (mut s, _link, _dir) = screen();
+    let id = |memo: &str| SaveIdentity {
+        posting: posting_with_memo(memo),
+        edit: None,
+        password: false,
+    };
+    let k = s.key_for(&id("To savings"));
+    s.save_failed(keyed_unknown(&k));
+    assert_eq!(s.key_for(&id("To savings, Q4")), k);
+}

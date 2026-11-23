@@ -200,7 +200,7 @@ fn a_stale_expected_owed_previews_again_with_a_message() {
     s.send(Pending::Pay(plan.clone()), None);
     assert!(s.paid.is_some());
     s.paid = None;
-    s.key = None;
+    s.key.clear();
     s.send(
         Pending::Pay(PayPostPlan {
             attempt: plan.attempt + 99,
@@ -266,19 +266,19 @@ fn each_write_target_has_its_own_idempotency_key() {
         id("8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01"),
         id("8a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02"),
     );
-    let k1 = s.key_for(KeyFor::Void(a));
+    let k1 = s.key_for(&KeyFor::Void(a));
     assert_eq!(
-        s.key_for(KeyFor::Void(a)).as_header(),
+        s.key_for(&KeyFor::Void(a)).as_header(),
         k1.as_header(),
         "a retry reuses it"
     );
-    let k2 = s.key_for(KeyFor::Void(b));
+    let k2 = s.key_for(&KeyFor::Void(b));
     assert_ne!(
         k1.as_header(),
         k2.as_header(),
         "another payment gets another key"
     );
-    let k3 = s.key_for(KeyFor::Unlink(b));
+    let k3 = s.key_for(&KeyFor::Unlink(b));
     assert_ne!(
         k2.as_header(),
         k3.as_header(),
@@ -286,13 +286,13 @@ fn each_write_target_has_its_own_idempotency_key() {
     );
     let agency = s.form.agency.expect("agency");
     let d = CalendarDate::from_ymd(2026, 11, 30).expect("d");
-    let k4 = s.key_for(KeyFor::MarkPaid(agency, d));
+    let k4 = s.key_for(&KeyFor::MarkPaid(agency, d));
     assert_eq!(
-        s.key_for(KeyFor::MarkPaid(agency, d)).as_header(),
+        s.key_for(&KeyFor::MarkPaid(agency, d)).as_header(),
         k4.as_header()
     );
     assert_ne!(
-        s.key_for(KeyFor::MarkPaid(agency, d.add_days(-1).expect("d")))
+        s.key_for(&KeyFor::MarkPaid(agency, d.add_days(-1).expect("d")))
             .as_header(),
         k4.as_header()
     );

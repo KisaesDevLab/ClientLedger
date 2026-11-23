@@ -777,12 +777,7 @@ fn applying_a_deposit_in_a_closed_period_asks_and_keeps_its_key() {
         ))
     };
     s.apply_deposit(source, pw());
-    let key = s
-        .deposit_card
-        .key
-        .as_ref()
-        .map(|(_, _, k)| k.clone())
-        .expect("a key");
+    let key = s.deposit_card.key.key().cloned().expect("a key");
     if let Some((_, job)) = s.deposit_card.apply.as_mut() {
         *job = super::engine::Job::Done(Some(Err(cl_api::ApiError::Timeout)));
     }
@@ -791,15 +786,9 @@ fn applying_a_deposit_in_a_closed_period_asks_and_keeps_its_key() {
             .poll_apply(&s.link, s.group.as_ref())
             .is_some()
     );
-    assert_eq!(
-        s.deposit_card.key.as_ref().map(|(_, _, k)| k.clone()),
-        Some(key.clone())
-    );
+    assert_eq!(s.deposit_card.key.key().cloned(), Some(key.clone()));
     s.apply_deposit(source, pw());
-    assert_eq!(
-        s.deposit_card.key.as_ref().map(|(_, _, k)| k.clone()),
-        Some(key)
-    );
+    assert_eq!(s.deposit_card.key.key().cloned(), Some(key));
     assert!(
         s.deposit_card
             .poll_apply(&s.link, s.group.as_ref())
@@ -1144,4 +1133,15 @@ fn p33_the_dialog_names_layouts_and_sales_tax_and_shows_quantity_and_rate() {
     let text = words.line(&theirs_line);
     assert!(text.contains("3 \u{00d7} "), "{text}");
     assert!(open.dialog.conflict().theirs_changed_lines());
+}
+
+/// PR-8 B1 (invoices, sales receipts, credit memos): a keyed unknown
+/// outcome on a new one, the memo fixed, Save: the same key goes.
+#[test]
+fn a_lost_reply_then_a_fixed_memo_saves_under_the_same_key() {
+    use crate::forms::held_key::keyed_unknown;
+    let (_d, mut s) = screen();
+    let k = s.key_for("invoice|memo: Spring order");
+    s.save_failed(keyed_unknown(&k));
+    assert_eq!(s.key_for("invoice|memo: Spring order, 2"), k);
 }

@@ -191,7 +191,7 @@ impl EnterBillScreen {
             e.old_date = theirs.record.txn.txn_date;
             e.has_payments = theirs.record.has_payments();
         }
-        self.save.key = None;
+        self.save.key.clear();
         self.save.stale = false;
         self.sync_inputs();
     }

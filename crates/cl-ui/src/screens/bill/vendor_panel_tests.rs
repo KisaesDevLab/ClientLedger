@@ -296,6 +296,63 @@ fn save_with_a_duplicate_asks_and_save_anyway_sends_it() {
     assert!(!q.go_back());
 }
 
+/// PR-8 S1: on the office network a bill another computer saved with this
+/// vendor and ref (no notice names the vendor) is found at Save, and the
+/// owner is asked; Save anyway still sends it, without asking twice. Just
+/// this computer keeps the earlier answer (its own saves reach the bus).
+#[test]
+fn a_bill_saved_on_another_computer_is_found_at_save() {
+    let e = env();
+    let v = e.story();
+    let input = e.input(BillKind::Bill, Some(v), REF, day(2026, 11, 3), None);
+    let t0 = Instant::now();
+    let mut alone = VendorPanel::default();
+    assert_eq!(settle(&mut alone, &input, t0), "clear");
+    assert!(crate::lan_status::LanShell::command(
+        &e.link,
+        "dev.lan_host_up"
+    ));
+    let mut p = VendorPanel::default();
+    assert_eq!(settle(&mut p, &input, t0), "clear");
+    e.bill(v, REF, day(2026, 11, 3));
+    assert!(!p.clear_to_save(&input, SaveIntent::Save), "asked first");
+    assert!(p.asking());
+    assert_eq!(p.answer(true), PanelEvent::None);
+    assert_eq!(p.take_resume(), Some(SaveIntent::Save));
+    assert!(p.clear_to_save(&input, SaveIntent::Save), "not asked twice");
+    assert!(crate::lan_status::LanShell::demo_off(&e.link));
+    assert!(alone.clear_to_save(&input, SaveIntent::Save));
+}
+
+/// PR-8 S1: the save a fresh check resumes is not checked once more (no
+/// loop): with the check run after the press, Save goes at once, and the
+/// next press checks again.
+#[test]
+fn the_save_a_fresh_check_resumes_is_not_checked_again() {
+    let e = env();
+    let v = e.story();
+    let input = e.input(BillKind::Bill, Some(v), REF, day(2026, 11, 3), None);
+    assert!(crate::lan_status::LanShell::command(
+        &e.link,
+        "dev.lan_host_up"
+    ));
+    let mut p = VendorPanel::default();
+    assert_eq!(settle(&mut p, &input, Instant::now()), "clear");
+    e.bill(v, REF, day(2026, 11, 3));
+    // As after a live check that answered after the press.
+    p.checked_for_save = true;
+    assert!(
+        p.clear_to_save(&input, SaveIntent::Save),
+        "resumed, not rechecked"
+    );
+    assert!(!p.checked_for_save, "used once");
+    assert!(
+        !p.clear_to_save(&input, SaveIntent::Save),
+        "the next press looks"
+    );
+    assert!(p.asking());
+}
+
 #[test]
 fn no_duplicate_or_no_ref_saves_without_asking() {
     let e = env();

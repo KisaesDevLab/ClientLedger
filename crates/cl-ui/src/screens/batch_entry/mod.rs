@@ -155,7 +155,7 @@ pub struct BulkEntryScreen {
     pub(crate) save_after_check: Option<cl_model::forms::SaveIntent>,
     pub(crate) save_task: Option<save::Saving>,
     /// The idempotency key for a batch content hash (kept for retries).
-    pub(crate) key: Option<(u64, cl_api::IdempotencyKey)>,
+    pub(crate) key: crate::forms::held_key::HeldKey<u64>,
     /// A save whose outcome is unknown (follow-up 4): only the unchanged
     /// batch (this content hash) may go again until the owner confirms.
     pub(crate) lost: crate::forms::lost_save::LostSave,
@@ -277,7 +277,7 @@ impl BulkEntryScreen {
             tag_refusal: Vec::new(),
             save_after_check: None,
             save_task: None,
-            key: None,
+            key: crate::forms::held_key::HeldKey::default(),
             lost: crate::forms::lost_save::LostSave::default(),
             resend_only: None,
             lost_gate: cl_model::forms::FormState::new(()),

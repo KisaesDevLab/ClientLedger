@@ -186,7 +186,7 @@ impl WriteCheckScreen {
             e.old_date = theirs.record.txn.txn_date;
             e.print_status = theirs.record.print_status.clone();
         }
-        self.save.key = None;
+        self.save.key.clear();
         self.save.stale = false;
         self.sync_inputs();
     }

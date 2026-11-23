@@ -12,10 +12,7 @@
 
 use std::sync::Arc;
 
-use cl_api::{
-    ApiError, ApplyInvoice, ApplyRequest, DepositOnHand, IdempotencyKey, PaymentRefusal,
-    RequestGroup,
-};
+use cl_api::{ApiError, ApplyInvoice, ApplyRequest, DepositOnHand, PaymentRefusal, RequestGroup};
 use cl_core::ids::{ContactId, TransactionId};
 use cl_core::{CalendarDate, MoneyStyle, Secret};
 use eframe::egui::{RichText, Ui};
@@ -44,7 +41,7 @@ pub(crate) struct DepositCard {
     pub(crate) apply: Option<(TransactionId, Job<cl_api::ApplyResult>)>,
     /// The deposit and invoice the key was made for, and the key: kept
     /// until the engine answers for sure.
-    pub(crate) key: Option<(TransactionId, TransactionId, IdempotencyKey)>,
+    pub(crate) key: crate::forms::held_key::HeldKey<(TransactionId, TransactionId)>,
     note: Option<&'static str>,
     /// Applies done (tests and the scenario).
     pub(crate) applied: u32,
@@ -127,14 +124,7 @@ impl DepositCard {
             expected_updated_at: None,
         };
         // The same apply keeps its key until the engine answers for sure.
-        let key = match &self.key {
-            Some((s, i, k)) if *s == source && *i == invoice => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((source, invoice, k.clone()));
-                k
-            }
-        };
+        let key = self.key.key_for(&(source, invoice));
         let demo_req = req.clone();
         let demo_pw = password.clone();
         let opts = crate::screens::receive_payment::engine::options(password);
@@ -166,7 +156,7 @@ impl DepositCard {
         self.apply = None;
         match r {
             Ok(_) => {
-                self.key = None;
+                self.key.clear();
                 self.applied += 1;
                 self.note = Some("invoice.deposit.applied");
                 if let Some(c) = self.client {
@@ -175,9 +165,7 @@ impl DepositCard {
                 None
             }
             Err(e) => {
-                if !crate::screens::register::keeps_key(&e) {
-                    self.key = None;
-                }
+                self.key.failed(&e);
                 self.note = Some(failed_note(&e));
                 Some(CardEvent::Failed(source, e))
             }

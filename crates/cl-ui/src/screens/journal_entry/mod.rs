@@ -31,8 +31,8 @@ mod save;
 use std::sync::Arc;
 
 use cl_api::{
-    AccountRoles, ApiError, Basis, Capabilities, DraftWarning, IdempotencyKey, NewJournalEntry,
-    RecordVersion, RequestGroup, TemplateDraft, Transaction, TxnType, Versioned,
+    AccountRoles, ApiError, Basis, Capabilities, DraftWarning, NewJournalEntry, RecordVersion,
+    RequestGroup, TemplateDraft, Transaction, TxnType, Versioned,
 };
 use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, MoneyStyle};
@@ -175,7 +175,7 @@ pub struct JournalScreen {
     pub(crate) new_basis: Basis,
     pub(crate) number_task: Option<Task<String>>,
     pub(crate) intent: Option<SaveIntent>,
-    pub(crate) key: Option<(SaveIdentity, IdempotencyKey)>,
+    pub(crate) key: crate::forms::held_key::HeldKey<SaveIdentity>,
     pub(crate) problems: Vec<JournalProblem>,
     /// P29 WP7: the lines the tag rules refused, in words (Q-276).
     pub(crate) tag_refusal: Vec<String>,
@@ -281,7 +281,7 @@ impl JournalScreen {
             new_basis: Basis::Both,
             number_task: None,
             intent: None,
-            key: None,
+            key: crate::forms::held_key::HeldKey::default(),
             problems: Vec::new(),
             tag_refusal: Vec::new(),
             error: None,
@@ -638,7 +638,7 @@ impl JournalScreen {
             .start(&self.link, self.group.as_ref(), v.record.id, banks, shape);
         self.focused = None;
         self.stale = false;
-        self.key = None;
+        self.key.clear();
         self.problems.clear();
         self.error = None;
         self.void_open = false;

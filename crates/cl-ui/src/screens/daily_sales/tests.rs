@@ -187,6 +187,7 @@ fn entry_of(id: DailyEntryId, d: &DailyEntryDraft) -> DailyEntry {
         totals: DailyTotals::default(),
         layout: None,
         stamp: None,
+        created_by: None,
     }
 }
 
@@ -1115,4 +1116,266 @@ fn header_enter_saves_or_moves_by_the_preference() {
             }
         }
     }
+}
+
+// --- PR-8 S5 and B1: a lost reply on a new day ---------------------------
+
+/// The books with one lost create: [`Now`] for everything, except that the
+/// next `create_draft` loses its reply (after saving the draft when
+/// `commits`), as a dropped office-network link does. A key seen before
+/// is answered with the draft it saved (the engine's replay, U-18).
+struct LosesReply {
+    books: SharedBooks,
+    keyed: bool,
+    commits: bool,
+    lost: Mutex<bool>,
+    keys: Mutex<Vec<(cl_api::IdempotencyKey, DailyEntryId)>>,
+    sent: Mutex<Vec<cl_api::IdempotencyKey>>,
+}
+
+impl LosesReply {
+    fn new(books: SharedBooks, keyed: bool, commits: bool) -> LosesReply {
+        LosesReply {
+            books,
+            keyed,
+            commits,
+            lost: Mutex::new(false),
+            keys: Mutex::new(Vec::new()),
+            sent: Mutex::new(Vec::new()),
+        }
+    }
+    fn with<T>(&self, f: impl FnOnce(&mut dyn DailyBooks) -> T) -> T {
+        let mut b = self.books.lock().expect("books");
+        f(&mut *b)
+    }
+}
+
+#[allow(clippy::unused_async_trait_impl, reason = "answered at once, like Now")]
+impl DailyApi for LosesReply {
+    async fn templates(&self) -> Result<Vec<DailyTemplate>, ApiError> {
+        self.with(|b| b.templates())
+    }
+    async fn template(&self, id: DailyTemplateId) -> Result<DailyTemplate, ApiError> {
+        self.with(|b| b.template(id))
+    }
+    async fn create_template(
+        &self,
+        name: &str,
+        preset: Option<Preset>,
+    ) -> Result<DailyTemplate, ApiError> {
+        self.with(|b| b.create_template(name, preset))
+    }
+    async fn rename(
+        &self,
+        id: DailyTemplateId,
+        _stamp: Option<cl_api::RecordStamp>,
+        name: &str,
+    ) -> Result<DailyTemplate, ApiError> {
+        self.with(|b| b.rename(id, name))
+    }
+    async fn replace_lines(
+        &self,
+        id: DailyTemplateId,
+        _stamp: Option<cl_api::RecordStamp>,
+        lines: &[DailyLineInput],
+    ) -> Result<DailyTemplate, ApiError> {
+        self.with(|b| b.replace_lines(id, lines))
+    }
+    async fn delete_template(
+        &self,
+        id: DailyTemplateId,
+        _stamp: Option<cl_api::RecordStamp>,
+    ) -> Result<(), ApiError> {
+        self.with(|b| b.delete_template(id))
+    }
+    async fn list(&self, q: &DailyEntryQuery) -> Result<Vec<DailyEntrySummary>, ApiError> {
+        self.with(|b| b.list(q))
+    }
+    async fn entry(&self, id: DailyEntryId) -> Result<DailyEntry, ApiError> {
+        self.with(|b| b.entry(id))
+    }
+    async fn create_draft(
+        &self,
+        d: &DailyEntryDraft,
+        key: cl_api::IdempotencyKey,
+    ) -> Result<DailyEntry, ApiError> {
+        self.sent.lock().expect("sent").push(key.clone());
+        let seen = self
+            .keys
+            .lock()
+            .expect("keys")
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, id)| *id);
+        if let Some(id) = seen {
+            return self.with(|b| b.entry(id));
+        }
+        let lose = !std::mem::replace(&mut *self.lost.lock().expect("lost"), true);
+        if lose && !self.commits {
+            return Err(lost_reply(&key, self.keyed));
+        }
+        let e = self.with(|b| b.create_draft(d))?;
+        self.keys.lock().expect("keys").push((key.clone(), e.id));
+        if lose {
+            return Err(lost_reply(&key, self.keyed));
+        }
+        Ok(e)
+    }
+    async fn update_draft(
+        &self,
+        id: DailyEntryId,
+        _stamp: Option<cl_api::RecordStamp>,
+        d: &DailyEntryDraft,
+        _key: cl_api::IdempotencyKey,
+    ) -> Result<DailyEntry, ApiError> {
+        self.with(|b| b.update_draft(id, d))
+    }
+    async fn preview(
+        &self,
+        template: DailyTemplateId,
+        values: &[DailyValue],
+    ) -> Result<DailyPreview, ApiError> {
+        self.with(|b| b.preview(template, values))
+    }
+    async fn post(
+        &self,
+        id: DailyEntryId,
+        password: Option<Secret>,
+    ) -> Result<DailyEntry, ApiError> {
+        self.with(|b| b.post(id, password.as_ref()))
+    }
+    async fn void(
+        &self,
+        id: DailyEntryId,
+        password: Option<Secret>,
+    ) -> Result<DailyEntry, ApiError> {
+        self.with(|b| b.void(id, password.as_ref()))
+    }
+}
+
+fn lost_reply(key: &cl_api::IdempotencyKey, keyed: bool) -> ApiError {
+    ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-0000000000d5")
+            .expect("id"),
+        idempotency_key: Some(key.clone()),
+        keyed,
+    }
+}
+
+fn user(n: u8) -> cl_core::ids::UserId {
+    cl_core::ids::UserId::parse(&format!("d0000000-0000-4000-8000-0000000000{n:02x}"))
+        .expect("user")
+}
+
+/// The books with the counter layout and the owner's draft of today, made
+/// on another computer (the form never saw it); the clerk's day and the
+/// plan for it.
+fn two_computers() -> (SharedBooks, DailyEntry, super::save::Plan) {
+    let t = counter();
+    let sales = t.lines[0].id;
+    let cash = t.lines[2].id;
+    let mut fake = Fake::default();
+    fake.templates.push(t.clone());
+    let day = |amount: &str| DailyEntryDraft {
+        template: t.id,
+        date: today(),
+        tag: None,
+        notes: None,
+        values: vec![
+            DailyValue {
+                line: sales,
+                amount: m(amount),
+                tag: None,
+            },
+            DailyValue {
+                line: cash,
+                amount: m(amount),
+                tag: None,
+            },
+        ],
+    };
+    let mut owners = entry_of(DailyEntryId::parse(&fresh()).expect("id"), &day("812.40"));
+    owners.created_by = Some(user(1));
+    fake.entries.push(owners.clone());
+    let books: SharedBooks = Arc::new(Mutex::new(fake));
+    let plan = super::save::Plan {
+        draft: None,
+        draft_stamp: None,
+        body: day("97.15"),
+        expected: Money::ZERO,
+        password: None,
+        key: cl_api::IdempotencyKey::new(),
+        known: Vec::new(),
+        me: Some(user(2)),
+    };
+    (books, owners, plan)
+}
+
+fn untouched(books: &SharedBooks, owners: &DailyEntry) {
+    let now = Now(Arc::clone(books));
+    let e = at_once(now.entry(owners.id)).expect("the owner's day");
+    assert_eq!(e.status, EntryStatus::Draft, "not posted");
+    assert_eq!(e.values, owners.values, "the owner's figures kept");
+}
+
+/// S5: a keyed lost reply resends the same draft under the same key (the
+/// engine replays it); the owner's draft of the day is never touched.
+#[test]
+fn a_keyed_lost_reply_resends_its_own_draft_and_leaves_the_others() {
+    for commits in [true, false] {
+        let (books, owners, plan) = two_computers();
+        let key = plan.key.clone();
+        let api = LosesReply::new(Arc::clone(&books), true, commits);
+        let out = at_once(super::save::flow(&api, plan)).expect("saved");
+        let super::save::Outcome::Posted(posted, _) = out else {
+            panic!("posted");
+        };
+        assert_ne!(posted.id, owners.id, "its own day");
+        untouched(&books, &owners);
+        let sent = api.sent.lock().expect("sent").clone();
+        assert_eq!(sent, vec![key.clone(), key], "the same key twice");
+        let days =
+            at_once(Now(Arc::clone(&books)).list(&DailyEntryQuery::default())).expect("list");
+        assert_eq!(days.len(), 2, "one day each, nothing twice");
+    }
+}
+
+/// S5: an unkeyed lost reply never adopts another user's draft of the
+/// day, nor guesses between two: "could not tell" (nothing overwritten).
+#[test]
+fn an_unkeyed_probe_leaves_another_users_draft_alone() {
+    for commits in [false, true] {
+        let (books, owners, plan) = two_computers();
+        let api = LosesReply::new(Arc::clone(&books), false, commits);
+        let Err(e) = at_once(super::save::flow(&api, plan)) else {
+            panic!("could not tell");
+        };
+        assert!(
+            matches!(e, ApiError::OutcomeUnknown { keyed: false, .. }),
+            "{e:?}"
+        );
+        untouched(&books, &owners);
+    }
+}
+
+/// B1: after a keyed unknown outcome on a new day, the figures fixed, Save:
+/// the same key goes.
+#[test]
+fn a_lost_reply_then_fixed_figures_save_under_the_same_key() {
+    use crate::forms::held_key::keyed_unknown;
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let mut s = DailySalesScreen::new(Arc::clone(&link), None, today());
+    let (_books, _owners, plan) = two_computers();
+    let id = |notes: &str| super::save::SaveIdentity {
+        body: DailyEntryDraft {
+            notes: Some(notes.into()),
+            ..plan.body.clone()
+        },
+        draft: None,
+        password: false,
+    };
+    let k = s.key_for(&id("Sat"));
+    s.save_failed(keyed_unknown(&k));
+    assert_eq!(s.key_for(&id("Sat, market")), k);
 }

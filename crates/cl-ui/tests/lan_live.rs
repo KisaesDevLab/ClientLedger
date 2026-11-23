@@ -755,6 +755,27 @@ fn host_restore(host: &Host, b: &Desk, scratch: &Path) {
 
     // A workstation can't restore: host-only, refused before the engine.
     let sb = b.sign_in(&host.password);
+
+    // PR-8 S6: a routine hold (payroll, an import) refuses the workstation
+    // while it lasts but keeps it signed in; its next read works.
+    if hs
+        .client()
+        .capabilities()
+        .has(cl_api::Capabilities::MAINTENANCE_SESSIONS)
+    {
+        rt.block_on(hs.start_maintenance(true))
+            .expect("a routine hold");
+        let during = b.run(sb.ledger_version());
+        assert!(
+            matches!(during, Err(ApiError::Lan(LanRefusal::Maintenance))),
+            "a workstation during a routine hold: {during:?}"
+        );
+        rt.block_on(hs.end_maintenance()).expect("the hold ends");
+        b.run(sb.ledger_version())
+            .expect("still signed in after a routine hold");
+    } else {
+        eprintln!("PENDING: maintenance-sessions-v1 (engine before PR-8 S6)");
+    }
     let refused = b.run(sb.tenants().import_archive(&cl_api::ImportRequest {
         path: made.record.path.clone(),
         passphrase: Secret::new("lan-live-backup-passphrase-synthetic"),
@@ -771,7 +792,7 @@ fn host_restore(host: &Host, b: &Desk, scratch: &Path) {
     let restored = rt
         .block_on(cl_ui::lan_status::with_maintenance(
             &hs,
-            true,
+            cl_ui::lan_status::Hold::Restore,
             cl_company::restore(
                 &hs,
                 &store,
@@ -1062,6 +1083,54 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
     assert_eq!(after.record.memo.as_deref(), Some(held_memo.as_str()));
     assert_eq!(debits(&after.record), m("25.00"));
 
+    // --- PR-8 B1: a lost reply on a new entry, the memo fixed, Save -------
+    // The create commits through the proxy but its reply is lost (the form
+    // holds what cl-api reports then: a keyed unknown outcome). The owner
+    // fixes the memo and saves again: the form's held key is pinned, so
+    // the engine refuses the changed entry (422 IDEMPOTENCY_KEY_REUSED,
+    // "your earlier save went through") and the books hold one entry.
+    let lost_memo = unique("lost reply");
+    let mut held = cl_ui::forms::held_key::HeldKey::<String>::default();
+    let k = held.key_for(&lost_memo);
+    a.run(sa.transactions().create_journal_entry(
+        &je2(on(), &lost_memo, supplies, cash, "12.50"),
+        &PostingOptions::default(),
+        k.clone(),
+    ))
+    .expect("the first save commits");
+    held.failed(&ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-0000000000b1")
+            .expect("id"),
+        idempotency_key: Some(k.clone()),
+        keyed: true,
+    });
+    let fixed = format!("{lost_memo} fixed");
+    let again = held.key_for(&fixed);
+    assert_eq!(again, k, "the edited form goes under the held key");
+    let e = a
+        .run(sa.transactions().create_journal_entry(
+            &je2(on(), &fixed, supplies, cash, "12.50"),
+            &PostingOptions::default(),
+            again,
+        ))
+        .expect_err("the changed entry is refused");
+    assert!(
+        matches!(e, ApiError::IdempotencyKeyReused { .. }),
+        "422 IDEMPOTENCY_KEY_REUSED: {e:?}"
+    );
+    held.failed(&e);
+    assert!(held.pinned(), "still refused until the form starts over");
+    let found = a
+        .run(sa.transactions().list(
+            &cl_api::TransactionFilter {
+                search: Some(lost_memo.clone()),
+                ..cl_api::TransactionFilter::default()
+            },
+            cl_api::PageRequest::first_max(),
+        ))
+        .expect("list");
+    assert_eq!(found.data.len(), 1, "one entry in the books");
+
     // --- Remove ends the computer's sign-ins (review S7) ------------------
     let hs = host.sign_in_here();
     removal_ends_sign_ins(host, &hs, scratch);
@@ -1072,7 +1141,7 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
     // away without ending it, as a crash or a power cut would.
     let held = host
         .host_rt()
-        .block_on(hs.start_maintenance())
+        .block_on(hs.start_maintenance(false))
         .expect("the host starts maintenance");
     assert!(held.active, "{held:?}");
     // Refused: 503 MAINTENANCE, or its sign-in already ended by the start.

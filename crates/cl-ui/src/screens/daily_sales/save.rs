@@ -11,7 +11,7 @@
 use cl_api::{
     ApiError, DailyEntry, DailyEntryDraft, DailyEntryQuery, DailyValue, EntryStatus, IdempotencyKey,
 };
-use cl_core::ids::{AccountId, DailyEntryId};
+use cl_core::ids::{AccountId, DailyEntryId, UserId};
 use cl_core::{Money, Secret};
 use cl_model::closing::{ClosingStage, is_locked, needs_password};
 use cl_model::forms::daily_sales::{CheckedDaily, DailySalesForm, check};
@@ -35,13 +35,16 @@ pub(crate) struct Plan {
     pub key: IdempotencyKey,
     /// Drafts the form already knew of (the outcome probe skips them).
     pub known: Vec<DailyEntryId>,
+    /// The signed-in user (`None` in the demo): the probe only takes a
+    /// draft this user made (PR-8 S5).
+    pub me: Option<UserId>,
 }
 
 /// How a save ended.
 pub(crate) enum Outcome {
     /// Posted, with the engine's expected tax when the typed tax differs
     /// from it (`TAX_DIFFERS`, a warning: the typed tax posts).
-    Posted(DailyEntry, Option<Money>),
+    Posted(Box<DailyEntry>, Option<Money>),
     /// The engine's preview disagreed with the form (the layout changed
     /// elsewhere) or a line is unmapped: nothing posted; the draft is kept.
     Mismatch {
@@ -76,43 +79,22 @@ pub(crate) async fn flow<A: DailyApi>(api: &A, plan: Plan) -> Result<Outcome, Ap
             Err(ApiError::Validation(v)) => {
                 let e = api.entry(id).await?;
                 if e.status == EntryStatus::Posted {
-                    return Ok(Outcome::Posted(e, None));
+                    return Ok(Outcome::Posted(Box::new(e), None));
                 }
                 return Err(ApiError::Validation(v));
             }
             Err(e) => return Err(e),
         },
-        None => match api.create_draft(&plan.body, plan.key).await {
+        None => match api.create_draft(&plan.body, plan.key.clone()).await {
             Ok(e) => e,
-            Err(lost @ ApiError::OutcomeUnknown { .. }) => {
-                // The outcome probe: a draft of this layout and day the
-                // form did not know is the one just written.
-                let q = DailyEntryQuery {
-                    status: Some(EntryStatus::Draft),
-                    template: Some(plan.body.template),
-                    date: Some(plan.body.date),
-                    limit: Some(50),
-                };
-                let found = api
-                    .list(&q)
-                    .await?
-                    .into_iter()
-                    .find(|d| !plan.known.contains(&d.id));
-                match found {
-                    Some(d) => {
-                        // The row's own stamp (engine #98); an older
-                        // engine's rows carry none, so the draft is read
-                        // for it (U-291, Q-P33at).
-                        let at = match d.stamp {
-                            Some(s) => Some(s),
-                            None => api.entry(d.id).await?.stamp,
-                        };
-                        api.update_draft(d.id, at, &plan.body, IdempotencyKey::new())
-                            .await?
-                    }
-                    None => return Err(lost),
-                }
+            // PR-8 S5: a keyed outcome (`idempotency-v1`). The same draft
+            // under the same key is answered with the first result if it
+            // went through, or saved once if not; no guessing from the
+            // list, where another computer's draft of the day may be.
+            Err(ApiError::OutcomeUnknown { keyed: true, .. }) => {
+                api.create_draft(&plan.body, plan.key.clone()).await?
             }
+            Err(lost @ ApiError::OutcomeUnknown { .. }) => adopt(api, &plan, lost).await?,
             Err(e) => return Err(e),
         },
     };
@@ -134,7 +116,7 @@ pub(crate) async fn flow<A: DailyApi>(api: &A, plan: Plan) -> Result<Outcome, Ap
     }
     match api.post(entry.id, plan.password).await {
         Ok(posted) => Ok(Outcome::Posted(
-            posted,
+            Box::new(posted),
             preview
                 .tax_differs()
                 .then_some(preview.expected_tax)
@@ -146,6 +128,40 @@ pub(crate) async fn flow<A: DailyApi>(api: &A, plan: Plan) -> Result<Outcome, Ap
             error,
         }),
     }
+}
+
+/// The outcome probe after an unkeyed lost reply on a new draft: the one
+/// draft of this layout and day the form did not know, made by this user,
+/// is the one just written; it takes this form's figures. Anything else
+/// (none, more than one, or another user's) could be another computer's
+/// day (PR-8 S5): `lost` comes back, so the form says it could not tell
+/// and nothing is overwritten or posted.
+async fn adopt<A: DailyApi>(api: &A, plan: &Plan, lost: ApiError) -> Result<DailyEntry, ApiError> {
+    let q = DailyEntryQuery {
+        status: Some(EntryStatus::Draft),
+        template: Some(plan.body.template),
+        date: Some(plan.body.date),
+        limit: Some(50),
+    };
+    let new: Vec<_> = api
+        .list(&q)
+        .await?
+        .into_iter()
+        .filter(|d| !plan.known.contains(&d.id))
+        .collect();
+    let [d] = new.as_slice() else {
+        return Err(lost);
+    };
+    // The day itself says who saved it (`createdBy`; the list does not).
+    let full = api.entry(d.id).await?;
+    if full.created_by != plan.me {
+        return Err(lost);
+    }
+    // The row's own stamp (engine #98), else the one just read (U-291,
+    // Q-P33at).
+    let at = d.stamp.or(full.stamp);
+    api.update_draft(d.id, at, &plan.body, IdempotencyKey::new())
+        .await
 }
 
 /// The checked day as the engine's draft, field by field (no arithmetic).
@@ -282,6 +298,7 @@ impl DailySalesScreen {
             password,
             key,
             known,
+            me: self.link.session().and_then(|s| s.user_id()),
         };
         self.save.intent = Some(intent);
         self.save.task = self.run(Call::Save(plan), true);
@@ -294,15 +311,8 @@ impl DailySalesScreen {
         false
     }
 
-    fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
-        match &self.save.key {
-            Some((d, k)) if d == id => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.save.key = Some((id.clone(), k.clone()));
-                k
-            }
-        }
+    pub(crate) fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
+        self.save.key.key_for(id)
     }
 
     pub(crate) fn poll_save(&mut self) {
@@ -360,7 +370,7 @@ impl DailySalesScreen {
         if let LostEvent::Saved(_) = ev {
             // The stored probe found the day posted: read it again and
             // show it as saved.
-            self.save.key = None;
+            self.save.key.clear();
             if let Some(id) = self.saved.as_ref().map(|s| s.id) {
                 self.save.lost_check = self.run(Call::Entry(id), false);
                 self.poll_lost();
@@ -445,7 +455,7 @@ impl DailySalesScreen {
         self.closing_prompt.saved();
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
         self.save.count += 1;
-        self.save.key = None;
+        self.save.key.clear();
         self.save.problems.clear();
         self.save.error = None;
         self.save.notice = None;
@@ -504,7 +514,7 @@ impl DailySalesScreen {
         self.save_template.forget();
         self.void = VoidState::default();
         self.save.problems.clear();
-        self.save.key = None;
+        self.save.key.clear();
         self.nav.at = None;
         self.nav_prompt = None;
         self.focus = Some(Field::Date);
@@ -525,9 +535,7 @@ impl DailySalesScreen {
     pub(crate) fn save_failed(&mut self, e: ApiError) {
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
         self.after_save_nav = None;
-        if !crate::screens::register::keeps_key(&e) {
-            self.save.key = None;
-        }
+        self.save.key.failed(&e);
         let failure = SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),

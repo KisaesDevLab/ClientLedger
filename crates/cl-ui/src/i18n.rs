@@ -370,6 +370,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("closing.admin.exceptions", "See changes made in closed periods"),
     ("closing.admin.exceptions.tip", "The Closing Date Exceptions report: who changed locked transactions, and when."),
     ("closing.admin.saved", "Closing date saved."),
+    ("closing.admin.changed_elsewhere", "The closing date was changed on another computer. Check the date shown now, then save again if you still want to change it."),
     ("closing.admin.cleared", "The books are open: there is no closing date now."),
     ("closing.admin.password_changed", "Closing-date password changed."),
     ("closing.admin.date_needed", "Type a date, like 09/30/2026."),

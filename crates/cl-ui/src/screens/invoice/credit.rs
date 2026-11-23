@@ -201,7 +201,7 @@ impl InvoiceScreen {
                 edit.map(|(id, at)| (id.to_string(), at)),
                 password.is_some()
             );
-            let key = self.key_for(identity);
+            let key = self.key_for(&identity);
             let live = new.clone();
             engine::write(
                 &self.link,
@@ -254,7 +254,7 @@ impl InvoiceScreen {
                 edit.map(|(id, at)| (id.to_string(), at)),
                 password.is_some()
             );
-            let key = self.key_for(identity);
+            let key = self.key_for(&identity);
             let live = new.clone();
             engine::write(
                 &self.link,

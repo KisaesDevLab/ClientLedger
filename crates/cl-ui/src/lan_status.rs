@@ -244,21 +244,65 @@ pub fn host_only(workstation: bool, id: &str) -> bool {
     workstation && HOST_ONLY.contains(&id)
 }
 
-/// Runs `work` under maintenance when this computer is a LAN host (`on`)
-/// and the engine has `maintenance-v1` (U-293): restore, import commit and
-/// undo, payroll post and reverse. The engine drains writes in flight and
-/// ends the workstations' sessions first, then refuses them with 503
-/// `MAINTENANCE` (never retried) until the hold ends. The hold always ends,
-/// whatever `work` answered; a refused start (`MAINTENANCE_BUSY` or
-/// `MAINTENANCE_HELD`) runs nothing.
+/// What a maintenance hold is for (PR-8 S6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hold {
+    /// A restore replaces the books under everyone: the workstations are
+    /// signed out (they open the restored company again).
+    Restore,
+    /// Payroll post and reverse, an import's commit and undo: the
+    /// workstations stay signed in and only wait (503 `MAINTENANCE`) while
+    /// it lasts, so their open windows and unsaved work are kept.
+    Routine,
+}
+
+/// The engine routes that need the hold in LAN mode
+/// (`requireMaintenanceInLan`, Q-P33y) and the cl-api calls this app makes
+/// to them. Every call must run inside [`with_maintenance`]
+/// (`every_maintenance_route_is_called_under_a_hold` checks both lists).
+pub const MAINTENANCE_CALLS: &[(&str, &str)] = &[
+    ("POST /tenant-archives/import", "cl_company::restore("),
+    ("POST /imports/:id/commit", ".imports().commit("),
+    (
+        "POST /imports/batches/:id/commit",
+        ".import_transactions().commit(",
+    ),
+    (
+        "POST /imports/batches/:id/undo",
+        ".import_transactions().undo(",
+    ),
+    ("POST /imports/batches/:id/undo", ".imports().undo("),
+    ("POST /payroll-import/sessions/:id/post", ".payroll().post("),
+    (
+        "POST /payroll-import/sessions/:id/reverse",
+        ".payroll().reverse(",
+    ),
+    // No caller in the app: the payroll check-register and checks posts.
+    ("POST /payroll-import/sessions/:id/check-register/post", ""),
+    ("POST /payroll-import/sessions/:id/checks/post", ""),
+];
+
+/// Runs `work` under maintenance when this computer is the LAN host (its
+/// engine runs with LAN on, PR-8 S7: also when sharing itself could not
+/// start) and the engine has `maintenance-v1` (U-293): restore, import
+/// commit and undo, payroll post and reverse. The engine drains writes in
+/// flight, ends the workstations' sessions for a [`Hold::Restore`] only,
+/// then refuses them with 503 `MAINTENANCE` (never retried) until the hold
+/// ends. The hold always ends, whatever `work` answered; a refused start
+/// (`MAINTENANCE_BUSY` or `MAINTENANCE_HELD`) runs nothing.
 ///
 /// # Errors
 /// The start's refusal, or `work`'s own error.
-pub async fn with_maintenance<T, E, F>(session: &cl_api::Session, on: bool, work: F) -> Result<T, E>
+pub async fn with_maintenance<T, E, F>(
+    session: &cl_api::Session,
+    hold: Hold,
+    work: F,
+) -> Result<T, E>
 where
     E: From<cl_api::ApiError>,
     F: std::future::Future<Output = Result<T, E>>,
 {
+    let on = crate::lan_link::host_running() || session.client().lan_host_engine();
     if !on
         || !session
             .client()
@@ -267,7 +311,7 @@ where
     {
         return work.await;
     }
-    session.start_maintenance().await?;
+    session.start_maintenance(hold == Hold::Routine).await?;
     // QA-9: the workstations' heartbeat says "maintenance" while it lasts.
     crate::lan_link::set_host_maintenance(true);
     let r = work.await;
@@ -336,8 +380,50 @@ fn everything() -> Vec<Change> {
         Change::Tags,
         Change::Items,
         Change::Templates,
+        Change::BillsAll,
+        Change::BankFeed,
+        Change::Company,
     ]
 }
+
+/// Every kind the engine's change feed writes (a `mybooks_feed` trigger,
+/// engine migration 0289) and the notices it becomes (PR-8 S2). A kind
+/// with no trigger has no row here
+/// (`every_fed_kind_has_a_row_and_every_row_a_trigger`).
+pub const FEED_KINDS: &[(&str, &[Change])] = &[
+    // An edit, void or delete of any transaction: the registers, and any
+    // vendor's duplicate-ref check (a bill is a transaction; PR-8 S1). The
+    // Bank Feed reads again on any notice already (a remote accept is a
+    // transaction).
+    ("transactions", &[Change::Ledger(None), Change::BillsAll]),
+    ("daily_sales_entries", &[Change::Ledger(None)]),
+    ("contacts", &[Change::Contacts]),
+    ("contact_tax_exemptions", &[Change::Contacts]),
+    ("accounts", &[Change::Accounts]),
+    ("tags", &[Change::Tags]),
+    ("tag_groups", &[Change::Tags]),
+    ("items", &[Change::Items]),
+    ("unit_sets", &[Change::Items]),
+    ("price_levels", &[Change::Items]),
+    // Sales tax codes and agencies feed the same pickers as the tax items.
+    ("sales_tax_items", &[Change::Items]),
+    ("sales_tax_codes", &[Change::Items]),
+    ("sales_tax_agencies", &[Change::Items]),
+    ("je_templates", &[Change::Templates]),
+    ("recurring_schedules", &[Change::Templates]),
+    ("daily_sales_templates", &[Change::Templates]),
+    ("invoice_templates", &[Change::Templates]),
+    ("vendor_layout_templates", &[Change::Templates]),
+    // Bank rules and documents waiting for review: Bank Feed and Review
+    // Documents read again.
+    ("conditional_rules", &[Change::BankFeed]),
+    ("document_drafts", &[Change::BankFeed]),
+    // The company row (settings, closing date) and the books' own row; the
+    // role templates live with the company's people settings.
+    ("companies", &[Change::Company]),
+    ("tenants", &[Change::Company]),
+    ("permission_templates", &[Change::Company]),
+];
 
 /// What the windows must read again for one feed page (ids and kinds
 /// only). `reset` reloads everything; `upsert`, `delete` and `left`
@@ -351,25 +437,13 @@ pub fn changes_of(page: &cl_api::ChangePage) -> Vec<Change> {
     }
     let mut out: Vec<Change> = Vec::new();
     for item in &page.changes {
-        let change = match item.kind.as_str() {
-            "transactions"
-            | "journal_lines"
-            | "deposit_lines"
-            | "payment_applications"
-            | "bill_payment_applications"
-            | "vendor_credit_applications"
-            | "transaction_tags"
-            | "daily_sales_entries"
-            | "attachments" => Change::Ledger(None),
-            "contacts" | "contact_tax_exemptions" => Change::Contacts,
-            "accounts" => Change::Accounts,
-            "tags" | "tag_groups" => Change::Tags,
-            "items" | "unit_sets" | "price_levels" | "sales_tax_items" => Change::Items,
-            "je_templates" | "recurring_schedules" | "daily_sales_templates" => Change::Templates,
-            _ => continue,
+        let Some((_, notices)) = FEED_KINDS.iter().find(|(k, _)| *k == item.kind) else {
+            continue;
         };
-        if !out.contains(&change) {
-            out.push(change);
+        for change in *notices {
+            if !out.contains(change) {
+                out.push(change.clone());
+            }
         }
     }
     out
@@ -463,11 +537,12 @@ impl LanShell {
                     self.last = Some(stamp);
                 }
                 Some(Ok(Answer::Feed(page))) => {
-                    // The first read only primes the cursor.
-                    if self.cursor.is_some() {
-                        for change in changes_of(&page) {
-                            link.bus().publish(change);
-                        }
+                    // The first read primes the cursor and answers `reset`:
+                    // the windows read again once, so a change committed
+                    // between their own first reads and this one is not
+                    // missed (PR-8 M3).
+                    for change in changes_of(&page) {
+                        link.bus().publish(change);
                     }
                     self.cursor = page.cursor.or_else(|| self.cursor.take());
                 }
@@ -849,18 +924,236 @@ mod tests {
             changes_of(&page),
             vec![
                 Change::Ledger(None),
+                Change::BillsAll,
                 Change::Contacts,
                 Change::Accounts,
                 Change::Tags
             ],
             "each list once; a hidden account (`left`) re-reads the chart; unknown kinds skipped"
         );
+        // PR-8 S1, S2: a remote bill reaches every vendor panel; settings,
+        // documents and sales tax codes reach their windows.
+        let more = ChangePage {
+            changes: vec![
+                item("companies", ChangeOp::Upsert),
+                item("document_drafts", ChangeOp::Upsert),
+                item("sales_tax_codes", ChangeOp::Upsert),
+                item("vendor_layout_templates", ChangeOp::Delete),
+            ],
+            ..ChangePage::default()
+        };
+        assert_eq!(
+            changes_of(&more),
+            vec![
+                Change::Company,
+                Change::BankFeed,
+                Change::Items,
+                Change::Templates
+            ]
+        );
+        let bus = crate::data_bus::DataBus::new();
+        let mut sub = bus.subscribe();
+        for c in changes_of(&page) {
+            bus.publish(c);
+        }
+        let vendor =
+            cl_core::ids::ContactId::parse("00000000-0000-4000-8000-000000000101").expect("id");
+        assert!(bus.take(&mut sub).bills_touch(vendor));
         let reset = ChangePage {
             reset: true,
             ..ChangePage::default()
         };
         assert_eq!(changes_of(&reset), everything());
         assert_eq!(changes_of(&ChangePage::default()).len(), 0);
+    }
+
+    /// PR-8 S6, S7: sharing did not start in this app, but the engine runs
+    /// with LAN on, so the hold is still taken; a routine hold asks to keep
+    /// the other sessions, a restore's does not; the hold always ends.
+    #[tokio::test]
+    async fn a_lan_engine_takes_the_hold_even_without_sharing() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/desktop/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "mode": "desktop", "initialized": true, "lan": true,
+                "capabilities": [cl_api::Capabilities::MAINTENANCE]
+            })))
+            .mount(&server)
+            .await;
+        let hold = serde_json::json!({
+            "active": true, "holderSession": "c", "holderUser": "u", "startedAt": "x"
+        });
+        Mock::given(method("POST"))
+            .and(path("/api/v1/desktop/maintenance"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(hold))
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/v1/desktop/maintenance"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "active": false, "holderSession": null, "holderUser": null, "startedAt": null
+            })))
+            .mount(&server)
+            .await;
+        let s = cl_api::testing::stub_session(server.address().port());
+        s.client().desktop_info().await.expect("desktop info");
+        assert!(!crate::lan_link::host_running(), "no sharing in this test");
+        let work = async { Ok::<u8, cl_api::ApiError>(7) };
+        assert_eq!(
+            with_maintenance(&s, Hold::Routine, work).await.ok(),
+            Some(7)
+        );
+        let fails = async { Err::<u8, _>(cl_api::ApiError::Internal) };
+        assert!(with_maintenance(&s, Hold::Restore, fails).await.is_err());
+        let seen: Vec<String> = server
+            .received_requests()
+            .await
+            .expect("recorded")
+            .iter()
+            .filter(|r| r.url.path() == "/api/v1/desktop/maintenance")
+            .map(|r| format!("{} {}", r.method, String::from_utf8_lossy(&r.body)))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                r#"POST {"keepSessions":true}"#.to_string(),
+                "DELETE ".to_string(),
+                "POST {}".to_string(),
+                "DELETE ".to_string(),
+            ]
+        );
+    }
+
+    /// PR-8 S2: every kind with a `mybooks_feed` trigger in the engine's
+    /// migrations has a row in [`FEED_KINDS`], and every row a trigger (no
+    /// dead rows that look like coverage).
+    #[test]
+    fn every_fed_kind_has_a_row_and_every_row_a_trigger() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../engine/packages/api/src/db/migrations");
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            eprintln!("SKIPPED: no engine migrations at {}", dir.display());
+            return;
+        };
+        let mut fed = std::collections::BTreeSet::new();
+        let mut dropped = std::collections::BTreeSet::new();
+        for e in entries.flatten() {
+            let text = std::fs::read_to_string(e.path()).unwrap_or_default();
+            let rollback = e.file_name().to_string_lossy().contains("rollback");
+            for line in text.lines() {
+                // `CREATE TRIGGER mybooks_feed ... ON <table> FOR EACH ROW`
+                // and `DROP TRIGGER IF EXISTS mybooks_feed ON <table>;`
+                if !line.contains("TRIGGER") || !line.contains("mybooks_feed ") {
+                    continue;
+                }
+                let Some((_, rest)) = line.split_once(" ON ") else {
+                    continue;
+                };
+                let table = rest
+                    .split(|c: char| c.is_whitespace() || c == ';')
+                    .next()
+                    .unwrap_or_default()
+                    .to_string();
+                if line.trim_start().starts_with("CREATE") && !rollback {
+                    fed.insert(table);
+                } else if line.trim_start().starts_with("DROP") && !rollback {
+                    dropped.insert(table);
+                }
+            }
+        }
+        assert!(!fed.is_empty(), "the feed's triggers were found");
+        let fed: std::collections::BTreeSet<String> = fed.difference(&dropped).cloned().collect();
+        let rows: std::collections::BTreeSet<String> =
+            FEED_KINDS.iter().map(|(k, _)| (*k).to_string()).collect();
+        assert_eq!(rows.len(), FEED_KINDS.len(), "a kind is listed twice");
+        assert_eq!(rows, fed, "FEED_KINDS against the engine's feed triggers");
+        assert!(FEED_KINDS.iter().all(|(_, n)| !n.is_empty()));
+    }
+
+    /// PR-8 B2: every engine route that needs the hold in LAN mode is in
+    /// [`MAINTENANCE_CALLS`], and every call this app makes to one runs
+    /// inside [`with_maintenance`] (a call outside it is refused on a
+    /// sharing host with `MAINTENANCE_REQUIRED`, every time).
+    #[test]
+    fn every_maintenance_route_is_called_under_a_hold() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let routes = root.join("../../engine/packages/api/src/routes");
+        if let Ok(dir) = std::fs::read_dir(&routes) {
+            let mut found = std::collections::BTreeSet::new();
+            for f in dir.flatten() {
+                let name = f.file_name().to_string_lossy().into_owned();
+                let Some(prefix) = name.strip_suffix(".routes.ts") else {
+                    continue;
+                };
+                let text = std::fs::read_to_string(f.path()).unwrap_or_default();
+                for line in text
+                    .lines()
+                    .filter(|l| l.contains("requireMaintenanceInLan()"))
+                {
+                    // `xRouter.post('/path', requireMaintenanceInLan(), ...`
+                    let Some((head, rest)) = line.split_once("('") else {
+                        continue;
+                    };
+                    let Some(verb) = head.rsplit('.').next() else {
+                        continue;
+                    };
+                    let Some((p, _)) = rest.split_once('\'') else {
+                        continue;
+                    };
+                    found.insert(format!("{} /{prefix}{p}", verb.to_uppercase()));
+                }
+            }
+            let listed: std::collections::BTreeSet<String> = MAINTENANCE_CALLS
+                .iter()
+                .map(|(r, _)| (*r).to_string())
+                .collect();
+            assert_eq!(found, listed, "the engine's maintenance routes changed");
+        } else {
+            eprintln!(
+                "SKIPPED (route list): no engine sources at {}",
+                routes.display()
+            );
+        }
+        // Every call in the app's sources sits inside `with_maintenance(`.
+        let mut files = Vec::new();
+        let mut dirs = vec![root.join("src")];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).expect("src").flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    dirs.push(p);
+                } else if p.extension().is_some_and(|x| x == "rs") && !p.ends_with("lan_status.rs")
+                {
+                    files.push(p);
+                }
+            }
+        }
+        let mut calls = 0;
+        for f in &files {
+            let text = std::fs::read_to_string(f).expect("read");
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                for (route, needle) in MAINTENANCE_CALLS {
+                    if needle.is_empty() || !line.contains(needle) {
+                        continue;
+                    }
+                    calls += 1;
+                    let from = i.saturating_sub(12);
+                    assert!(
+                        lines[from..=i]
+                            .iter()
+                            .any(|l| l.contains("with_maintenance(")),
+                        "{}:{}: {route} called outside with_maintenance",
+                        f.display(),
+                        i + 1
+                    );
+                }
+            }
+        }
+        assert!(calls >= 7, "the call sites were found ({calls})");
     }
 
     #[test]

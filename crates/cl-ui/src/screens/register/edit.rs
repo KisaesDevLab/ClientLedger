@@ -476,7 +476,7 @@ impl RegisterScreen {
         self.close_splits();
         self.entry.form.load(draft, &*lists);
         self.entry.proposed = None;
-        self.entry.key = None;
+        self.entry.key.clear();
         let a = self.entry.form.adapter_mut();
         a.lock_number = editing.kind != EntryKind::CardCharge;
         a.label = t("register.entry.row_edit");

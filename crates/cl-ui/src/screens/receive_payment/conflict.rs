@@ -176,7 +176,7 @@ impl ReceivePaymentScreen {
                 return;
             }
             self.editing = Some(theirs);
-            self.save_key = None;
+            self.save_key.clear();
             self.start_save(after, None);
             return;
         }
@@ -285,7 +285,7 @@ impl ReceivePaymentScreen {
                 let fields = fields_from_theirs(c);
                 self.take_their_fields(&theirs_form, &fields);
                 self.editing = Some(open.theirs);
-                self.save_key = None;
+                self.save_key.clear();
                 self.dirty = true;
                 self.resave = Some(after_of(open.intent));
             }

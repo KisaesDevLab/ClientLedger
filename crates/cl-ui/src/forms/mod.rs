@@ -13,6 +13,7 @@ pub mod condensed;
 pub(crate) mod conflict;
 pub mod enter;
 pub mod header;
+pub mod held_key;
 pub mod invoice_lines_grid;
 pub mod item_lines_grid;
 pub mod items_tab;

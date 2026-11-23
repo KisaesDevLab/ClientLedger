@@ -154,7 +154,7 @@ impl DepositScreen {
             e.version = theirs.version;
             e.old_date = theirs.record.txn_date;
         }
-        self.save.key = None;
+        self.save.key.clear();
         self.save.stale = false;
         self.sync_inputs();
     }

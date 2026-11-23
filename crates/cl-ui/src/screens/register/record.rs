@@ -46,7 +46,7 @@ pub(super) struct EntryState {
     /// The save in flight.
     pub task: Option<Task<TransactionId>>,
     /// The idempotency key of the request being retried.
-    pub key: Option<(SaveIdentity, IdempotencyKey)>,
+    pub key: crate::forms::held_key::HeldKey<SaveIdentity>,
     /// A save whose outcome is unknown (B2).
     pub lost: crate::forms::lost_save::LostSave,
     /// The next check number (Q-P12q).
@@ -77,7 +77,7 @@ impl EntryState {
             problems: Vec::new(),
             error: None,
             task: None,
-            key: None,
+            key: crate::forms::held_key::HeldKey::default(),
             lost: crate::forms::lost_save::LostSave::default(),
             next_check: None,
             next_check_task: None,
@@ -103,14 +103,7 @@ impl EntryState {
     /// changed (the posting and its lines, the record version, the
     /// password).
     pub(super) fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
-        match &self.key {
-            Some((d, k)) if d == id => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((id.clone(), k.clone()));
-                k
-            }
-        }
+        self.key.key_for(id)
     }
 }
 
@@ -235,7 +228,7 @@ impl RegisterScreen {
         self.entry.error = None;
         self.entry.proposed = None;
         self.entry.next_check = None;
-        self.entry.key = None;
+        self.entry.key.clear();
         self.close_splits();
         self.fetch_next_check();
     }
@@ -704,7 +697,7 @@ impl RegisterScreen {
             self.closing_saved();
             self.entry.saved += 1;
             self.entry.last_saved = Some("saved");
-            self.entry.key = None;
+            self.entry.key.clear();
             self.entry.lost.notice = Some("lost.saved_register");
             self.finish_edit();
             self.after_own_write();
@@ -725,7 +718,7 @@ impl RegisterScreen {
             (None, Some(k)) => entry_row::kind_name(k),
             (None, None) => "saved",
         });
-        self.entry.key = None;
+        self.entry.key.clear();
         self.entry.problems.clear();
         self.entry.error = None;
         self.finish_edit();
@@ -738,9 +731,7 @@ impl RegisterScreen {
     }
 
     pub(super) fn record_failed(&mut self, e: ApiError) {
-        if !keeps_key(&e) {
-            self.entry.key = None;
-        }
+        self.entry.key.failed(&e);
         let failure = cl_model::forms::SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),

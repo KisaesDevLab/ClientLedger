@@ -975,6 +975,7 @@ fn entry_of(state: &mut DemoState, id: u32) -> Result<cl_api::DailyEntry, ApiErr
         },
         layout: Some(template_of(&l)?),
         stamp: None,
+        created_by: None,
     })
 }
 

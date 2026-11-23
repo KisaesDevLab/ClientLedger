@@ -885,3 +885,15 @@ fn after_a_lost_reply_a_changed_batch_is_not_sent_under_a_new_key() {
     assert_eq!(keys.len(), 2);
     assert_eq!(keys[0], keys[1], "the same key");
 }
+
+/// PR-8 B1: a keyed unknown outcome of a batch, then changed rows: the
+/// same key goes (the engine refuses the changed batch if the first went
+/// through).
+#[test]
+fn a_lost_reply_then_changed_rows_save_under_the_same_key() {
+    use crate::forms::held_key::keyed_unknown;
+    let (mut s, _link, _dir) = screen();
+    let a = s.key_for(7);
+    s.key.failed(&keyed_unknown(&a));
+    assert_eq!(s.key_for(8), a);
+}

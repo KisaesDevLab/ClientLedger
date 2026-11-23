@@ -47,8 +47,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use cl_api::{
-    ApiError, Capabilities, ClientSales, CreditMemoRecord, IdempotencyKey, InvoicePreview,
-    InvoiceRecord, Item, ItemFilter, RequestGroup, SalesReceiptRecord,
+    ApiError, Capabilities, ClientSales, CreditMemoRecord, InvoicePreview, InvoiceRecord, Item,
+    ItemFilter, RequestGroup, SalesReceiptRecord,
 };
 use cl_core::ids::{ContactId, ItemId, TenantId, TransactionId};
 use cl_core::{CalendarDate, MoneyStyle, Timestamp};
@@ -394,7 +394,7 @@ pub struct InvoiceScreen {
     /// use elsewhere (Q-94).
     pub(crate) save_job: Option<Job<(SavedDoc, bool)>>,
     pub(crate) intent: Option<SaveIntent>,
-    pub(crate) key: Option<(String, IdempotencyKey)>,
+    pub(crate) key: crate::forms::held_key::HeldKey<String>,
     pub(crate) void_job: Option<(Pending, Job<SavedDoc>)>,
     pub(crate) load_job: Option<Job<SavedDoc>>,
     /// P33: their version being read after a stale save.
@@ -529,7 +529,7 @@ impl InvoiceScreen {
             editing: None,
             save_job: None,
             intent: None,
-            key: None,
+            key: crate::forms::held_key::HeldKey::default(),
             void_job: None,
             load_job: None,
             conflict_job: None,

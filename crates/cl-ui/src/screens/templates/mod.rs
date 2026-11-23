@@ -239,7 +239,7 @@ pub struct TemplatesScreen {
     use_job: Option<Job<TemplateOpen>>,
     enter_job: Option<Job<Entered>>,
     enter_for: Option<Occurrence>,
-    enter_key: Option<(Occurrence, IdempotencyKey)>,
+    enter_key: crate::forms::held_key::HeldKey<Occurrence>,
     /// An Enter now whose outcome is unknown (B2): the template it was for,
     /// the banner, and the block it holds.
     pub(crate) lost: crate::forms::lost_save::LostSave,
@@ -296,7 +296,7 @@ impl TemplatesScreen {
             use_job: None,
             enter_job: None,
             enter_for: None,
-            enter_key: None,
+            enter_key: crate::forms::held_key::HeldKey::default(),
             lost: crate::forms::lost_save::LostSave::for_templates(),
             lost_for: None,
             lost_gate: cl_model::forms::FormState::new(()),
@@ -451,7 +451,7 @@ impl TemplatesScreen {
         match ev {
             LostEvent::Saved(txn) => {
                 let id = self.lost_for.take();
-                self.enter_key = None;
+                self.enter_key.clear();
                 self.entered_ok(txn, id);
             }
             LostEvent::NotSaved | LostEvent::OwnerConfirmed => self.lost_for = None,
@@ -471,7 +471,7 @@ impl TemplatesScreen {
                     self.lost.saved();
                     self.lost_for = None;
                 }
-                self.enter_key = None;
+                self.enter_key.clear();
                 self.entered_ok(Some(e.transaction), occ.map(|(id, _)| id));
             }
             // Could not tell: Enter now on this template waits (B2), in
@@ -487,13 +487,11 @@ impl TemplatesScreen {
             }
             // A retry of a lost reply: the date is already entered.
             Err(e) if cl_api::is_occurrence_taken(&e) => {
-                self.enter_key = None;
+                self.enter_key.clear();
                 self.entered_ok(None, occ.map(|(id, _)| id));
             }
             Err(e) => {
-                if !crate::screens::register::keeps_key(&e) {
-                    self.enter_key = None;
-                }
+                self.enter_key.failed(&e);
                 let supported = true;
                 let pending = occ.map(|(id, date)| EnterNow(id, date));
                 let took = pending
@@ -508,14 +506,7 @@ impl TemplatesScreen {
     /// The idempotency key of one occurrence: the same until a definite
     /// answer, a new one for another template or date.
     fn enter_key_for(&mut self, occ: Occurrence) -> IdempotencyKey {
-        match &self.enter_key {
-            Some((o, k)) if *o == occ => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.enter_key = Some((occ, k.clone()));
-                k
-            }
-        }
+        self.enter_key.key_for(&occ)
     }
 
     fn failed(&mut self, e: ApiError) {

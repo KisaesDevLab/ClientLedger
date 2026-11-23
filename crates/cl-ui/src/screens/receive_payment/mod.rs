@@ -146,7 +146,7 @@ pub struct ReceivePaymentScreen {
     pub(crate) cells: BTreeMap<TransactionId, String>,
     pub(crate) preview: Option<(u64, Job<PaymentPreview>)>,
     pub(crate) save: Option<(After, Job<PaymentRecord>)>,
-    pub(crate) save_key: Option<IdempotencyKey>,
+    pub(crate) save_key: crate::forms::held_key::HeldKey<()>,
     /// A credits-only apply in flight (Q-P21b).
     pub(crate) credit_apply: Option<(After, Job<CreditOutcome>)>,
     /// The credits-only plan being sent and one key per credit, with
@@ -258,7 +258,7 @@ impl ReceivePaymentScreen {
             cells: BTreeMap::new(),
             preview: None,
             save: None,
-            save_key: None,
+            save_key: crate::forms::held_key::HeldKey::default(),
             credit_apply: None,
             credit_keys: None,
             credits_applied: 0,
@@ -593,7 +593,7 @@ impl ReceivePaymentScreen {
         self.conflict_job = None;
         self.resave = None;
         self.silent_tried = false;
-        self.save_key = None;
+        self.save_key.clear();
         self.credit_keys = None;
         self.problems.clear();
         self.error = None;
@@ -647,10 +647,9 @@ impl ReceivePaymentScreen {
                 return false;
             }
         };
-        let key = self
-            .save_key
-            .get_or_insert_with(IdempotencyKey::new)
-            .clone();
+        // One key per payment until a definitive answer (PR-8 B1: kept
+        // after a keyed unknown outcome whatever changes).
+        let key = self.save_key.key_for(&());
         let label = engine::label(&key);
         #[allow(clippy::single_match_else)]
         let job = match self.editing.as_ref().map(|e| (e.id, e.updated_at)) {
@@ -724,7 +723,7 @@ impl ReceivePaymentScreen {
     fn saved(&mut self, rec: PaymentRecord, after: After) {
         self.closing_prompt.saved();
         self.silent_tried = false;
-        self.save_key = None;
+        self.save_key.clear();
         self.saved_count += 1;
         let accounts = [rec.deposit_to, self.clearing()]
             .into_iter()
@@ -761,9 +760,7 @@ impl ReceivePaymentScreen {
     }
 
     fn save_failed(&mut self, e: ApiError, after: After) {
-        if !crate::screens::register::keeps_key(&e) {
-            self.save_key = None;
-        }
+        self.save_key.failed(&e);
         if self
             .closing_prompt
             .failed(&e, Pending::Save(after), true, self.books.closing)
@@ -1132,7 +1129,7 @@ impl ReceivePaymentScreen {
         self.editing = Some(rec);
         self.saved_next = None;
         self.dirty = false;
-        self.save_key = None;
+        self.save_key.clear();
         self.problems.clear();
         self.list_attachments();
         // Client Center's "Record bounced check" (P21 follow-up 3).
