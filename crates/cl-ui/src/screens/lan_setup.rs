@@ -1023,6 +1023,7 @@ mod tests {
             );
             let node = nodes
                 .iter()
+                .filter(|n| n.role() != Role::TextRun)
                 .find(|n| n.label() == Some(line.as_str()) || n.value() == Some(line.as_str()))
                 .unwrap_or_else(|| panic!("reason line in the tree: {}", texts(&nodes)));
             assert_eq!(node.role(), Role::Label);
