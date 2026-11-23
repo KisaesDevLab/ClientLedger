@@ -482,6 +482,8 @@ pub async fn backup(
         archive_id: result.archive_id.clone(),
         created_at: now,
         kind: req.kind,
+        trigger: None,
+        tested: None,
     };
     let dest_dir = req.dest_dir.clone();
     let pruned = store.update(|l| {
@@ -702,6 +704,8 @@ mod tests {
                     archive_id: at.to_wire(),
                     created_at: at,
                     kind,
+                    trigger: None,
+                    tested: None,
                 });
             };
         for i in 0..12 {
@@ -763,6 +767,8 @@ mod tests {
                 archive_id: at.to_wire(),
                 created_at: at,
                 kind,
+                trigger: None,
+                tested: None,
             });
         };
         // 14 before-import files, one a month apart in 2025 and 2026 (a
@@ -834,6 +840,8 @@ mod tests {
                 archive_id: at.to_wire(),
                 created_at: at,
                 kind: BackupKind::BeforeImport,
+                trigger: None,
+                tested: None,
             });
             names.push(name);
         }
@@ -865,6 +873,8 @@ mod tests {
                 archive_id: at.to_wire(),
                 created_at: at,
                 kind: BackupKind::BeforeImport,
+                trigger: None,
+                tested: None,
             });
         }
         let mut req = BackupRequest {
@@ -917,6 +927,8 @@ mod tests {
                 archive_id: at.to_wire(),
                 created_at: at,
                 kind: BackupKind::LegacyPortable,
+                trigger: None,
+                tested: None,
             });
         }
         let pruned = prune_company_backups(&mut rec, dir.path(), now);

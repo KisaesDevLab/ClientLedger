@@ -619,6 +619,8 @@ mod tests {
                 archive_id: "arch-1".into(),
                 created_at: Timestamp::from_unix_millis(1).expect("ts"),
                 kind: BackupKind::Backup,
+                trigger: None,
+                tested: None,
             },
         );
         let info = inspect_archive(&p, &list).expect("info");
@@ -639,6 +641,8 @@ mod tests {
                 archive_id: "arch-1".into(),
                 created_at: Timestamp::from_unix_millis(1).expect("ts"),
                 kind: BackupKind::Backup,
+                trigger: None,
+                tested: None,
             },
         );
         let e = inspect_archive(&p, &list).expect_err("tampered");

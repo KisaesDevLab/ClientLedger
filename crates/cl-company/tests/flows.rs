@@ -397,6 +397,8 @@ async fn restore_imports_as_a_new_tenant_swaps_names_and_keeps_the_old_one() {
                     archive_id: "arch-9".into(),
                     created_at: cl_settings::recent::now(),
                     kind: BackupKind::Backup,
+                    trigger: None,
+                    tested: None,
                 },
             );
         })
@@ -524,6 +526,8 @@ async fn a_second_restore_of_the_same_backup_names_each_company_once() {
                     archive_id: "arch-9".into(),
                     created_at: cl_settings::recent::now(),
                     kind: BackupKind::Backup,
+                    trigger: None,
+                    tested: None,
                 },
             );
             l.upsert(t(T3), "Ozark Ridge Landscaping LLC").restored =
@@ -752,6 +756,8 @@ async fn restore_refuses_a_changed_file_before_anything_is_sent() {
                     archive_id: "arch-9".into(),
                     created_at: cl_settings::recent::now(),
                     kind: BackupKind::Backup,
+                    trigger: None,
+                    tested: None,
                 },
             );
         })
@@ -1473,6 +1479,8 @@ async fn restore_with_a_stale_previous_company_keeps_both_names() {
                     archive_id: "arch-9".into(),
                     created_at: cl_settings::recent::now(),
                     kind: BackupKind::Backup,
+                    trigger: None,
+                    tested: None,
                 },
             );
         })
