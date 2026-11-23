@@ -1878,3 +1878,43 @@ fn close_and_sign_out_are_refused_during_a_transfer() {
         "a refused Sign Out never runs later"
     );
 }
+
+/// P33 QA-1: a new second computer reaches the Office Network window with
+/// no company open and nobody signed in (the first-run screen, Open
+/// Company, Company › Office Network): it starts on "Use the books on
+/// another computer", sharing waits for a sign-in, and Back returns to Open
+/// Company.
+#[test]
+fn p33_office_network_opens_with_no_company_and_no_sign_in() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = std::sync::Arc::new(crate::company::CompanyLink::demo(dir.path()));
+    let mut shell = Shell::new(ShellOptions {
+        company: Some(std::sync::Arc::clone(&link)),
+        ..ShellOptions::default()
+    });
+    let ctx = context();
+    settle(&ctx, &mut shell, WIDE);
+    assert!(shell.company.is_none());
+    // A new computer: nobody signed in.
+    if let Some(mut d) = link.demo_state() {
+        d.auth.signed_in = None;
+    }
+    assert!(!link.signed_in());
+    let kind = CommandId::new(crate::screens::lan_setup::KIND);
+    shell.dispatch_now(kind);
+    settle(&ctx, &mut shell, WIDE);
+    let w = shell.windows.active().expect("a window");
+    assert_eq!(w.kind, kind, "not sent back to Open Company");
+    let st = w.screen.state();
+    assert_eq!(st["choice"], "workstation");
+    assert_eq!(st["standalone"], true);
+    assert_eq!(st["may_host"], false, "sharing needs the owner signed in");
+    // Back closes it; Open Company is in front again.
+    link.push(crate::company::CompanyEvent::CloseWindow(kind));
+    settle(&ctx, &mut shell, WIDE);
+    assert!(shell.windows.find_kind(kind).is_none());
+    assert_eq!(
+        shell.windows.active().map(|w| w.kind.as_str()),
+        Some("file.open_company")
+    );
+}

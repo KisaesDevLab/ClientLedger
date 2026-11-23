@@ -897,6 +897,7 @@ fn template_of(l: &DemoLayout) -> Result<cl_api::DailyTemplate, ApiError> {
         is_active: l.active,
         default_tag: None,
         lines,
+        stamp: None,
     })
 }
 
@@ -973,6 +974,7 @@ fn entry_of(state: &mut DemoState, id: u32) -> Result<cl_api::DailyEntry, ApiErr
             payments: c.payments,
         },
         layout: Some(template_of(&l)?),
+        stamp: None,
     })
 }
 
@@ -1091,6 +1093,7 @@ impl crate::screens::daily_sales::DailyBooks for DemoDailyBooks {
                     transaction: d.transaction,
                     over_short: d.over_short.unwrap_or(Money::ZERO),
                     sales,
+                    stamp: None,
                 });
             }
             Ok(out)

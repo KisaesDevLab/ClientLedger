@@ -249,5 +249,5 @@ Find these from the menus or with `Ctrl+K`.
 - **Banking:** Pay Yourself or Put Money In, Loan Payment, Bulk Entry, Import Bank File, Bank Feed
 - **Payroll:** Import Payroll
 - **Reports:** Reports, Profit & Loss, Balance Sheet, A/R Aging Summary, Memorized Reports…, Inventory Value, Inventory Value Detail, Stock Status
-- **Company:** Company Information, Set Closing Date, Users and Permissions, My Sign-in, Send to My Accountant, Audit Trail
+- **Company:** Company Information, Set Closing Date, Users and Permissions, My Sign-in, Office Network (Multi-User), Send to My Accountant, Audit Trail
 - **Help:** Privacy Notice, Support ClientLedger on Ko-fi, About ClientLedger

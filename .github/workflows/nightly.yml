@@ -38,3 +38,38 @@ jobs:
       - name: Fetch pinned PostgreSQL (hash-verified, the only networked step)
         run: cargo xtask pg-fetch
       - run: cargo xtask ci
+
+  lan-soak:
+    # P33 AC3: five workstations for 30 minutes through a real host's proxy
+    # (loopback, test-only listener). The PR CI runs 3 minutes for
+    # correctness only.
+    name: office network soak, 30 minutes (ubuntu-22.04)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          submodules: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: Swatinem/rust-cache@v2
+      - name: Engine commit
+        id: engine
+        shell: bash
+        run: echo "commit=$(git rev-parse HEAD:engine)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: target/engine/.cache
+          key: engine-ubuntu-22.04-${{ steps.engine.outputs.commit }}-node24
+      - uses: actions/cache@v6
+        with:
+          path: target/pg/.cache
+          key: pg-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pg-binaries.lock') }}
+      - name: Build the engine executable
+        run: cargo xtask engine
+      - name: Fetch pinned PostgreSQL (hash-verified)
+        run: cargo xtask pg-fetch
+      - name: Office network soak, 30 minutes
+        run: cargo xtask lan-soak --minutes 30

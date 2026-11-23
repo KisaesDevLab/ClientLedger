@@ -859,3 +859,207 @@ fn client_center_bounce_opens_the_payment_and_its_bounce_flow() {
     assert_eq!(w.state()["mode"], "edit");
     assert_eq!(w.state()["dialog"], "bounce");
 }
+
+// --- P33: someone else saved the payment first ------------------------------
+
+use crate::screens::conflict_dialog::ConflictChoice;
+
+/// The mockup payment, saved, then open here and in `other`.
+fn two_windows(
+    link: &Arc<CompanyLink>,
+) -> (ReceivePaymentScreen, ReceivePaymentScreen, TransactionId) {
+    let mut s = mockup(link);
+    assert!(s.start_save(After::Stay, None), "{:?}", s.problems);
+    s.poll();
+    settle(&mut s);
+    let id = s.editing.as_ref().map(|e| e.id).expect("saved");
+    let mut other = ReceivePaymentScreen::new(Arc::clone(link), today());
+    other.poll();
+    other.open_id(id);
+    settle(&mut other);
+    assert_eq!(other.editing.as_ref().map(|e| e.id), Some(id));
+    (s, other, id)
+}
+
+fn stored(link: &Arc<CompanyLink>, id: TransactionId) -> PaymentRecord {
+    let mut demo = link.demo_state().expect("demo");
+    crate::company::demo::receivables::get(&mut demo, id).expect("payment")
+}
+
+fn save_stay(s: &mut ReceivePaymentScreen) {
+    settle(s);
+    s.start_save(After::Stay, None);
+    s.poll();
+    settle(s);
+}
+
+#[test]
+fn p33_keep_mine_merges_header_fields_and_keeps_my_applications() {
+    let (_d, link) = link();
+    let (mut s, mut other, id) = two_windows(&link);
+    other.form.memo = "theirs".into();
+    other.dirty = true;
+    save_stay(&mut other);
+    assert_eq!(other.saved_count, 1, "{:?} {:?}", other.notice, other.error);
+    s.form.ref_no = "R-1".into();
+    s.dirty = true;
+    save_stay(&mut s);
+    let open = s.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(merge.undone.is_empty(), "{:?}", merge.undone);
+    let before = s.saved_count;
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    settle(&mut s);
+    assert_eq!(s.saved_count, before + 1, "{:?} {:?}", s.notice, s.error);
+    let r = stored(&link, id);
+    assert_eq!(r.memo.as_deref(), Some("theirs"));
+    assert_eq!(r.ref_no.as_deref(), Some("R-1"));
+}
+
+#[test]
+fn p33_their_new_applications_are_shown_for_a_recheck_never_merged() {
+    let (_d, link) = link();
+    let (mut s, mut other, id) = two_windows(&link);
+    let ids = invoice_ids(&other);
+    other.amount_text = "3000".into();
+    other.amount_typed();
+    other
+        .form
+        .type_payment(ids["1091"], Money::parse_wire("3000.00").expect("m"));
+    other.dirty = true;
+    save_stay(&mut other);
+    assert_eq!(
+        other.saved_count, 1,
+        "{:?} {:?} {:?}",
+        other.problems, other.notice, other.error
+    );
+    s.form.memo = "mine".into();
+    s.dirty = true;
+    save_stay(&mut s);
+    let open = s.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    let before = s.saved_count;
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    settle(&mut s);
+    // Their applications and amount, my memo; nothing saved until the
+    // owner checks the invoices (Q-P33ao).
+    assert_eq!(s.saved_count, before);
+    assert_eq!(s.notice, Some(super::conflict::RECHECK));
+    assert!(s.dirty);
+    assert_eq!(s.form.memo, "mine");
+    assert_eq!(
+        s.amount_text,
+        shown(Money::parse_wire("3000.00").expect("m"))
+    );
+    assert_eq!(stored(&link, id).memo, None, "nothing saved yet");
+    // The owner checked: Save goes on their stamp.
+    save_stay(&mut s);
+    assert_eq!(s.saved_count, before + 1, "{:?} {:?}", s.notice, s.error);
+    assert_eq!(stored(&link, id).memo.as_deref(), Some("mine"));
+}
+
+#[test]
+fn p33_use_theirs_shows_their_payment_and_esc_is_back() {
+    let (_d, link) = link();
+    let (mut s, mut other, _id) = two_windows(&link);
+    other.form.memo = "theirs".into();
+    other.dirty = true;
+    save_stay(&mut other);
+    s.form.memo = "mine".into();
+    s.dirty = true;
+    save_stay(&mut s);
+    assert!(s.conflict.is_open());
+    assert!(s.command(CommandId::new("form.revert")));
+    assert_eq!(s.notice, Some("payment.refusal.stale"));
+    assert_eq!(s.form.memo, "mine");
+    save_stay(&mut s);
+    let open = s.conflict.open.take().expect("dialog again");
+    s.run_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(s.form.memo, "theirs");
+    assert!(!s.dirty);
+}
+
+#[test]
+fn p33_a_new_stamp_with_nothing_editable_changed_saves_without_asking() {
+    let (_d, link) = link();
+    let (mut s, _other, id) = two_windows(&link);
+    if let Some(e) = s.editing.as_mut() {
+        e.updated_at = cl_core::Timestamp::parse_wire("2000-01-01T00:00:00Z").expect("ts");
+    }
+    s.form.memo = "mine".into();
+    s.dirty = true;
+    let before = s.saved_count;
+    save_stay(&mut s);
+    assert!(!s.conflict.is_open());
+    assert_eq!(s.saved_count, before + 1, "{:?} {:?}", s.notice, s.error);
+    assert_eq!(stored(&link, id).memo.as_deref(), Some("mine"));
+}
+
+#[test]
+fn p33_a_payment_deleted_elsewhere_is_never_saved_again() {
+    let (_d, link) = link();
+    let (mut s, _other, _id) = two_windows(&link);
+    s.conflict_read(Err(ApiError::NotFound { code: None }), After::Stay);
+    assert_eq!(s.notice, Some(crate::forms::conflict::GONE));
+}
+
+#[test]
+fn p33_their_amount_over_my_changed_applications_is_a_recheck_never_merged() {
+    let (_d, link) = link();
+    let (mut s, _other, id) = two_windows(&link);
+    // Mine: other invoices paid and a memo; theirs: a new amount only.
+    let conflict = cl_model::lan::Conflict::new(
+        &serde_json::json!({"amount": "100.00", "applications": {"rows": ["a"]}, "memo": "", "lines": []}),
+        &serde_json::json!({"amount": "100.00", "applications": {"rows": ["b"]}, "memo": "mine", "lines": []}),
+        &serde_json::json!({"amount": "120.00", "applications": {"rows": ["a"]}, "memo": "", "lines": []}),
+        "lines",
+    );
+    let merge = conflict.keep_mine();
+    let open = crate::forms::conflict::OpenConflict {
+        dialog: crate::screens::conflict_dialog::ConflictDialog::new(
+            conflict,
+            Box::new(|_| String::new()),
+        ),
+        theirs: stored(&link, id),
+        intent: cl_model::forms::SaveIntent::Save,
+    };
+    s.form.memo = "mine".into();
+    s.dirty = true;
+    let before = s.saved_count;
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    settle(&mut s);
+    assert_eq!(s.saved_count, before, "never saved on its own");
+    assert_eq!(s.notice, Some(super::conflict::RECHECK));
+    assert!(s.dirty);
+    assert_eq!(s.form.memo, "mine", "my other change kept");
+    assert_eq!(stored(&link, id).memo, None, "nothing saved yet");
+}
+
+/// U-291 S2 on a form without lines: a file attached to the open payment
+/// moves its stamp (the demo, as the engine, refuses a save on the old
+/// one); the form takes the upload's stamp and its next save goes on it.
+#[test]
+fn p33_an_attached_file_moves_the_payment_stamp_and_the_next_save_goes_on_it() {
+    let (_d, link) = link();
+    let (mut s, _other, id) = two_windows(&link);
+    let opened = s.editing.as_ref().map(|e| e.updated_at).expect("open");
+    s.upload_attachment("check.pdf".into(), b"%PDF-1.4\n%%EOF\n".to_vec());
+    for _ in 0..50 {
+        s.poll();
+        if s.attach.attached == 1 {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert_eq!(s.attach.attached, 1);
+    let now = stored(&link, id).updated_at;
+    assert!(now > opened, "the file moved the payment's stamp");
+    assert_eq!(s.editing.as_ref().map(|e| e.updated_at), Some(now));
+    s.form.memo = "after the file".into();
+    s.dirty = true;
+    let before = s.saved_count;
+    save_stay(&mut s);
+    assert!(s.conflict.open.is_none());
+    assert_eq!(s.saved_count, before + 1, "{:?} {:?}", s.notice, s.error);
+    assert_eq!(stored(&link, id).memo.as_deref(), Some("after the file"));
+}

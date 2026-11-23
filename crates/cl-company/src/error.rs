@@ -131,6 +131,12 @@ impl OwnerFacing for CompanyError {
                     "fix.company.transfer_not_backup",
                 ),
                 "TENANT_BUSY" => OwnerMessage::with_fix("error.company.busy", "fix.company.busy"),
+                // P33 QA-10: the restored copy did not check out against
+                // the backup; nothing was changed. Trying again won't help.
+                "ARCHIVE_VERIFY_FAILED" => OwnerMessage::with_fix(
+                    "error.company.verify_failed",
+                    "fix.company.verify_failed",
+                ),
                 "ARCHIVE_TOTALS_MISMATCH" => OwnerMessage::with_fix(
                     "error.company.totals_mismatch",
                     "fix.company.totals_mismatch",

@@ -170,7 +170,22 @@ impl ReceivePaymentScreen {
         if let Some((n, k, mut job)) = self.attach.upload.take() {
             match job.take() {
                 None => self.attach.upload = Some((n, k, job)),
-                Some(Ok(_)) => {
+                Some(Ok(a)) => {
+                    // The file moved the payment's stamp: its next save
+                    // goes out on the new one (U-291 S2).
+                    let newer = |held: cl_core::Timestamp, id: TransactionId| {
+                        a.stamp_for(&id.to_string())
+                            .and_then(cl_api::RecordStamp::timestamp)
+                            .filter(|t| *t > held)
+                    };
+                    for p in [self.editing.as_mut(), self.last_saved.as_mut()]
+                        .into_iter()
+                        .flatten()
+                    {
+                        if let Some(t) = newer(p.updated_at, p.id) {
+                            p.updated_at = t;
+                        }
+                    }
                     self.attach.attached += 1;
                     self.list_attachments();
                 }

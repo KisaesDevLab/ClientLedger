@@ -12,6 +12,7 @@
 //! owed", the stored balance with its sign turned for display (Q-241).
 //! Every save and void publishes both accounts on the data bus (Q-262).
 
+mod conflict;
 mod engine;
 mod template;
 
@@ -146,6 +147,10 @@ pub struct TransferScreen {
     pub(crate) lost: crate::forms::lost_save::LostSave,
     pub(crate) notice: Option<&'static str>,
     pub(crate) stale: bool,
+    /// P33: their version being read after a stale save.
+    pub(crate) theirs_task: Option<(Task<Versioned<Transaction>>, SaveIntent)>,
+    /// P33: the conflict dialog.
+    pub(crate) conflict: Option<conflict::OpenConflict>,
     pub(crate) saved_count: u32,
     pub(crate) last_action: Option<&'static str>,
     pub(crate) last_saved: Option<TransactionId>,
@@ -265,6 +270,8 @@ impl TransferScreen {
             notice: None,
             layout: crate::layout::FrameReport::default(),
             stale: false,
+            theirs_task: None,
+            conflict: None,
             saved_count: 0,
             last_action: None,
             last_saved: None,
@@ -382,6 +389,7 @@ impl TransferScreen {
     }
 
     pub(crate) fn poll(&mut self) {
+        self.poll_conflict();
         if let Some(r) = self.accounts_task.as_mut().and_then(Task::try_take) {
             self.accounts_task = None;
             self.loaded = true;
@@ -773,6 +781,12 @@ impl TransferScreen {
             return;
         }
         match &e {
+            // P33: someone else saved it first: their version, then the
+            // conflict dialog (or a silent re-save).
+            ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                ..
+            } if self.editing.is_some() => self.conflict_start(intent),
             ApiError::Conflict {
                 reason: ConflictReason::Stale,
                 ..
@@ -1112,7 +1126,7 @@ impl TransferScreen {
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
             s.transactions()
-                .void(e.id, &reason, &options(password), key)
+                .void(e.id, e.version.stamp(), &reason, &options(password), key)
                 .await?;
             Ok(())
         }) {
@@ -1472,6 +1486,7 @@ impl TransferScreen {
                 "refused": self.problems.first().map(|p| p.name()),
                 "error": self.error.is_some(),
                 "stale": self.stale,
+                "conflict": self.conflict.as_ref().map(|c| c.dialog.state()),
             },
             "published": self.published.iter().map(ToString::to_string).collect::<Vec<_>>(),
             "last_action": self.last_action,
@@ -1509,9 +1524,12 @@ impl Screen for TransferScreen {
             self.sync_inputs();
         }
         self.draw(ui);
+        let ctx = ui.ctx().clone();
+        self.conflict_ui(&ctx);
         // A refused save's problems follow the owner's fixes.
         self.recheck_problems();
         let busy = self.accounts_task.is_some()
+            || self.theirs_task.is_some()
             || self.save_task.is_some()
             || self.load_task.is_some()
             || self.nav_task.is_some()
@@ -1587,6 +1605,13 @@ impl Screen for TransferScreen {
                     self.sync_inputs();
                 }
                 d
+            }
+            // P33: Esc in the conflict dialog is Back.
+            "form.revert" if self.conflict.is_some() => {
+                if let Some(open) = self.conflict.take() {
+                    self.run_choice(open, crate::screens::conflict_dialog::ConflictChoice::Back);
+                }
+                true
             }
             "form.revert" => self.revert_field(),
             "form.save_as_template" => {

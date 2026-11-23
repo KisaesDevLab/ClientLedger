@@ -32,8 +32,12 @@ pub trait Marker {
 
 impl Marker for Session {
     async fn mark(&self, id: AccountId) -> Result<(), ApiError> {
+        // A one-time move of a local mark at open: the account is read for
+        // its stamp just before (U-291; LAN mode requires one, U-292). The
+        // mark is idempotent and changes no other field.
+        let read = self.accounts().get(id).await?;
         self.accounts()
-            .set_sensitive(id, true, IdempotencyKey::new())
+            .set_sensitive(id, &read.version, true, IdempotencyKey::new())
             .await
             .map(|_| ())
     }

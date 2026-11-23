@@ -25,7 +25,7 @@
 //!
 //! Only the outcome class is logged: no names, amounts or fingerprints.
 
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use cl_core::ids::{AccountId, TransactionId};
 use cl_core::{CalendarDate, Timestamp};
@@ -152,10 +152,9 @@ enum Check {
     Wait,
 }
 
+/// On the engine's clock: `createdAt` is compared against it (Q-P33o).
 fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+    crate::idempotency::engine_now_ms()
 }
 
 fn synth(body: Vec<u8>, generation: u64) -> EngineReply {
@@ -223,7 +222,7 @@ impl Probe {
         let deadline = Instant::now() + budget;
         let poll = POLL.min(budget / 4);
         if transport
-            .wait_ready(deadline, crate::endpoint::Purpose::Ordinary)
+            .wait_ready(deadline, crate::endpoint::Purpose::Ordinary, true)
             .await
             .is_err()
         {

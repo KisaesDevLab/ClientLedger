@@ -1904,7 +1904,7 @@ impl Intake {
                 s.attachments()
                     .link(attachment, to, key)
                     .await
-                    .map(|()| JobDone::Done)
+                    .map(|_| JobDone::Done)
             })
             .map_err(|_| "inbox.upload.failed")?;
         self.jobs.push(Job {
@@ -2037,7 +2037,7 @@ impl Intake {
                 Err(e) => return Err(e),
             }
             match s.attachments().delete(a, key).await {
-                Ok(()) | Err(ApiError::NotFound { .. }) => Ok(JobDone::Done),
+                Ok(_) | Err(ApiError::NotFound { .. }) => Ok(JobDone::Done),
                 Err(e) => Err(e),
             }
         }) {

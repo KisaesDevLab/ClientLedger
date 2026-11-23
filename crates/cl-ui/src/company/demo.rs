@@ -58,6 +58,8 @@ pub mod stock;
 pub mod template_store;
 pub mod templates;
 pub mod transfer;
+// P33: the office network (synthetic, no sockets).
+pub mod lan;
 pub mod units;
 // P25: the in-memory bank feed of Import Bank File.
 pub mod bank_import;
@@ -145,6 +147,8 @@ pub struct DemoState {
     pub payroll: payroll::DemoPayroll,
     /// P32: Send to My Accountant and IIF export.
     pub transfer: transfer::DemoTransfer,
+    /// P33: the office network.
+    pub lan: lan::DemoLan,
     /// P31: QBD and other-system imports.
     pub imports: imports::DemoImports,
     /// P31 D5: spreadsheet transaction imports.
@@ -324,6 +328,7 @@ impl DemoState {
             bank_feed: bank_import::DemoBankFeed::default(),
             payroll: payroll::DemoPayroll::default(),
             transfer: transfer::DemoTransfer::default(),
+            lan: lan::DemoLan::default(),
             imports: imports::DemoImports::default(),
             txn_import: import_transactions::DemoTxnImport::default(),
             feed_review: feed_review::DemoFeedReview::default(),

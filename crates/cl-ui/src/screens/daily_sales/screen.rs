@@ -237,6 +237,7 @@ impl DailySalesScreen {
             status: e.status.clone(),
             transaction: e.transaction,
             date: e.date,
+            stamp: e.stamp,
         });
         self.header.load(form);
         self.save_template.forget();

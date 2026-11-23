@@ -685,7 +685,7 @@ pub fn balance_holds_after_random_edits(h: &Harness) {
                 let id = *rng.pick(&live);
                 h.run(
                     s.transactions()
-                        .void(id, "property test", &posting_opts, key()),
+                        .void(id, None, "property test", &posting_opts, key()),
                 )
                 .unwrap_or_else(|err| panic!("{}: void: {err}", ctx(i)));
                 o.entries.get_mut(&id).expect("live entry").void = true;
@@ -695,7 +695,7 @@ pub fn balance_holds_after_random_edits(h: &Harness) {
                 let id = *rng.pick(&live);
                 h.run(
                     s.transactions()
-                        .delete(id, &DeleteOptions::default(), key()),
+                        .delete(id, None, &DeleteOptions::default(), key()),
                 )
                 .unwrap_or_else(|err| panic!("{}: delete: {err}", ctx(i)));
                 o.entries.remove(&id);

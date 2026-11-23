@@ -586,6 +586,13 @@ impl Versioned<CheckRecord> {
             RecordVersion::Fingerprint(_) => {
                 RecordVersion::Fingerprint(EditableFields::fingerprint(&self.record.txn))
             }
+            // The stamp is the transaction row's (U-291): the same for both
+            // reads; the fingerprint is the plain transaction's.
+            RecordVersion::Stamped { stamp, .. } => RecordVersion::Stamped {
+                fingerprint: EditableFields::fingerprint(&self.record.txn),
+                stamp,
+            },
+            RecordVersion::Stamp(s) => RecordVersion::Stamp(s),
         }
     }
 }

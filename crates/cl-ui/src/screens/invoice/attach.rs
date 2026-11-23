@@ -166,7 +166,12 @@ impl InvoiceScreen {
         if let Some((n, k, mut job)) = self.attach.upload.take() {
             match job.take() {
                 None => self.attach.upload = Some((n, k, job)),
-                Some(Ok(_)) => {
+                Some(Ok(a)) => {
+                    // The file moved the document's stamp: its next save
+                    // goes out on the new one (U-291 S2).
+                    if let Some(e) = self.editing.as_mut() {
+                        e.doc.adopt_stamp(a.stamp_for(&e.id.to_string()));
+                    }
                     self.last_action = Some("attached");
                     self.list_attachments();
                 }

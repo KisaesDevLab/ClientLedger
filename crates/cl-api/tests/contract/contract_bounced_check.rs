@@ -216,6 +216,7 @@ pub fn bounced_check_restores_balances(h: &Harness) {
     let e = h
         .run(s.transactions().void(
             deposit,
+            None,
             "contract: release",
             &PostingOptions::default(),
             key(),

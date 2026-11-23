@@ -377,6 +377,11 @@ fn prev_next_and_a_stale_edit() {
     );
     s.header.edit_step(|h| h.memo = "mine".into());
     assert!(!s.start_save(SaveIntent::Save, None));
+    // P33: both changed the memo, so the conflict dialog asks.
+    assert_eq!(s.state_json()["save"]["stale"], false);
+    assert_eq!(s.state_json()["save"]["conflict"]["fields"], 1);
+    let open = s.conflict.take().expect("dialog");
+    s.run_choice(open, ConflictChoice::Back);
     assert_eq!(s.state_json()["save"]["stale"], true);
     // Unsaved edits ask before moving.
     s.navigate(true);
@@ -870,4 +875,162 @@ fn tag_options_on_journal_entries() {
     set_lines(&mut s, &lines);
     assert!(s.start_save(SaveIntent::Save, None) || s.saved_count > 1);
     assert_eq!(s.saved_count, 2);
+}
+
+// --- P33: someone else saved the entry first --------------------------------
+
+use crate::screens::conflict_dialog::ConflictChoice;
+
+/// An entry saved, then open in this window and in `other`.
+fn two_windows() -> (
+    JournalScreen,
+    JournalScreen,
+    TransactionId,
+    Arc<CompanyLink>,
+    tempfile::TempDir,
+) {
+    let (mut s, link, dir) = screen();
+    set_lines(
+        &mut s,
+        &[(6100, "1.00", "", None), (1010, "", "1.00", None)],
+    );
+    assert!(s.start_save(SaveIntent::SaveAndNew, None));
+    let id = s.last_saved.expect("saved");
+    assert!(s.open_record(id));
+    let mut other = JournalScreen::new(Arc::clone(&link), None, s.today);
+    assert!(other.open_record(id));
+    (s, other, id, link, dir)
+}
+
+fn stored(link: &CompanyLink, id: TransactionId) -> cl_api::Transaction {
+    let mut d = link.demo_state().expect("demo");
+    crate::company::demo::journal::get(&mut d, id)
+        .expect("entry")
+        .record
+}
+
+fn balanced(t: &cl_api::Transaction) -> bool {
+    let dr = Money::sum(t.lines.iter().map(|l| l.debit)).expect("sum");
+    let cr = Money::sum(t.lines.iter().map(|l| l.credit)).expect("sum");
+    dr == cr
+}
+
+#[test]
+fn p33_keep_mine_takes_their_change_keeps_mine_and_stays_balanced() {
+    let (mut s, mut other, id, link, _dir) = two_windows();
+    other.header.edit_step(|h| h.memo = "theirs".into());
+    assert!(other.start_save(SaveIntent::Save, None));
+    s.header.edit_step(|h| h.number = "42".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let st = s.state_json();
+    assert_eq!(st["save"]["conflict"]["fields"], 2, "{st}");
+    assert_eq!(
+        st["save"]["conflict"]["undoes"], 0,
+        "nothing of theirs undone"
+    );
+    let open = s.conflict.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    assert_eq!(s.state_json()["save"]["error"], false);
+    let t = stored(&link, id);
+    assert_eq!(t.memo.as_deref(), Some("theirs"));
+    assert_eq!(t.txn_number.as_deref(), Some("42"));
+    assert!(balanced(&t));
+
+    // A second conflict compares against their record, so their memo,
+    // taken over above, is not "mine" and a third person's memo stays.
+    let mut third = JournalScreen::new(Arc::clone(&link), None, s.today);
+    assert!(third.open_record(id));
+    third.header.edit_step(|h| h.memo = "third".into());
+    assert!(third.start_save(SaveIntent::Save, None));
+    s.header.edit_step(|h| h.number = "43".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.take().expect("dialog again");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(merge.undone.is_empty(), "{:?}", merge.undone);
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    let t = stored(&link, id);
+    assert_eq!(t.memo.as_deref(), Some("third"));
+    assert_eq!(t.txn_number.as_deref(), Some("43"));
+    assert!(balanced(&t));
+}
+
+#[test]
+fn p33_keep_mine_with_both_changing_lines_takes_mine_whole() {
+    let (mut s, mut other, id, link, _dir) = two_windows();
+    set_lines(
+        &mut other,
+        &[(6100, "5.00", "", None), (1010, "", "5.00", None)],
+    );
+    assert!(other.start_save(SaveIntent::Save, None));
+    set_lines(
+        &mut s,
+        &[
+            (6100, "2.00", "", None),
+            (6100, "1.00", "", None),
+            (1010, "", "3.00", None),
+        ],
+    );
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(merge.lines_from_mine);
+    assert_eq!(merge.undone.len(), 1, "their lines are undone, and said so");
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    let t = stored(&link, id);
+    assert_eq!(t.lines.len(), 3);
+    assert!(balanced(&t));
+}
+
+#[test]
+fn p33_use_theirs_shows_their_entry_and_drops_mine() {
+    let (mut s, mut other, id, link, _dir) = two_windows();
+    other.header.edit_step(|h| h.memo = "theirs".into());
+    assert!(other.start_save(SaveIntent::Save, None));
+    s.header.edit_step(|h| h.memo = "mine".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.take().expect("dialog");
+    s.run_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(s.header.current().memo, "theirs");
+    assert!(!s.is_dirty());
+    assert_eq!(stored(&link, id).memo.as_deref(), Some("theirs"));
+}
+
+#[test]
+fn p33_back_keeps_my_edits_and_saving_again_asks_again() {
+    let (mut s, mut other, _id, _link, _dir) = two_windows();
+    other.header.edit_step(|h| h.memo = "theirs".into());
+    assert!(other.start_save(SaveIntent::Save, None));
+    s.header.edit_step(|h| h.memo = "mine".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.take().expect("dialog");
+    s.run_choice(open, ConflictChoice::Back);
+    assert_eq!(s.header.current().memo, "mine");
+    assert!(s.is_dirty());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert!(s.conflict.is_some(), "not a dead end");
+}
+
+#[test]
+fn p33_a_change_to_nothing_editable_resaves_without_asking() {
+    let (mut s, _other, id, link, _dir) = two_windows();
+    assert!(s.form_command(CommandId::new("dev.lan_simulate_touch")));
+    s.header.edit_step(|h| h.memo = "mine".into());
+    let before = s.saved_count;
+    s.start_save(SaveIntent::Save, None);
+    assert!(s.conflict.is_none());
+    assert_eq!(s.saved_count, before + 1);
+    assert_eq!(stored(&link, id).memo.as_deref(), Some("mine"));
+}
+
+#[test]
+fn p33_an_entry_deleted_elsewhere_is_never_recreated() {
+    let (mut s, mut other, _id, link, _dir) = two_windows();
+    let before = journal_count(&link);
+    other.send_delete(None);
+    assert_eq!(journal_count(&link), before - 1);
+    s.header.edit_step(|h| h.memo = "mine".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert!(s.conflict.is_none());
+    assert_eq!(journal_count(&link), before - 1);
 }

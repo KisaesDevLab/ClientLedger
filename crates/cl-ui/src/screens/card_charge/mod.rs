@@ -11,6 +11,7 @@
 //! balance owed is the engine's, read again after every save (Q-262).
 
 mod attach;
+mod conflict;
 // A04 WP-F2: draft mode (a document from Review Documents).
 mod draft;
 pub(crate) mod kit;
@@ -129,6 +130,8 @@ pub struct CardChargeScreen {
     pub(crate) payee: payee::PayeeState,
     /// Save as Template and the template this form came from (P15).
     pub(crate) template: crate::screens::templates::SaveFlow,
+    /// P33: their version being read after a stale save, then the dialog.
+    pub(crate) conflict: crate::forms::conflict::ConflictFlow<Versioned<Transaction>>,
     /// The files on the charge and the document pane (A02, Q-A02e).
     pub(crate) attach: attach::CardAttach,
     /// A04 draft mode: the document draft this form enters (`draft.rs`).
@@ -186,6 +189,7 @@ impl CardChargeScreen {
             focused: None,
             payee: payee::PayeeState::default(),
             template: crate::screens::templates::SaveFlow::default(),
+            conflict: crate::forms::conflict::ConflictFlow::default(),
             attach: attach::CardAttach::default(),
             draft: draft::CardDraft::default(),
             feed_watch: crate::feed_link::Watch::default(),
@@ -269,6 +273,7 @@ impl CardChargeScreen {
             }
         }
         self.balances.poll();
+        self.poll_conflict();
         let (saved, voided) = self.flow.poll();
         match saved {
             Some(Ok(r)) => self.saved(r),
@@ -500,6 +505,7 @@ impl CardChargeScreen {
         self.books.busy()
             || self.balances.busy()
             || self.flow.busy()
+            || self.conflict.busy()
             || self.records.busy()
             || self.payee.busy()
             || self.attach.busy()
@@ -753,7 +759,11 @@ impl CardChargeScreen {
                 let _: SaveStart<CardForm> = self.header.begin_save(intent);
                 false
             }
-            Sent::Asked | Sent::Failed => false,
+            Sent::Failed => {
+                self.after_failed();
+                false
+            }
+            Sent::Asked => false,
         }
     }
 
@@ -844,6 +854,7 @@ impl CardChargeScreen {
             return;
         }
         self.flow.failed(&self.link, e, closing);
+        self.after_failed();
     }
 
     /// The recheck or the owner answered an unknown save (B2). Found: the
@@ -907,6 +918,7 @@ impl CardChargeScreen {
         self.problems.clear();
         self.inputs.payee = NameInput::default();
         self.flow.new_record();
+        self.conflict.clear();
         self.records.new_record();
         self.payee.prefill = None;
         self.payee.applied = false;
@@ -1090,6 +1102,7 @@ impl CardChargeScreen {
         };
         self.inventory = None;
         self.template.forget();
+        self.conflict.clear();
         self.flow.opened_txn(v, fits);
         // PR-5 QA-2: its bank line, if the Bank Feed matched or recorded it.
         let shape = self.feed_shape();
@@ -1635,6 +1648,13 @@ impl CardChargeScreen {
                 done
             }
             // Q-PR4d: Esc cancels an open Quick Add prompt first.
+            // P33: Esc in the conflict dialog is Back.
+            "form.revert" if self.conflict.is_open() => {
+                if let Some((open, choice)) = self.conflict.take_back() {
+                    self.run_choice(open, choice);
+                }
+                true
+            }
             "form.revert" => self.quick_add.cancel() || self.revert_field(),
             _ => false,
         }
@@ -1697,6 +1717,7 @@ impl CardChargeScreen {
             m.extend(c);
         }
         v["quick_add"] = self.quick_add.state();
+        v["conflict"] = self.conflict.state();
         v
     }
 }
@@ -1721,6 +1742,8 @@ impl Screen for CardChargeScreen {
         }
         self.compare_before();
         self.draw(ui);
+        let ctx = ui.ctx().clone();
+        self.conflict_ui(&ctx);
         self.fill_remaining();
         self.follow_items();
         self.compare_after();

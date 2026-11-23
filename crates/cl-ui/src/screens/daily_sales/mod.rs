@@ -182,13 +182,25 @@ pub(crate) trait DailyApi {
         name: &str,
         preset: Option<Preset>,
     ) -> Result<DailyTemplate, ApiError>;
-    async fn rename(&self, id: DailyTemplateId, name: &str) -> Result<DailyTemplate, ApiError>;
+    // The stamp arguments are the record's `updatedAt` as read, sent back
+    // (U-291; LAN mode requires them, U-292).
+    async fn rename(
+        &self,
+        id: DailyTemplateId,
+        stamp: Option<cl_api::RecordStamp>,
+        name: &str,
+    ) -> Result<DailyTemplate, ApiError>;
     async fn replace_lines(
         &self,
         id: DailyTemplateId,
+        stamp: Option<cl_api::RecordStamp>,
         lines: &[DailyLineInput],
     ) -> Result<DailyTemplate, ApiError>;
-    async fn delete_template(&self, id: DailyTemplateId) -> Result<(), ApiError>;
+    async fn delete_template(
+        &self,
+        id: DailyTemplateId,
+        stamp: Option<cl_api::RecordStamp>,
+    ) -> Result<(), ApiError>;
     async fn list(&self, q: &DailyEntryQuery) -> Result<Vec<DailyEntrySummary>, ApiError>;
     async fn entry(&self, id: DailyEntryId) -> Result<DailyEntry, ApiError>;
     async fn create_draft(
@@ -199,6 +211,7 @@ pub(crate) trait DailyApi {
     async fn update_draft(
         &self,
         id: DailyEntryId,
+        stamp: Option<cl_api::RecordStamp>,
         d: &DailyEntryDraft,
         key: IdempotencyKey,
     ) -> Result<DailyEntry, ApiError>;
@@ -242,18 +255,28 @@ impl DailyApi for Live {
     ) -> Result<DailyTemplate, ApiError> {
         self.0.daily_sales().create_template(name, preset).await
     }
-    async fn rename(&self, id: DailyTemplateId, name: &str) -> Result<DailyTemplate, ApiError> {
-        self.0.daily_sales().rename(id, name).await
+    async fn rename(
+        &self,
+        id: DailyTemplateId,
+        stamp: Option<cl_api::RecordStamp>,
+        name: &str,
+    ) -> Result<DailyTemplate, ApiError> {
+        self.0.daily_sales().rename(id, stamp, name).await
     }
     async fn replace_lines(
         &self,
         id: DailyTemplateId,
+        stamp: Option<cl_api::RecordStamp>,
         lines: &[DailyLineInput],
     ) -> Result<DailyTemplate, ApiError> {
-        self.0.daily_sales().replace_lines(id, lines).await
+        self.0.daily_sales().replace_lines(id, stamp, lines).await
     }
-    async fn delete_template(&self, id: DailyTemplateId) -> Result<(), ApiError> {
-        self.0.daily_sales().delete_template(id).await
+    async fn delete_template(
+        &self,
+        id: DailyTemplateId,
+        stamp: Option<cl_api::RecordStamp>,
+    ) -> Result<(), ApiError> {
+        self.0.daily_sales().delete_template(id, stamp).await
     }
     async fn list(&self, q: &DailyEntryQuery) -> Result<Vec<DailyEntrySummary>, ApiError> {
         self.0.daily_sales().list(q).await
@@ -271,10 +294,11 @@ impl DailyApi for Live {
     async fn update_draft(
         &self,
         id: DailyEntryId,
+        stamp: Option<cl_api::RecordStamp>,
         d: &DailyEntryDraft,
         key: IdempotencyKey,
     ) -> Result<DailyEntry, ApiError> {
-        self.0.daily_sales().update_draft(id, d, key).await
+        self.0.daily_sales().update_draft(id, stamp, d, key).await
     }
     async fn preview(
         &self,
@@ -333,17 +357,27 @@ impl DailyApi for Now {
     ) -> Result<DailyTemplate, ApiError> {
         self.with(|b| b.create_template(name, preset))
     }
-    async fn rename(&self, id: DailyTemplateId, name: &str) -> Result<DailyTemplate, ApiError> {
+    async fn rename(
+        &self,
+        id: DailyTemplateId,
+        _stamp: Option<cl_api::RecordStamp>,
+        name: &str,
+    ) -> Result<DailyTemplate, ApiError> {
         self.with(|b| b.rename(id, name))
     }
     async fn replace_lines(
         &self,
         id: DailyTemplateId,
+        _stamp: Option<cl_api::RecordStamp>,
         lines: &[DailyLineInput],
     ) -> Result<DailyTemplate, ApiError> {
         self.with(|b| b.replace_lines(id, lines))
     }
-    async fn delete_template(&self, id: DailyTemplateId) -> Result<(), ApiError> {
+    async fn delete_template(
+        &self,
+        id: DailyTemplateId,
+        _stamp: Option<cl_api::RecordStamp>,
+    ) -> Result<(), ApiError> {
         self.with(|b| b.delete_template(id))
     }
     async fn list(&self, q: &DailyEntryQuery) -> Result<Vec<DailyEntrySummary>, ApiError> {
@@ -362,6 +396,7 @@ impl DailyApi for Now {
     async fn update_draft(
         &self,
         id: DailyEntryId,
+        _stamp: Option<cl_api::RecordStamp>,
         d: &DailyEntryDraft,
         _key: IdempotencyKey,
     ) -> Result<DailyEntry, ApiError> {
@@ -411,10 +446,12 @@ pub(crate) enum Call {
     /// or, with no id, create it first ("Save as new layout").
     SaveLayout {
         id: Option<DailyTemplateId>,
+        /// The layout's stamp as read (U-291).
+        stamp: Option<cl_api::RecordStamp>,
         name: Option<String>,
         lines: Vec<DailyLineInput>,
     },
-    DeleteTemplate(DailyTemplateId),
+    DeleteTemplate(DailyTemplateId, Option<cl_api::RecordStamp>),
     List(DailyEntryQuery),
     Entry(DailyEntryId),
     /// Find the posted day of a transaction (`OpenRecord`).
@@ -445,19 +482,29 @@ pub(crate) async fn run<A: DailyApi>(api: &A, call: Call) -> Result<Reply, ApiEr
         Call::CreateTemplate(name, preset) => {
             Reply::Template(api.create_template(&name, preset).await?)
         }
-        Call::SaveLayout { id, name, lines } => {
-            let id = match (id, &name) {
-                (Some(id), Some(n)) => api.rename(id, n).await?.id,
-                (Some(id), None) => id,
+        Call::SaveLayout {
+            id,
+            stamp,
+            name,
+            lines,
+        } => {
+            // A rename moves the stamp: the lines go on the new one.
+            let (id, stamp) = match (id, &name) {
+                (Some(id), Some(n)) => {
+                    let t = api.rename(id, stamp, n).await?;
+                    (t.id, t.stamp)
+                }
+                (Some(id), None) => (id, stamp),
                 (None, n) => {
                     let n = n.clone().unwrap_or_default();
-                    api.create_template(&n, None).await?.id
+                    let t = api.create_template(&n, None).await?;
+                    (t.id, t.stamp)
                 }
             };
-            Reply::Template(api.replace_lines(id, &lines).await?)
+            Reply::Template(api.replace_lines(id, stamp, &lines).await?)
         }
-        Call::DeleteTemplate(id) => {
-            api.delete_template(id).await?;
+        Call::DeleteTemplate(id, stamp) => {
+            api.delete_template(id, stamp).await?;
             Reply::Unit
         }
         Call::List(q) => Reply::Days(api.list(&q).await?),
@@ -527,6 +574,9 @@ pub(crate) struct Saved {
     pub status: cl_api::EntryStatus,
     pub transaction: Option<TransactionId>,
     pub date: CalendarDate,
+    /// The day's stamp as last read or saved (sent with the next save,
+    /// U-291).
+    pub stamp: Option<cl_api::RecordStamp>,
 }
 
 /// Saving and its outcome.

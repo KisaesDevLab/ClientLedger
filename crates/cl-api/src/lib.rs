@@ -42,8 +42,8 @@ pub use client::{Budget, ClientConfig, LOOPBACK_HOST, Method, Timeouts};
 pub use endpoint::{EndpointSource, EndpointState, EngineEndpoint, FixedEndpoint, Purpose};
 pub use errors::{
     ApiError, AuthFailure, BANK_FEED_MATCH_LINK, ClosedPeriod, ConflictDetails, ConflictReason,
-    DEPOSIT_LINKS_DROPPED, ErrorCode, FieldPath, LocalValidation, SavedEntity, UserText,
-    ValidationError, ValidationIssue, delete_linked_to_bank_feed, delete_links,
+    DEPOSIT_LINKS_DROPPED, ErrorCode, FieldPath, LanRefusal, LocalValidation, SavedEntity,
+    UserText, ValidationError, ValidationIssue, delete_linked_to_bank_feed, delete_links,
     is_deposit_links_dropped, reconciled_statement_date,
 };
 // P29: sensitive accounts (U-33).
@@ -114,6 +114,9 @@ pub use resources::items::{
     Item, ItemFields, ItemFilter, ItemPurchase, ItemSort, ItemStock, ItemType, ItemUpdate, Items,
     OpeningStock, UNIT_LABEL_MAX_CHARS, UnitPrice,
 };
+pub use resources::lan::{
+    ChangeItem, ChangeOp, ChangePage, LanAuditEvent, LanSession, MaintenanceState, is_device_id,
+};
 pub use resources::ledger::LedgerStamp;
 pub use resources::list_csv::{CONTACT_IMPORT_MAX_ROWS, ContactImportResult, ContactImportRow};
 pub use resources::me::Me;
@@ -178,7 +181,9 @@ pub use resources::transactions::{
 };
 pub use resources::transactions::{INVENTORY_DERIVED_ROLES, InventoryLine, is_inventory_derived};
 pub use resources::unit_sets::{NewUnitSet, Unit, UnitRefusal, UnitSet, UnitSets, unit_refusal};
-pub use resources::versioning::{EditableFields, RecordVersion, Versioned};
+pub use resources::versioning::{
+    EditableFields, RecordStamp, RecordVersion, Versioned, with_expected_stamp,
+};
 pub use session::{
     Client, CompanySummary, CreatedCompany, LoginOutcome, NewCompany, OpenCompany, Scope, Session,
     TfaChallenge, TfaMethod,

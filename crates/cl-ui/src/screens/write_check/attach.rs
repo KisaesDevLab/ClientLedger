@@ -558,6 +558,14 @@ impl WriteCheckScreen {
             match r {
                 Ok(a) => {
                     self.attach.path.clear();
+                    // The file moved the check's stamp: its next save goes
+                    // out on the new one (U-291 S2), never a conflict with
+                    // itself.
+                    if let Some(e) = self.editing.as_mut() {
+                        let stamp = a.stamp_for(&e.id.to_string());
+                        e.version.adopt_stamp(stamp);
+                        e.txn_version.adopt_stamp(stamp);
+                    }
                     if let Some(src) = source {
                         self.attach.pane_task = None;
                         self.attach.show(a.id, src);

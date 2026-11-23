@@ -83,7 +83,10 @@ pub fn paid_bill_void_is_refused_and_links_remain(h: &Harness) {
 
     // The guarded path refuses the paid bill; nothing about it changes.
     let e = h
-        .run(s.ap_voids().bill(bill, "Voided in the register", key()))
+        .run(
+            s.ap_voids()
+                .bill(bill, None, "Voided in the register", key()),
+        )
         .expect_err("a paid bill is not voided");
     if h.require_cap(Capabilities::AP_EDIT, "U-84") {
         // `ap-edit-v1`: 409 `BILL_HAS_PAYMENTS`.
@@ -116,7 +119,7 @@ pub fn paid_bill_void_is_refused_and_links_remain(h: &Harness) {
     // The payment's own void takes the link off: the bill is owed again.
     h.run(
         s.ap_voids()
-            .bill_payment(payment, "Voided in the register", key()),
+            .bill_payment(payment, None, "Voided in the register", key()),
     )
     .expect("payment voided");
     let reopened = bill_state(h, s, bill);
@@ -136,7 +139,10 @@ pub fn paid_bill_void_is_refused_and_links_remain(h: &Harness) {
     assert_eq!(voided.status, cl_api::TxnStatus::Void);
 
     // Now the bill's own void goes through.
-    h.run(s.ap_voids().bill(bill, "Voided in the register", key()))
-        .expect("bill voided");
+    h.run(
+        s.ap_voids()
+            .bill(bill, None, "Voided in the register", key()),
+    )
+    .expect("bill voided");
     assert_eq!(bill_state(h, s, bill)["status"], "void");
 }

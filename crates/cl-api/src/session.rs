@@ -38,6 +38,10 @@ use crate::resources::operations::{
 };
 use crate::wire::{Capabilities, DesktopInfo, Health};
 
+/// A LAN save whose preparation waited longer than this is refused as not
+/// sent: the owner's press is stale (P33 QA-6).
+const STALE_PRESS: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Refresh when the access token has less than this many seconds left.
 const REFRESH_MARGIN_SECS: u64 = 60;
 
@@ -119,70 +123,86 @@ impl Client {
         if let Some(ws) = info.workspace_tenant_id {
             *lock(&self.inner.workspace) = Some(ws);
         }
+        // This read is the re-run a moved generation asks for.
+        let _ = self.exec().transport().take_generation_moved();
+        self.apply_capabilities(&info.capabilities);
+        Ok(info)
+    }
+
+    /// Runs `desktop_info` again when the engine's generation moved since
+    /// the last one (a restart, or a restarted LAN host engine; P33 S12), so
+    /// the capability flags and the retry policy follow the engine now
+    /// running. When the re-read fails, every capability flag is dropped (the
+    /// no-capability retry policy: nothing keyed, nothing blind-retried) and
+    /// the next request tries again.
+    pub(crate) async fn refresh_after_restart(&self) {
+        if !self.exec().transport().take_generation_moved() {
+            return;
+        }
+        if self.desktop_info().await.is_err() {
+            tracing::warn!("engine info could not be read after a restart");
+            self.apply_capabilities(&Capabilities::default());
+            self.exec().transport().mark_generation_moved();
+        }
+    }
+
+    fn apply_capabilities(&self, caps: &Capabilities) {
         self.exec()
-            .set_idempotency_v1(info.capabilities.has(Capabilities::IDEMPOTENCY));
+            .set_idempotency_v1(caps.has(Capabilities::IDEMPOTENCY));
         self.exec()
-            .set_idempotency_ap_v1(info.capabilities.has(Capabilities::IDEMPOTENCY_AP));
+            .set_idempotency_ap_v1(caps.has(Capabilities::IDEMPOTENCY_AP));
         self.exec()
-            .set_idempotency_docs_v1(info.capabilities.has(Capabilities::IDEMPOTENCY_DOCS));
-        self.exec().set_idempotency_docs_attach_v1(
-            info.capabilities.has(Capabilities::DOCUMENT_DRAFTS_ATTACH),
-        );
-        self.exec().set_idempotency_pay_bills_v1(
-            info.capabilities.has(Capabilities::IDEMPOTENCY_PAY_BILLS),
-        );
-        self.exec().set_idempotency_check_print_v1(
-            info.capabilities.has(Capabilities::IDEMPOTENCY_CHECK_PRINT),
-        );
+            .set_idempotency_docs_v1(caps.has(Capabilities::IDEMPOTENCY_DOCS));
         self.exec()
-            .set_idempotency_invoice_v1(info.capabilities.has(Capabilities::IDEMPOTENCY_INVOICE));
+            .set_idempotency_docs_attach_v1(caps.has(Capabilities::DOCUMENT_DRAFTS_ATTACH));
         self.exec()
-            .set_invoice_email_v1(info.capabilities.has(Capabilities::INVOICE_EMAIL));
+            .set_idempotency_pay_bills_v1(caps.has(Capabilities::IDEMPOTENCY_PAY_BILLS));
         self.exec()
-            .set_sales_doc_email_v1(info.capabilities.has(Capabilities::SALES_DOC_EMAIL));
+            .set_idempotency_check_print_v1(caps.has(Capabilities::IDEMPOTENCY_CHECK_PRINT));
+        self.exec()
+            .set_idempotency_invoice_v1(caps.has(Capabilities::IDEMPOTENCY_INVOICE));
+        self.exec()
+            .set_invoice_email_v1(caps.has(Capabilities::INVOICE_EMAIL));
+        self.exec()
+            .set_sales_doc_email_v1(caps.has(Capabilities::SALES_DOC_EMAIL));
         self.exec().set_idempotency_receive_payment_v1(
-            info.capabilities
-                .has(Capabilities::IDEMPOTENCY_RECEIVE_PAYMENT),
+            caps.has(Capabilities::IDEMPOTENCY_RECEIVE_PAYMENT),
         );
         self.exec().set_p22_key_sets(
-            info.capabilities.has(Capabilities::IDEMPOTENCY_CREDIT_MEMO),
-            info.capabilities
-                .has(Capabilities::IDEMPOTENCY_CUSTOMER_STATEMENTS),
-            info.capabilities
-                .has(Capabilities::IDEMPOTENCY_FINANCE_CHARGES),
+            caps.has(Capabilities::IDEMPOTENCY_CREDIT_MEMO),
+            caps.has(Capabilities::IDEMPOTENCY_CUSTOMER_STATEMENTS),
+            caps.has(Capabilities::IDEMPOTENCY_FINANCE_CHARGES),
         );
         self.exec().set_p23_key_sets(
-            info.capabilities.has(Capabilities::IDEMPOTENCY_SALES_TAX),
-            info.capabilities
-                .has(Capabilities::IDEMPOTENCY_SALES_TAX_PAY),
-            info.capabilities.has(Capabilities::IDEMPOTENCY_RECOVERY),
+            caps.has(Capabilities::IDEMPOTENCY_SALES_TAX),
+            caps.has(Capabilities::IDEMPOTENCY_SALES_TAX_PAY),
+            caps.has(Capabilities::IDEMPOTENCY_RECOVERY),
         );
         self.exec()
-            .set_idempotency_inventory_v1(info.capabilities.has(Capabilities::INVENTORY_ADJUST));
+            .set_idempotency_inventory_v1(caps.has(Capabilities::INVENTORY_ADJUST));
         self.exec()
-            .set_unit_sets_v1(info.capabilities.has(Capabilities::UNITS_OF_MEASURE));
+            .set_unit_sets_v1(caps.has(Capabilities::UNITS_OF_MEASURE));
         self.exec()
-            .set_report_defs_v1(info.capabilities.has(Capabilities::REPORT_DEFS));
+            .set_report_defs_v1(caps.has(Capabilities::REPORT_DEFS));
         self.exec()
-            .set_budgets_v1(info.capabilities.has(Capabilities::BUDGETS_EXACT));
+            .set_budgets_v1(caps.has(Capabilities::BUDGETS_EXACT));
         self.exec()
-            .set_reports_email_v1(info.capabilities.has(Capabilities::REPORTS_EMAIL));
+            .set_reports_email_v1(caps.has(Capabilities::REPORTS_EMAIL));
         self.exec()
-            .set_bank_import_v1(info.capabilities.has(Capabilities::BANK_IMPORT_BATCH));
+            .set_bank_import_v1(caps.has(Capabilities::BANK_IMPORT_BATCH));
         self.exec()
-            .set_feed_v1(info.capabilities.has(Capabilities::FEED_IDEMPOTENCY));
+            .set_feed_v1(caps.has(Capabilities::FEED_IDEMPOTENCY));
         self.exec()
-            .set_feed_post_v1(info.capabilities.has(Capabilities::FEED_MATCH_POST));
+            .set_feed_post_v1(caps.has(Capabilities::FEED_MATCH_POST));
         self.exec().set_feed_accept_v1(
-            info.capabilities.has(Capabilities::FEED_ACCEPT),
-            info.capabilities.has(Capabilities::FEED_UNDO),
+            caps.has(Capabilities::FEED_ACCEPT),
+            caps.has(Capabilities::FEED_UNDO),
         );
         self.exec()
-            .set_payroll_v1(info.capabilities.has(Capabilities::PAYROLL_IMPORT_POST));
+            .set_payroll_v1(caps.has(Capabilities::PAYROLL_IMPORT_POST));
         self.exec()
-            .set_imports_v1(info.capabilities.has(Capabilities::IMPORTS_BATCH));
-        lock(&self.inner.caps).clone_from(&info.capabilities);
-        Ok(info)
+            .set_imports_v1(caps.has(Capabilities::IMPORTS_BATCH));
+        lock(&self.inner.caps).clone_from(caps);
     }
 
     /// `GET /health`.
@@ -1019,12 +1039,42 @@ impl Session {
     /// this view's pin, or to the scope read once here for an unpinned
     /// session, so the company id and the token never come from two
     /// different companies.
+    /// P33 QA-6: a LAN workstation's save is refused as not sent when the
+    /// link is down now, or when what ran since the owner pressed Save
+    /// (`asked`) waited longer than [`STALE_PRESS`]. Never on the local
+    /// engine.
+    ///
+    /// # Errors
+    /// `Lan(NotSent)`.
+    pub(crate) fn lan_save_check(&self, asked: std::time::Instant) -> Result<(), ApiError> {
+        let t = self.client().exec().transport();
+        if t.writes_never_wait() && (t.write_held() || asked.elapsed() > STALE_PRESS) {
+            return Err(ApiError::Lan(crate::LanRefusal::NotSent));
+        }
+        Ok(())
+    }
+
     pub(crate) async fn send(
         &self,
         op: &Operation,
         mut call: Call,
         reconciler: Option<&dyn Reconciler>,
     ) -> Result<EngineReply, ApiError> {
+        // P33 QA-6: on a LAN workstation a save is never held for the host
+        // to come back: refused at once when the link is down, and refused
+        // when the steps before it (the engine info re-read after a
+        // restart) waited for the link, since the owner's press is stale.
+        let lan_save =
+            !call.method.is_read() && self.client().exec().transport().writes_never_wait();
+        let transport = self.client().exec().transport();
+        if lan_save && transport.write_held() {
+            return Err(ApiError::Lan(crate::LanRefusal::NotSent));
+        }
+        let asked = std::time::Instant::now();
+        self.client().refresh_after_restart().await;
+        if lan_save && (transport.write_held() || asked.elapsed() > STALE_PRESS) {
+            return Err(ApiError::Lan(crate::LanRefusal::NotSent));
+        }
         if !op.company_scoped() {
             let out = self
                 .client()

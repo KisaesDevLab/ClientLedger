@@ -15,6 +15,7 @@
 //! * `FAKE_HANG_HEALTH=1`: accept connections and never answer
 //! * `FAKE_SUPERUSER=1`: report a superuser database role
 //! * `FAKE_LEAK_TOKEN=1`: print the launch token to stderr before dying
+//! * `FAKE_RESET_LOG=<file>`: append a line per `maintenance/reset` call
 #![forbid(unsafe_code)]
 
 use std::fmt::Write as _;
@@ -67,6 +68,19 @@ fn respond(stream: &mut TcpStream, status: &str, body: &str) {
         "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
+}
+
+/// `maintenance/reset`: records each call so a test can count them.
+fn maintenance_reset(stream: &mut TcpStream) {
+    if let Some(path) = env("FAKE_RESET_LOG") {
+        let mut f = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .expect("reset log");
+        let _ = writeln!(f, "reset");
+    }
+    respond(stream, "200 OK", r#"{"cleared":false}"#);
 }
 
 fn handle(mut stream: TcpStream, token: &str, port: u16, initialized: &AtomicBool) {
@@ -143,6 +157,7 @@ fn handle(mut stream: TcpStream, token: &str, port: u16, initialized: &AtomicBoo
                 ),
             );
         }
+        ("POST", "/api/v1/desktop/maintenance/reset") => maintenance_reset(&mut stream),
         ("POST", "/api/v1/desktop/initialize") => {
             if initialized.swap(true, Ordering::SeqCst) {
                 respond(

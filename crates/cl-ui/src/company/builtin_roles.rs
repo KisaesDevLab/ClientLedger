@@ -45,10 +45,12 @@ pub trait Templates {
     /// Every template.
     fn list(&self)
     -> impl std::future::Future<Output = Result<Vec<RoleTemplate>, ApiError>> + Send;
-    /// Replaces one template's map (name unchanged).
+    /// Replaces one template's map (name unchanged), read at `stamp` (its
+    /// `updatedAt`, sent back as `expectedUpdatedAt`, U-291).
     fn put(
         &self,
         id: Uuid,
+        stamp: Option<cl_api::RecordStamp>,
         name: &str,
         map: &PermissionMap,
     ) -> impl std::future::Future<Output = Result<(), ApiError>> + Send;
@@ -59,8 +61,17 @@ impl Templates for Session {
         self.team().templates().await
     }
 
-    async fn put(&self, id: Uuid, name: &str, map: &PermissionMap) -> Result<(), ApiError> {
-        self.team().update_template(id, name, map).await.map(drop)
+    async fn put(
+        &self,
+        id: Uuid,
+        stamp: Option<cl_api::RecordStamp>,
+        name: &str,
+        map: &PermissionMap,
+    ) -> Result<(), ApiError> {
+        self.team()
+            .update_template(id, stamp, name, map)
+            .await
+            .map(drop)
     }
 }
 
@@ -85,7 +96,7 @@ pub async fn put_back(t: &impl Templates, keys: EngineKeys) -> Result<usize, Api
             continue;
         };
         if let Some(map) = sensitive_putback(*b, &tpl.permissions, keys) {
-            t.put(tpl.id, &tpl.name, &map).await?;
+            t.put(tpl.id, tpl.stamp, &tpl.name, &map).await?;
             sent += 1;
         }
     }
@@ -175,6 +186,7 @@ mod tests {
         fn put(
             &self,
             id: Uuid,
+            _stamp: Option<cl_api::RecordStamp>,
             name: &str,
             map: &PermissionMap,
         ) -> impl std::future::Future<Output = Result<(), ApiError>> + Send {
@@ -191,6 +203,7 @@ mod tests {
             name: name.to_owned(),
             description: None,
             permissions: map,
+            stamp: None,
         }
     }
 

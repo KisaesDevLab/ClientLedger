@@ -5,7 +5,7 @@
 
 use cl_api::{
     AccountType, AccountUpdate, ApiError, Capabilities, ConflictReason, ContactFields, ContactType,
-    ContactUpdate, Method, NewContact, PostingOptions, RecordVersion,
+    ContactUpdate, Method, NewContact, PostingOptions, RecordStamp, RecordVersion,
 };
 use cl_core::Money;
 
@@ -20,17 +20,30 @@ fn assert_stale(e: &ApiError, server: bool) {
             ..
         } => match (server, current_version) {
             (false, Some(RecordVersion::Fingerprint(_)))
-            | (true, Some(RecordVersion::Server(_))) => {}
+            | (true, Some(RecordVersion::Server(_) | RecordVersion::Stamp(_))) => {}
             other => panic!("unexpected version {other:?}"),
         },
         other => panic!("expected Conflict(Stale), got {other:?}"),
     }
 }
 
+/// The 409's stamp, which must be the record's stamp now.
+fn conflict_stamp(e: &ApiError) -> RecordStamp {
+    match e {
+        ApiError::Conflict {
+            reason: ConflictReason::Stale,
+            current_version: Some(RecordVersion::Stamp(s)),
+            ..
+        } => *s,
+        other => panic!("expected 409 STALE with the current stamp, got {other:?}"),
+    }
+}
+
 pub fn two_clients_contact_and_entry(h: &Harness) {
     let s1 = &h.s1;
     let s2 = h.s2();
-    let server = h.caps.has(Capabilities::RECORD_VERSION);
+    // With `stale-all-v1` the engine checks the stamp and answers 409.
+    let server = h.caps.has(Capabilities::RECORD_VERSION) || h.caps.has(Capabilities::STALE_ALL);
 
     let new = NewContact {
         fields: ContactFields::named(ContactType::Customer, unique("Shared")),
@@ -169,4 +182,95 @@ pub fn server_version_conflict_u17(h: &Harness) {
         ))
         .expect_err("409 STALE");
     assert_stale(&e, true);
+}
+
+/// U-291 (`stale-all-v1`, P33 D3): the engine owns record stamps.
+/// - a stale journal-entry edit gets 409 `STALE` carrying the record's
+///   current stamp;
+/// - a posting does not make an account edit stale (the stamp stays; a
+///   rename moves it);
+/// - a save answers with the new stamp, and saving again on it succeeds
+///   (no self-conflict).
+pub fn stale_all_u291(h: &Harness) {
+    if !h.require_cap(Capabilities::STALE_ALL, "U-291") {
+        return;
+    }
+    let s1 = &h.s1;
+    let s2 = h.s2();
+    let (cash, supplies) = pair(h, s1);
+    let memo = unique("stamped entry");
+    let on = date(2026, 8, 3);
+    let made = post(h, s1, &je2(on, &memo, supplies.id, cash.id, "10.0000"));
+    let mine = h.run(s1.transactions().get(made.record.id)).expect("get");
+    let first = mine.version.stamp().expect("a read carries the stamp");
+
+    // A save answers with the new stamp; saving again on it succeeds.
+    let saved = h
+        .run(s1.transactions().update_journal_entry(
+            made.record.id,
+            &mine.version,
+            &je2(on, &memo, supplies.id, cash.id, "11.0000"),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect("save");
+    let second = saved
+        .version
+        .stamp()
+        .expect("the save answers with its stamp");
+    assert_ne!(first, second, "the stamp moved");
+    let again = h
+        .run(s1.transactions().update_journal_entry(
+            made.record.id,
+            &saved.version,
+            &je2(on, &memo, supplies.id, cash.id, "12.0000"),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect("re-save on the returned stamp is not stale");
+    let third = again.version.stamp().expect("stamp");
+
+    // Another window still holds the first read: 409 with the stamp now.
+    let e = h
+        .run(s2.transactions().update_journal_entry(
+            made.record.id,
+            &mine.version,
+            &je2(on, &memo, supplies.id, cash.id, "13.0000"),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect_err("stale");
+    assert_eq!(conflict_stamp(&e), third, "409 carries the current stamp");
+    let now = h.run(s2.transactions().get(made.record.id)).expect("get");
+    assert_eq!(now.version.stamp(), Some(third));
+    assert_eq!(now.version, again.version, "the stale save changed nothing");
+
+    // A posting leaves the account's stamp; a rename on the old read saves.
+    let before = h.run(s1.accounts().get(cash.id)).expect("get");
+    let stamp = before.version.stamp().expect("account stamp");
+    post(
+        h,
+        s1,
+        &je2(on, &unique("p"), supplies.id, cash.id, "1.0000"),
+    );
+    let after = h.run(s1.accounts().get(cash.id)).expect("get");
+    assert_eq!(
+        after.version.stamp(),
+        Some(stamp),
+        "posting moved the stamp"
+    );
+    let mut fields = before.record.fields.clone();
+    fields.name = format!("{} (renamed)", fields.name);
+    let renamed = h
+        .run(s2.accounts().update(
+            cash.id,
+            &before.version,
+            &AccountUpdate {
+                fields,
+                is_active: true,
+            },
+            key(),
+        ))
+        .expect("rename after a posting is not stale");
+    assert_ne!(renamed.version.stamp(), Some(stamp), "a rename moves it");
 }

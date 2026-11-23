@@ -325,12 +325,17 @@ fn lane(
             ui.spacing_mut().item_spacing.y = 8.0;
             // P29: only the actions the user's role includes.
             let rights = home.link.rights();
+            let ws = home.workstation();
             for id in lane
                 .actions
                 .iter()
                 .copied()
                 .filter(|id| rights.allows(cl_model::CommandId::new(id)))
             {
+                if crate::lan_status::host_only(ws, id) {
+                    host_only_row(ui, tokens, &action_label(id));
+                    continue;
+                }
                 let r = action_row(ui, tokens, &action_label(id), &trailing(home, id));
                 if activated(&r) {
                     *clicked = Some(id);
@@ -405,6 +410,44 @@ fn footer(ui: &mut Ui, tokens: &Tokens, v: &FooterView) {
         ui.add(label.wrap());
         ui.with_layout(Layout::top_down(Align::Max), value);
     }
+}
+
+/// A host-only action on a workstation (QA-7): shown, but it can't be
+/// clicked, and the reason "Do this on the host computer." is text under it
+/// that Tab reaches. Painted at full strength (`text.secondary` on the
+/// lane, 4.5:1), not egui's half-faded disabled look.
+fn host_only_row(ui: &mut Ui, tokens: &Tokens, label: &str) {
+    let width = ui.available_width();
+    let galley = ui.painter().layout(
+        label.to_owned(),
+        TextStyle::Body.resolve(ui.style()),
+        tokens.text_secondary,
+        (width - 20.0).max(40.0),
+    );
+    let h = (galley.size().y + 18.0).max(ACTION_MIN_H);
+    let (rect, resp) = ui.allocate_exact_size(Vec2::new(width, h), Sense::hover());
+    resp.widget_info(|| WidgetInfo::labeled(Role::Button, false, label));
+    if ui.is_rect_visible(rect) {
+        let p = ui.painter();
+        p.rect(
+            rect,
+            CornerRadius::same(4),
+            tokens.surface_window,
+            Stroke::new(1.0, tokens.border_default),
+            StrokeKind::Inside,
+        );
+        let pos = egui::pos2(rect.left() + 10.0, rect.center().y - galley.size().y / 2.0);
+        p.galley(pos, galley, tokens.text_secondary);
+    }
+    ui.add(
+        egui::Label::new(
+            RichText::new(t("lan.host_only"))
+                .size(12.0)
+                .color(tokens.text_secondary),
+        )
+        .wrap()
+        .sense(Sense::focusable_noninteractive()),
+    );
 }
 
 /// The smallest lane action (DESIGN.md: 44 px targets for Home's lane

@@ -39,6 +39,7 @@ pub mod inventory;
 pub mod invoice_layouts;
 pub mod invoices;
 pub mod items;
+pub mod lan;
 pub mod ledger;
 // P29: the user's role and rights in the open company.
 pub mod list_csv;
@@ -85,5 +86,7 @@ pub mod versioning;
 mod journal_tests;
 #[cfg(test)]
 mod sensitive_tests;
+#[cfg(test)]
+mod stale_guard_tests;
 #[cfg(test)]
 pub(crate) mod testkit;

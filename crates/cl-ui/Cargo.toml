@@ -16,6 +16,8 @@ cl-docread = { path = "../cl-docread" }
 cl-grid = { path = "../cl-grid" }
 cl-host = { path = "../cl-host" }
 cl-import = { path = "../cl-import" }
+# LAN multi-user (P33).
+cl-lan = { path = "../cl-lan" }
 cl-model = { path = "../cl-model" }
 # P19: checks and forms laid out as PDF pages.
 cl-print = { path = "../cl-print" }
@@ -56,7 +58,9 @@ serde_json = "1.0.154"
 # A04: the review digests the control channel compares (form vs posted
 # body, plan §4 N4). MIT OR Apache-2.0; already in cl-api and cl-settings.
 sha2 = "0.11.1"
-tokio ={ version = "1.53.3", features = ["rt"] }
+tokio ={ version = "1.53.3", features = ["rt", "rt-multi-thread"] }
+# Error enums (MIT OR Apache-2.0; already in the tree).
+thiserror = "2.0.21"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt", "std", "registry"] }
 # A01: new intake-folder ids (client UUIDs, U-93). MIT OR Apache-2.0.
@@ -75,8 +79,15 @@ fax = "0.2.7"
 # cl-core). MIT OR Apache-2.0.
 proptest = { version = "1.12.0", default-features = false, features = ["std"] }
 tempfile = "3.27.0"
-tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros"] }
+tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "net", "io-util"] }
 wiremock = "0.6.5"
+# P33 D5: the live office-network tests (tests/lan_live.rs) run a real
+# host's proxy on loopback, which only this test-only feature allows
+# (T15: release builds lack it; xtask layering refuses it on any normal
+# edge). tokio-rustls (MIT OR Apache-2.0, already in the tree through
+# cl-lan) sends the smuggling shapes over a paired TLS connection.
+cl-lan = { path = "../cl-lan", features = ["lan-test-listener"] }
+tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring"] }
 
 [[bench]]
 name = "grid_scroll"

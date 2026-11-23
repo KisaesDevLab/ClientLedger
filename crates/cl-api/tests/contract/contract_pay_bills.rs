@@ -204,7 +204,7 @@ pub fn partial_payment_with_credit_live(h: &Harness) {
 
     h.run(
         s.ap_voids()
-            .bill_payment(paid[0].id, "contract clean-up", key()),
+            .bill_payment(paid[0].id, None, "contract clean-up", key()),
     )
     .expect("void");
     assert_eq!(
@@ -374,7 +374,7 @@ pub fn mockup_run_with_discount_u101(h: &Harness) {
         .expect("the 7781 payment");
     h.run(
         s.ap_voids()
-            .bill_payment(office_pay.id, "contract clean-up", key()),
+            .bill_payment(office_pay.id, None, "contract clean-up", key()),
     )
     .expect("void");
     assert_eq!(bill_balance(h, s, b3), m("218.44"), "7781 open again");
@@ -448,7 +448,7 @@ pub fn credit_and_discount_without_cash_u101(h: &Harness) {
     assert_eq!(rec.credit_applications.len(), 1);
     h.run(
         s.ap_voids()
-            .bill_payment(paid[0].id, "contract clean-up", key()),
+            .bill_payment(paid[0].id, None, "contract clean-up", key()),
     )
     .expect("void");
     assert_eq!(bill_balance(h, s, b), m("218.44"), "open again");
@@ -602,8 +602,11 @@ pub fn voided_payment_leaves_the_queue_u115(h: &Harness) {
     let b = bill(h, s, v, expense.id, "410.00", None, date(2026, 11, 8));
     let id = pay_one(h, s, bank, b, "410.00");
     assert!(in_queue(h, s, bank, id), "queued to print");
-    h.run(s.ap_voids().bill_payment(id, "contract clean-up", key()))
-        .expect("void");
+    h.run(
+        s.ap_voids()
+            .bill_payment(id, None, "contract clean-up", key()),
+    )
+    .expect("void");
     assert!(!in_queue(h, s, bank, id), "a void payment leaves the queue");
     let e = print_keyed(h, s, bank, vec![id], 6401, key()).expect_err("void");
     assert_eq!(print_problem(&e), Some(PrintProblem::Voided), "{e:?}");
@@ -714,7 +717,7 @@ pub fn void_with_cash_credit_discount_restores_ap_u117(h: &Harness) {
     );
     h.run(
         s.ap_voids()
-            .bill_payment(paid[0].id, "contract clean-up", key()),
+            .bill_payment(paid[0].id, None, "contract clean-up", key()),
     )
     .expect("void");
     let list = h

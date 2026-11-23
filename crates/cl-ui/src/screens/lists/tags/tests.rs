@@ -496,3 +496,107 @@ fn without_tag_numbers_the_column_and_field_are_hidden() {
         .expect("saved");
     assert_eq!(plain.fields.tag_number, None, "no number sent");
 }
+
+// --- P33: someone else saved the tag first ----------------------------------
+
+use crate::screens::conflict_dialog::ConflictChoice;
+
+/// The first tag, open in the panel; someone else then sets its
+/// description in the books.
+fn opened_then_changed_elsewhere(r: &mut Rig) -> cl_core::ids::TagId {
+    let id = r.s.tags[0].id;
+    r.s.place_cursor(Some(id));
+    r.frames(2);
+    r.s.open_edit_tag(Some(id));
+    let mut d = r.link.demo_state().expect("demo");
+    let t = d.tags_mut().iter_mut().find(|x| x.id == id).expect("tag");
+    t.fields.description = Some("theirs".into());
+    id
+}
+
+fn stored(r: &Rig, id: cl_core::ids::TagId) -> cl_api::Tag {
+    let mut d = r.link.demo_state().expect("demo");
+    d.tags_mut()
+        .iter()
+        .find(|x| x.id == id)
+        .cloned()
+        .expect("tag")
+}
+
+#[test]
+fn p33_keep_mine_takes_their_description_and_keeps_my_name() {
+    let mut r = Rig::new();
+    let id = opened_then_changed_elsewhere(&mut r);
+    r.tag_form().form.edit_step(|d| d.name = "Mine".into());
+    r.s.save_panel(SaveIntent::Save);
+    let open = r.s.tag_conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(merge.undone.is_empty(), "{:?}", merge.undone);
+    r.s.run_tag_choice(open, ConflictChoice::KeepMine(merge));
+    let t = stored(&r, id);
+    assert_eq!(t.fields.name, "Mine");
+    assert_eq!(t.fields.description.as_deref(), Some("theirs"));
+}
+
+#[test]
+fn p33_use_theirs_shows_their_tag_and_esc_is_back() {
+    let mut r = Rig::new();
+    let id = opened_then_changed_elsewhere(&mut r);
+    r.tag_form()
+        .form
+        .edit_step(|d| d.description = "mine".into());
+    r.s.save_panel(SaveIntent::Save);
+    assert!(r.s.tag_conflict.is_open());
+    assert!(r.s.command(CommandId::new("form.revert")));
+    assert_eq!(
+        r.tag_form().form.current().description,
+        "mine",
+        "Back keeps mine"
+    );
+    r.s.save_panel(SaveIntent::Save);
+    let open = r.s.tag_conflict.open.take().expect("dialog again");
+    r.s.run_tag_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(r.tag_form().form.current().description, "theirs");
+    assert!(!r.tag_form().form.is_dirty());
+    assert_eq!(stored(&r, id).fields.description.as_deref(), Some("theirs"));
+}
+
+#[test]
+fn p33_a_new_stamp_with_nothing_editable_changed_saves_without_asking() {
+    let mut r = Rig::new();
+    let id = r.s.tags[0].id;
+    r.s.place_cursor(Some(id));
+    r.frames(2);
+    r.s.open_edit_tag(Some(id));
+    // The panel's copy is older than the books (a file-only change).
+    if let Some(o) = r.tag_form().opened.as_mut() {
+        o.sort_order = Some(99);
+        o.fields.description = Some("older".into());
+    }
+    r.tag_form().form.edit_step(|d| d.name = "Mine".into());
+    r.s.save_panel(SaveIntent::Save);
+    assert!(!r.s.tag_conflict.is_open());
+    assert_eq!(stored(&r, id).fields.name, "Mine");
+}
+
+#[test]
+fn p33_a_tag_deleted_elsewhere_is_never_recreated() {
+    let mut r = Rig::new();
+    let id = opened_then_changed_elsewhere(&mut r);
+    r.link
+        .demo_state()
+        .expect("demo")
+        .tags_mut()
+        .retain(|x| x.id != id);
+    r.tag_form().form.edit_step(|d| d.name = "Mine".into());
+    r.s.save_panel(SaveIntent::Save);
+    assert_eq!(r.s.warn, Some(crate::forms::conflict::GONE));
+    assert!(
+        r.link
+            .demo_state()
+            .expect("demo")
+            .tags_mut()
+            .iter()
+            .all(|x| x.id != id)
+    );
+}

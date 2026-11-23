@@ -575,7 +575,7 @@ impl EnterBillScreen {
         };
         let written = group.write(&session, label, move |s| async move {
             let opts = options(password);
-            let record = match (&draft, edit) {
+            let mut record = match (&draft, edit) {
                 (Draft::Bill(d), None) => s.bills().create(d, &opts, key).await?,
                 (Draft::Bill(d), Some((id, expected))) => {
                     s.bills().update(id, &expected, d, &opts, key).await?
@@ -594,6 +594,10 @@ impl EnterBillScreen {
             let mut attach_failed = None;
             if let (Some(draft_key), false) = (retry_draft, lines_cap) {
                 let moved = move_files(&s, id, credit, draft_key, &files).await;
+                // The moves changed the record's stamp (U-291 S2).
+                if let Ok(stamp) = &moved {
+                    record.version.adopt_stamp(*stamp);
+                }
                 if moved.is_err() {
                     attach_failed = Some(AttachRetry {
                         id,
@@ -666,6 +670,7 @@ impl EnterBillScreen {
 
     /// Polls the save, the record being read, the list, Void and History.
     pub(crate) fn poll_save(&mut self) {
+        self.poll_conflict();
         if let Some(r) = self.save.task.as_mut().and_then(Task::try_take) {
             self.save.task = None;
             match r {
@@ -859,6 +864,7 @@ impl EnterBillScreen {
         let (expenses, items) = self.blank_lines();
         self.load_lines(expenses, items);
         self.editing = None;
+        self.conflict.clear();
         self.nav.at = None;
         self.tab = super::Tab::Expenses;
         self.void = super::VoidPrompt::default();
@@ -923,6 +929,19 @@ impl EnterBillScreen {
             return;
         }
         match &e {
+            // P33: someone else saved it first: their version, then the
+            // conflict dialog (or a silent re-save).
+            ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                ..
+            } if self.editing.is_some() => self.conflict_start(intent),
+            _ if matches!(ap_refusal(&e), Some(ApRefusal::Stale)) && self.editing.is_some() => {
+                self.conflict_start(intent);
+            }
+            // P33: deleted elsewhere: never saved again.
+            ApiError::NotFound { .. } if self.editing.is_some() => {
+                self.save.notice = Some(crate::forms::conflict::GONE);
+            }
             ApiError::Conflict {
                 reason: ConflictReason::Stale,
                 ..
@@ -1178,21 +1197,8 @@ impl EnterBillScreen {
         let (form, expenses, items) = form_of(r, &mut ek, self.items.keys());
         self.expenses.form_mut().adapter_mut().keys = ek;
         let credit = form.kind == BillKind::Credit;
-        let locked = is_locked(r.txn.txn_date, self.closing);
-        let line_detail = r.lines.iter().any(|l| {
-            l.item.is_some() || l.quantity.is_some() || l.customer.is_some() || l.billable
-        });
-        let read_only_note = if r.txn.status == TxnStatus::Void {
-            Some("bill.read_only.void")
-        } else if credit && !self.ap_edit() {
-            Some("bill.read_only.credit")
-        } else if locked && !caps.closing {
-            Some("bill.read_only.closed")
-        } else if line_detail && !caps.lines {
-            Some("bill.read_only.lines")
-        } else {
-            None
-        };
+        let read_only_note = self.read_only_note_of(r);
+        self.conflict.clear();
         self.header.load(form);
         self.load_lines(expenses, items);
         if self.items.value().used().next().is_some() && caps.lines {
@@ -1229,6 +1235,27 @@ impl EnterBillScreen {
         self.apply_locks();
         self.load_attachments();
         self.sync_inputs();
+    }
+
+    /// Why a saved bill or credit is shown read-only (i18n key), or None.
+    pub(crate) fn read_only_note_of(&self, r: &BillRecord) -> Option<&'static str> {
+        let caps = self.caps();
+        let credit = matches!(r.kind(), cl_api::ApKind::VendorCredit);
+        let locked = is_locked(r.txn.txn_date, self.closing);
+        let line_detail = r.lines.iter().any(|l| {
+            l.item.is_some() || l.quantity.is_some() || l.customer.is_some() || l.billable
+        });
+        if r.txn.status == TxnStatus::Void {
+            Some("bill.read_only.void")
+        } else if credit && !self.ap_edit() {
+            Some("bill.read_only.credit")
+        } else if locked && !caps.closing {
+            Some("bill.read_only.closed")
+        } else if line_detail && !caps.lines {
+            Some("bill.read_only.lines")
+        } else {
+            None
+        }
     }
 
     /// The edited bill was changed elsewhere: read it again.
@@ -1432,7 +1459,10 @@ impl EnterBillScreen {
             key: None,
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
-            move_files(&s, r.id, r.kind == BillKind::Credit, r.draft, &r.files).await
+            // Before `bill-lines-v1` only (no record stamps there).
+            move_files(&s, r.id, r.kind == BillKind::Credit, r.draft, &r.files)
+                .await
+                .map(drop)
         }) {
             self.save.attach_retry = Some(Task::Pending(p));
         }
@@ -1490,19 +1520,22 @@ async fn move_files(
     credit: bool,
     draft: DraftKey,
     files: &[AttachmentId],
-) -> Result<(), ApiError> {
+) -> Result<Option<cl_api::RecordStamp>, ApiError> {
+    let mut stamp = None;
     if credit {
         for f in files {
-            s.attachments()
+            let got = s
+                .attachments()
                 .link(*f, AttachTo::VendorCredit(id), IdempotencyKey::new())
                 .await?;
+            stamp = got.max(stamp);
         }
     } else {
         s.bills()
             .attach_draft(id, draft, IdempotencyKey::new())
             .await?;
     }
-    Ok(())
+    Ok(stamp)
 }
 
 fn action_key(a: &AuditAction) -> &'static str {

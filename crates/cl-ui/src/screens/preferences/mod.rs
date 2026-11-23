@@ -826,6 +826,15 @@ impl PreferencesScreen {
             self.block = Some(SaveBlock::NotLoaded);
             return false;
         }
+        let host_sets = self.host_sets();
+        if host_sets {
+            // Q-P33l: on a workstation the AI, document-reading and mail
+            // settings are the host's; nothing of them is checked, written
+            // here or sent from this computer's keychain.
+            self.edits.ai = self.committed.ai.clone();
+            self.edits.email = self.committed.email.clone();
+            self.edits.cloud_reading = self.committed.cloud_reading;
+        }
         let edits = match self.validate() {
             Ok(e) => e,
             Err(b) => {
@@ -1097,7 +1106,12 @@ impl PreferencesScreen {
             self.finish_save(&SaveOutcome::default(), after);
             return true;
         };
-        let secrets_for_engine = edits.ai.session_secrets(secrets.as_ref(), &edits.email);
+        // Secrets never leave the host computer (Q-P33l).
+        let secrets_for_engine = if host_sets {
+            cl_api::SessionSecrets::default()
+        } else {
+            edits.ai.session_secrets(secrets.as_ref(), &edits.email)
+        };
         // The edits stay dirty until the engine answers (S2).
         self.pending = Some(after);
         self.save_task = spawn_lifecycle(&self.link, group, move || async move {
@@ -1457,9 +1471,20 @@ impl PreferencesScreen {
             .is_some_and(AiConfig::cloud_vision_allowed)
     }
 
+    /// Q-P33l: on an office-network workstation the host computer sets the
+    /// AI, document-reading and mail settings; this window shows them
+    /// read-only and never saves or tests them.
+    fn host_sets(&self) -> bool {
+        crate::lan_status::state_of(&self.link)
+            .is_some_and(crate::lan_status::LanState::workstation)
+    }
+
+    /// The categories the host sets on a workstation.
+    fn host_set_category(c: Category) -> bool {
+        matches!(c, Category::Ai | Category::AiCloudReading | Category::Email)
+    }
+
     fn panel(&mut self, ui: &mut Ui, tokens: &Tokens) {
-        let caps = self.link.capabilities();
-        let demo = self.link.is_demo();
         let admin = self.link.rights().is_admin();
         if self.category.admin_only() && !admin {
             // P29 QA-17: never drawn for someone who is not an Admin (a
@@ -1468,6 +1493,27 @@ impl PreferencesScreen {
             form::hint(ui, tokens, &t("prefs.admin_only"));
             return;
         }
+        if Self::host_set_category(self.category) && self.host_sets() {
+            form::hint(ui, tokens, &t("prefs.ws.host_sets"));
+            ui.add_space(6.0);
+            // Drawn for reading only; whatever the widgets report is
+            // dropped, and the save puts these settings back as loaded.
+            let before = (
+                self.edits.ai.clone(),
+                self.edits.email.clone(),
+                self.edits.cloud_reading,
+            );
+            ui.add_enabled_ui(false, |ui| self.panel_body(ui, tokens, true));
+            (self.edits.ai, self.edits.email, self.edits.cloud_reading) = before;
+            return;
+        }
+        self.panel_body(ui, tokens, false);
+    }
+
+    fn panel_body(&mut self, ui: &mut Ui, tokens: &Tokens, read_only: bool) {
+        let caps = self.link.capabilities();
+        let demo = self.link.is_demo();
+        let admin = self.link.rights().is_admin();
         match self.category {
             Category::LookAndFeel => user::look_and_feel(ui, tokens, &mut self.edits),
             Category::DatesNumbers => user::dates_numbers(ui, tokens, &mut self.edits),
@@ -1557,7 +1603,9 @@ impl PreferencesScreen {
                     self.test_task.is_some(),
                     self.ai_test_status.as_deref(),
                 );
-                self.handle_ai_action(action);
+                if !read_only {
+                    self.handle_ai_action(action);
+                }
             }
             Category::AiCloudReading => {
                 let available = self.cloud_reading_available();
@@ -1579,7 +1627,9 @@ impl PreferencesScreen {
                     self.test_task.is_some(),
                     demo,
                 );
-                self.handle_email_action(action);
+                if !read_only {
+                    self.handle_email_action(action);
+                }
             }
             Category::ReceiptInbox => {
                 let app_dirs = self.app_dirs();
@@ -2591,6 +2641,52 @@ mod tests {
         assert!(crate::i18n::has(
             SaveBlock::AiNeedsConsentAgain.message_key()
         ));
+    }
+
+    /// Q-P33l: on an office-network workstation the AI, document-reading
+    /// and mail settings are the host's: drawn read-only, never saved.
+    #[test]
+    fn workstation_saves_never_change_the_hosts_ai_and_mail_settings() {
+        let (_d, mut s) = demo_screen(true);
+        assert!(!s.host_sets());
+        assert!(crate::lan_status::LanShell::command(
+            &s.link,
+            "dev.lan_host_up"
+        ));
+        assert!(s.host_sets(), "the demo is a workstation now");
+        for c in [Category::Ai, Category::AiCloudReading, Category::Email] {
+            assert!(PreferencesScreen::host_set_category(c), "{c:?}");
+        }
+        assert!(!PreferencesScreen::host_set_category(Category::LookAndFeel));
+        let ai_before = s.committed.ai.clone();
+        let mail_before = s.committed.email.clone();
+        s.edits_mut().ai.ollama_model = "qwen2.5:7b".into();
+        s.edits_mut().email.form.host = "mail.example.com".into();
+        s.edits_mut().user.theme = cl_settings::ThemeChoice::Dark;
+        assert!(Screen::save(&mut s), "{:?}", s.block);
+        assert_eq!(s.committed.ai, ai_before, "AI settings stay the host's");
+        assert_eq!(
+            s.committed.email, mail_before,
+            "mail settings stay the host's"
+        );
+        assert_eq!(
+            s.edits().ai,
+            ai_before,
+            "the read-only pane shows the host's"
+        );
+        // The pane is drawn with the plain words and no live widget edits.
+        s.category = Category::Ai;
+        let ctx = egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let tokens = Tokens::of(ui.ctx());
+            s.panel(ui, &tokens);
+        });
+        out.textures_delta.clear();
+        assert!(crate::i18n::has("prefs.ws.host_sets"));
+        assert!(crate::lan_status::LanShell::demo_off(&s.link));
+        assert!(!s.host_sets());
     }
 
     #[test]

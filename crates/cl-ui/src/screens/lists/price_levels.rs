@@ -300,6 +300,10 @@ impl PriceLevelsScreen {
         };
         self.problem = None;
         let id = ed.id;
+        // The level as listed: its stamp goes with the save (U-291).
+        let stamp = id
+            .and_then(|id| self.levels.iter().find(|l| l.id == id))
+            .and_then(PriceLevel::stamp);
         let d2 = draft.clone();
         self.save_job = Some(engine::write(
             &self.link,
@@ -313,7 +317,7 @@ impl PriceLevelsScreen {
                 let levels = s.invoices();
                 let levels = levels.price_levels();
                 match id {
-                    Some(id) => levels.update(id, &draft).await,
+                    Some(id) => levels.update(id, stamp, &draft).await,
                     None => levels.create(&draft).await,
                 }
             },
@@ -322,6 +326,11 @@ impl PriceLevelsScreen {
     }
 
     fn delete(&mut self, id: PriceLevelId) {
+        let stamp = self
+            .levels
+            .iter()
+            .find(|l| l.id == id)
+            .and_then(PriceLevel::stamp);
         self.delete_job = Some(engine::write(
             &self.link,
             self.group.as_ref(),
@@ -342,7 +351,7 @@ impl PriceLevelsScreen {
                 d.price_levels.levels.retain(|l| l.id != id);
                 Ok(())
             },
-            move |s| async move { s.invoices().price_levels().delete(id).await },
+            move |s| async move { s.invoices().price_levels().delete(id, stamp).await },
         ));
         self.poll();
     }

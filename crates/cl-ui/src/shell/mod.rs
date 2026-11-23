@@ -195,6 +195,9 @@ pub struct Shell {
     doc_follow: Option<WindowId>,
     /// A04 WP-C: the pop-out's compare events, for next frame.
     viewer_outbox: outbox::ViewerOutbox,
+    /// P33: the office network (status, host-down overlay, banners, live
+    /// refresh).
+    pub(crate) lan: crate::lan_status::LanShell,
     /// P29: reads the rights again after a 403.
     rights_watch: crate::company::RightsWatch,
     /// P29: the signed-in user's role in the open company (the engine's
@@ -254,6 +257,7 @@ impl Shell {
             doc_viewer,
             doc_follow: None,
             viewer_outbox: outbox::ViewerOutbox::new(),
+            lan: crate::lan_status::LanShell::default(),
             rights_watch: crate::company::RightsWatch::default(),
             company_role: String::new(),
             idle: idle_lock::IdleLock::default(),
@@ -1003,6 +1007,23 @@ impl Shell {
         self.about.is_open()
     }
 
+    /// The host-down overlay covers the app (P33): the host doesn't answer
+    /// and the Office Network window is not in front.
+    fn lan_covered(&self) -> bool {
+        self.lan
+            .state()
+            .is_some_and(crate::lan_status::LanState::covered)
+            && !self.lan_setup_in_front()
+    }
+
+    fn lan_setup_in_front(&self) -> bool {
+        self.windows.active().is_some_and(|w| {
+            self.windows
+                .find_kind(CommandId::new(crate::screens::lan_setup::KIND))
+                == Some(w.id)
+        })
+    }
+
     fn modal_open(&self) -> bool {
         self.palette.open
             || self.shortcuts_open
@@ -1084,6 +1105,24 @@ impl Shell {
             }
             return;
         }
+        // P33: the demo office network's link (any window).
+        if let Some(link) = &self.company_link {
+            let handled = match id.as_str() {
+                "dev.lan_demo_off" => crate::lan_status::LanShell::demo_off(link),
+                other => crate::lan_status::LanShell::command(link, other),
+            };
+            if handled {
+                return;
+            }
+        }
+        // P33 (Q-P33y): on a workstation the host-only actions say where
+        // to do them (a shortcut or the palette; the menu shows them off).
+        if crate::lan_status::host_only_now(id.as_str()) {
+            if let Some(ctx) = ctx {
+                self.toast(ctx, "lan.host_only");
+            }
+            return;
+        }
         // Q-P32u: a transfer file being made blocks Close Company, Restore
         // and Delete (a shortcut or the palette).
         if crate::screens::send_to_accountant::blocked_now(id.as_str()) {
@@ -1113,6 +1152,9 @@ impl Shell {
                 && self.company.is_none()
                 && kind.as_str() != "file.open_company"
                 && kind.as_str() != "file.new_company"
+                // P33 QA-1: a new second computer pairs with the host
+                // before it has (or needs) a company of its own.
+                && kind.as_str() != crate::screens::lan_setup::KIND
             {
                 // Nothing but Open Company and the interview works without a
                 // company (Q-182); the restore panel lives in Open Company.
@@ -1328,6 +1370,7 @@ impl Shell {
             return;
         }
         let modal = self.modal_open();
+        let covered = self.lan_covered();
         let window = target.and_then(|id| self.windows.get(id));
         // The viewer drawn inside the main window (embedded viewports) has
         // the keyboard: its keys act on it (A02).
@@ -1362,6 +1405,13 @@ impl Shell {
                 continue;
             };
             if modal && !matches!(id.as_str(), "help.palette" | "help.shortcuts") {
+                continue;
+            }
+            // P33 QA-6: behind the host-down overlay no key acts on a
+            // window (Alt+S there saved nothing then, and nothing is kept
+            // to send later); only the shortcut list opens.
+            if covered && id.as_str() != "help.shortcuts" {
+                handled.push(s);
                 continue;
             }
             if kept {
@@ -1557,6 +1607,9 @@ impl Shell {
         let tokens = Tokens::of(&ctx);
 
         self.apply_company_events(Some(&ctx));
+        // P33: the office network's state for this frame.
+        self.lan
+            .tick(self.company_link.as_ref(), std::time::Instant::now());
         // Security review minor 5: a copied secret leaves the clipboard.
         crate::secret_clipboard::tick(&ctx);
         if self.show_idle_lock(ui) {
@@ -1569,6 +1622,12 @@ impl Shell {
         self.publish_grid_facts(&ctx, egui::ViewportId::ROOT);
         title_bar::show(ui, self, narrow, &tokens);
         menu::show(ui, self, narrow, &tokens);
+        let dirty = self.windows.dirty_ids().len();
+        self.lan.banner(ui, &tokens, dirty);
+        // QA-9: the host ended this computer's sign-in; sign in again.
+        if self.lan.take_sign_in() {
+            self.queue(CommandId::new("file.sign_out"));
+        }
         if let Some(kind) = status_bar::show(ui, self, narrow, &tokens) {
             self.open_screen(CommandId::new(kind));
         }
@@ -1587,6 +1646,22 @@ impl Shell {
             self.run(Some(&ctx), id);
         }
         self.show_overlays(&ctx);
+        // P33: while the host doesn't answer, the app is covered and every
+        // window stays as it was; commands asked for meanwhile are dropped.
+        let setup_in_front = self.lan_setup_in_front();
+        match self.lan.overlay(&ctx, dirty, setup_in_front) {
+            crate::lan_status::Overlay::None => {}
+            // The demo office network's own link commands (`dev.lan_*`)
+            // still run: they stand for the host answering again.
+            crate::lan_status::Overlay::Covered => {
+                self.pending.retain(|c| c.as_str().starts_with("dev.lan_"));
+            }
+            crate::lan_status::Overlay::OpenSetup => {
+                self.pending.clear();
+                self.pending
+                    .push(CommandId::new(crate::screens::lan_setup::KIND));
+            }
+        }
 
         for id in std::mem::take(&mut self.pending) {
             self.run(Some(&ctx), id);
@@ -2101,6 +2176,7 @@ fn make_any(
             .chain(&crate::screens::P30_SCREENS)
             .chain(&crate::screens::P31_SCREENS)
             .chain(&crate::screens::P32_SCREENS)
+            .chain(&crate::screens::P33_SCREENS)
         {
             if let Some(s) = make(kind, link, open.clone(), today) {
                 return s;

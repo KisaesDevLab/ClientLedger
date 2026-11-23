@@ -32,6 +32,10 @@ pub enum Change {
     Ledger(Option<Vec<AccountId>>),
     /// Customers, vendors or other names.
     Contacts,
+    /// A write on something a contact owns (a sales tax exemption
+    /// certificate upload) moved the contact's stamp (U-291 S2): an open
+    /// contact panel takes it, so its next save is no conflict with itself.
+    ContactStamp(ContactId, cl_api::RecordStamp),
     /// The chart of accounts (names, numbers, active, opening balances).
     Accounts,
     /// Tags and tag groups.
@@ -94,6 +98,9 @@ pub struct Changes {
     pub ledger: LedgerScope,
     /// Contacts.
     pub contacts: bool,
+    /// New contact stamps from writes on things they own (the newest per
+    /// contact; never guessed for a subscriber that fell behind).
+    pub contact_stamps: std::collections::BTreeMap<ContactId, cl_api::RecordStamp>,
     /// The chart of accounts.
     pub accounts: bool,
     /// Tags.
@@ -127,6 +134,7 @@ impl Changes {
         Changes {
             ledger: LedgerScope::All,
             contacts: true,
+            contact_stamps: std::collections::BTreeMap::new(),
             accounts: true,
             tags: true,
             items: true,
@@ -189,6 +197,10 @@ impl Changes {
                 }
             },
             Change::Contacts => self.contacts = true,
+            Change::ContactStamp(id, stamp) => {
+                let held = self.contact_stamps.entry(*id).or_insert(*stamp);
+                *held = (*held).max(*stamp);
+            }
             Change::Accounts => self.accounts = true,
             Change::Tags => self.tags = true,
             Change::Items => self.items = true,
@@ -333,6 +345,20 @@ mod tests {
 
     fn account(n: u8) -> AccountId {
         AccountId::parse(&format!("00000000-0000-4000-8000-0000000000{n:02x}")).expect("id")
+    }
+
+    #[test]
+    fn a_contact_stamp_keeps_the_newest_and_never_lists_again() {
+        let bus = DataBus::new();
+        let mut sub = bus.subscribe();
+        let id = ContactId::parse("2a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id");
+        let older = cl_api::RecordStamp::parse("2026-11-20T10:00:00.000Z").expect("stamp");
+        let newer = cl_api::RecordStamp::parse("2026-11-20T10:00:01.000Z").expect("stamp");
+        bus.publish(Change::ContactStamp(id, newer));
+        bus.publish(Change::ContactStamp(id, older));
+        let got = bus.take(&mut sub);
+        assert_eq!(got.contact_stamps.get(&id), Some(&newer));
+        assert!(!got.contacts, "a stamp alone reads no list again");
     }
 
     #[test]

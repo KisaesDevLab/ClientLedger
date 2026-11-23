@@ -23,6 +23,7 @@
 //! password; an edit is guarded by the record's version (409 → Reload).
 //! Every save, void and delete publishes the accounts it touched (Q-262).
 
+mod conflict;
 mod engine;
 mod form;
 mod save;
@@ -181,6 +182,12 @@ pub struct JournalScreen {
     pub(crate) error: Option<ApiError>,
     pub(crate) notice: Option<&'static str>,
     pub(crate) stale: bool,
+    /// P33: the form as opened (the conflict dialog's original).
+    pub(crate) opened: Option<(JournalForm, FormLines)>,
+    /// P33: their version being read after a stale save.
+    pub(crate) theirs_task: Option<(Task<Versioned<Transaction>>, SaveIntent)>,
+    /// P33: the conflict dialog.
+    pub(crate) conflict: Option<conflict::OpenConflict>,
     pub(crate) saved_count: u32,
     pub(crate) last_action: Option<&'static str>,
     pub(crate) last_saved: Option<TransactionId>,
@@ -280,6 +287,9 @@ impl JournalScreen {
             error: None,
             notice: None,
             stale: false,
+            opened: None,
+            theirs_task: None,
+            conflict: None,
             saved_count: 0,
             last_action: None,
             last_saved: None,
@@ -440,6 +450,7 @@ impl JournalScreen {
     }
 
     pub(crate) fn poll(&mut self) {
+        self.poll_conflict();
         if self.books.poll() {
             self.lines.set_lists(Arc::clone(&self.books.lists));
             self.inputs.rev = u64::MAX;
@@ -598,6 +609,7 @@ impl JournalScreen {
         self.header.load(form);
         self.lines.load(lines, &*lists);
         self.seen_lines = self.lines.value().clone();
+        self.opened = Some((self.header.current().clone(), self.lines.value().clone()));
         let void = v.record.status == cl_api::TxnStatus::Void;
         let mut accounts: Vec<AccountId> = v.record.lines.iter().map(|l| l.account_id).collect();
         accounts.sort();
@@ -660,6 +672,7 @@ impl JournalScreen {
         self.delete_open = false;
         self.problems.clear();
         self.stale = false;
+        self.opened = None;
         self.template.forget();
         self.sync_inputs();
         self.fetch_number();
@@ -819,6 +832,7 @@ impl JournalScreen {
                 "tag_refusal": self.tag_refusal,
                 "error": self.error.is_some(),
                 "stale": self.stale,
+                "conflict": self.conflict.as_ref().map(|c| c.dialog.state()),
             },
             "published": self.published.len(),
             "last_action": self.last_action,
@@ -990,6 +1004,8 @@ impl Screen for JournalScreen {
             self.sync_inputs();
         }
         self.draw(ui);
+        let ctx = ui.ctx().clone();
+        self.conflict_ui(&ctx);
         self.prefill_balance();
         self.recheck_problems();
         if let Some(cmd) = self.after_frame.take() {
@@ -999,7 +1015,8 @@ impl Screen for JournalScreen {
             || self.busy()
             || self.load_task.is_some()
             || self.nav_task.is_some()
-            || self.number_task.is_some();
+            || self.number_task.is_some()
+            || self.theirs_task.is_some();
         if busy {
             ui.ctx()
                 .request_repaint_after(std::time::Duration::from_millis(50));

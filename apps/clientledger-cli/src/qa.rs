@@ -174,6 +174,7 @@ impl EndpointSource for Source {
                 port: ep.port,
                 token: Secret::new(ep.token.expose().to_string()),
                 generation: ep.generation,
+                clock_offset_ms: 0,
             }),
             (HostState::Running | HostState::Restarting { .. }, _) => EndpointState::Restarting,
             (HostState::Starting, _) => EndpointState::Starting,
@@ -630,7 +631,13 @@ async fn build(client: &Client, paths: &AppPaths) -> Result<Made, String> {
     );
 
     // 5. The unused tag the last report names, deleted.
-    match s.tags().delete(retired, key()).await {
+    let retired_v = s
+        .tags()
+        .get(retired)
+        .await
+        .map_err(api("read QA Retired yard"))?
+        .version;
+    match s.tags().delete(retired, &retired_v, key()).await {
         Ok(()) => summary.push("tag QA Retired yard deleted (a memorized report names it)".into()),
         Err(e) => notes.push(format!("deleting QA Retired yard was refused: {e}")),
     }
@@ -641,8 +648,14 @@ async fn build(client: &Client, paths: &AppPaths) -> Result<Made, String> {
     // it; A/R, A/P, View-only and Custom have "See sensitive accounts" at
     // none.
     if caps.has("sensitive-accounts-v1") {
+        let payroll_v = s
+            .accounts()
+            .get(payroll)
+            .await
+            .map_err(api("read payroll"))?
+            .version;
         s.accounts()
-            .set_sensitive(payroll, true, key())
+            .set_sensitive(payroll, &payroll_v, true, key())
             .await
             .map_err(api("payroll sensitive"))?;
         // A note, so credentials.txt says which account it is.

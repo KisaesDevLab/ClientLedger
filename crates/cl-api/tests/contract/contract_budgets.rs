@@ -480,5 +480,7 @@ pub fn hand_fixture_and_writes(h: &Harness) {
             .any(|x| x.id == next.id),
         "listed"
     );
-    h.run(budgets.delete(&next.id)).expect("delete");
+    // On the version the copy left (the adjust and the copy moved it).
+    h.run(budgets.delete(&next.id, copied.budget.version))
+        .expect("delete");
 }

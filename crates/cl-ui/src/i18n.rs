@@ -59,8 +59,11 @@ pub fn count_text(n: u64) -> String {
 #[must_use]
 pub fn t_count(key: &str, n: usize, args: &[(&str, &str)]) -> String {
     let one = format!("{key}.one");
+    let zero = format!("{key}.zero");
     let chosen = if n == 1 && has(&one) {
         one.as_str()
+    } else if n == 0 && has(&zero) {
+        zero.as_str()
     } else {
         key
     };
@@ -168,9 +171,12 @@ mod auth;
 mod sensitive;
 // P32: Send to My Accountant and the IIF export.
 mod send_to_accountant;
+// P33: the office network.
+pub(crate) mod lan;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 62] = [
+const TABLES: [&[(&str, &str)]; 63] = [
+    lan::ENGLISH,
     send_to_accountant::ENGLISH,
     audit::ENGLISH,
     auth::ENGLISH,
@@ -406,6 +412,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("open.restore_sub", "From a .clbackup file"),
     ("open.lan", "Open a company on my office network"),
     ("open.lan_sub", "Another computer here is sharing it"),
+    ("open.lan_first_sub", "Another computer here shares its books: pair this one with it, no account needed here"),
     ("open.practice", "Try the practice company"),
     ("open.practice_sub", "Explore without touching real books"),
     ("open.practice_later", "Sign in first; the practice company opens right after."),
@@ -651,6 +658,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("error.company.too_new", "This backup was made by a newer ClientLedger."),
     ("fix.company.too_new", "Update ClientLedger, then restore it."),
     ("error.company.job_failed", "The backup or restore could not be finished."),
+    ("error.company.verify_failed", "The restored copy didn't match the backup file, so nothing was changed. Your books are as they were."),
+    ("fix.company.verify_failed", "Try an older backup, or click Copy details and report it so the backup can be checked."),
     ("error.company.transfer_not_backup", "This is a transfer file for your accountant's MyBooks."),
     ("fix.company.transfer_not_backup", "To move your company to another computer, use a backup."),
     ("error.company.totals_mismatch", "The file's check totals don't match the books it holds, so the company wasn't restored."),
@@ -807,6 +816,21 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("fix.api.open_company", "Open a company first (File, Open or Switch Company)."),
     ("error.api.too_large", "That file or entry is too large."),
     ("error.api.engine_unavailable", "The books engine is not answering."),
+    // LAN multi-user (P33). Nothing was saved in any of these cases but link_lost.
+    ("error.lan.maintenance", "The host computer is restoring or importing books. Nothing was saved."),
+    ("error.lan.host_engine_down", "The host computer's books are restarting. Nothing was saved."),
+    ("error.lan.not_sent", "The host computer cannot be reached. Nothing was sent."),
+    ("error.lan.update_needed", "This computer needs the same ClientLedger version as the host computer."),
+    ("error.lan.host_only", "Do this on the host computer."),
+    ("error.lan.maintenance_required", "Do this on the host computer. It asks everyone else to sign out first."),
+    ("error.lan.maintenance_busy", "Other people are still saving. Try again in a moment."),
+    ("error.lan.stale_required", "ClientLedger could not check whether someone else changed this record. Nothing was saved."),
+    ("error.lan.not_paired", "The host computer no longer knows this computer."),
+    ("error.lan.link_lost", "The connection to the host computer dropped before it answered."),
+    ("fix.lan.check_host", "Check that the host computer is on and connected, then try again."),
+    ("fix.lan.update", "Install the same version on this computer and the host computer."),
+    ("fix.lan.on_host", "Sit at the host computer and do it there."),
+    ("fix.lan.pair_again", "Open Office network setup and pair this computer again."),
     ("error.api.outcome_unknown", "ClientLedger could not tell whether that was saved."),
     ("fix.api.check_again", "Look for it in the register before entering it again, so it is not entered twice."),
     ("fix.api.save_again_safely", "Save again. If the first try went through, ClientLedger keeps that one and does not enter it twice."),

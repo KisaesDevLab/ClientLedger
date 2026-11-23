@@ -170,6 +170,7 @@ pub fn bank_postings_in_a_closed_period(h: &Harness) {
     let e = h
         .run(s.transactions().void(
             inside.record.id,
+            None,
             "closed",
             &PostingOptions::default(),
             key(),
@@ -179,10 +180,12 @@ pub fn bank_postings_in_a_closed_period(h: &Harness) {
     // R7: a delete in the closed period is refused the same way.
     if h.require_cap(Capabilities::TXN_DELETE, "R7") {
         let e = h
-            .run(
-                s.transactions()
-                    .delete(inside_del.record.id, &DeleteOptions::default(), key()),
-            )
+            .run(s.transactions().delete(
+                inside_del.record.id,
+                None,
+                &DeleteOptions::default(),
+                key(),
+            ))
             .expect_err("closed delete");
         is_closed(&e);
     }
@@ -233,10 +236,13 @@ pub fn bank_postings_in_a_closed_period(h: &Harness) {
             "closed-period change is audited"
         );
         let voided = h
-            .run(
-                s.transactions()
-                    .void(inside.record.id, "closed", &with("closing-pass-1"), key()),
-            )
+            .run(s.transactions().void(
+                inside.record.id,
+                None,
+                "closed",
+                &with("closing-pass-1"),
+                key(),
+            ))
             .expect("void with password");
         assert_eq!(voided.record.status, cl_api::TxnStatus::Void);
         if h.require_cap(Capabilities::TXN_DELETE, "R7") {
@@ -247,7 +253,7 @@ pub fn bank_postings_in_a_closed_period(h: &Harness) {
             let e = h
                 .run(
                     s.transactions()
-                        .delete(inside_del.record.id, &del(None), key()),
+                        .delete(inside_del.record.id, None, &del(None), key()),
                 )
                 .expect_err("delete needs the password");
             assert!(
@@ -257,6 +263,7 @@ pub fn bank_postings_in_a_closed_period(h: &Harness) {
             let e = h
                 .run(s.transactions().delete(
                     inside_del.record.id,
+                    None,
                     &del(Some("not-the-password")),
                     key(),
                 ))
@@ -265,6 +272,7 @@ pub fn bank_postings_in_a_closed_period(h: &Harness) {
             let gone = h
                 .run(s.transactions().delete(
                     inside_del.record.id,
+                    None,
                     &del(Some("closing-pass-1")),
                     key(),
                 ))

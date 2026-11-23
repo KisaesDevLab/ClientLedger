@@ -151,6 +151,15 @@ impl std::fmt::Debug for UsersScreen {
     }
 }
 
+/// A built-in role to create (no id) or put back: id, the stamp it was
+/// listed at, name, permission map.
+type RoleTodo = (
+    Option<Uuid>,
+    Option<cl_api::RecordStamp>,
+    &'static str,
+    BTreeMap<String, String>,
+);
+
 fn label() -> OrphanLabel {
     OrphanLabel {
         what: "orphan.team",
@@ -476,13 +485,13 @@ impl UsersScreen {
         self.ensured = true;
         let keys = self.keys();
         let have = self.data().templates;
-        let mut todo: Vec<(Option<Uuid>, &'static str, BTreeMap<String, String>)> = Vec::new();
+        let mut todo: Vec<RoleTodo> = Vec::new();
         for b in BuiltinRole::ALL {
             let want = builtin_wire(*b, keys);
             match have.iter().find(|t| t.name == b.template_name()) {
-                None => todo.push((None, b.template_name(), want)),
+                None => todo.push((None, None, b.template_name(), want)),
                 Some(t) if t.permissions != want => {
-                    todo.push((Some(t.id), b.template_name(), want));
+                    todo.push((Some(t.id), t.stamp, b.template_name(), want));
                 }
                 Some(_) => {}
             }
@@ -496,7 +505,7 @@ impl UsersScreen {
             self.group.as_ref(),
             label(),
             move |d| {
-                for (id, name, map) in &demo_todo {
+                for (id, _, name, map) in &demo_todo {
                     match id {
                         Some(id) => d.auth.update_role_template(*id, name, map).map(drop)?,
                         None => d.auth.create_role_template(name, map).map(drop)?,
@@ -506,9 +515,12 @@ impl UsersScreen {
             },
             move |s| async move {
                 let team = s.team();
-                for (id, name, map) in &todo {
+                for (id, stamp, name, map) in &todo {
                     match id {
-                        Some(id) => team.update_template(*id, name, map).await.map(drop)?,
+                        Some(id) => team
+                            .update_template(*id, *stamp, name, map)
+                            .await
+                            .map(drop)?,
                         None => team.create_template(name, None, map).await.map(drop)?,
                     }
                 }
@@ -679,6 +691,7 @@ impl UsersScreen {
             return;
         }
         let map = wire_map(&edit.levels, edit.sensitive, self.keys());
+        let stamp = edit.id.and_then(|id| self.template_stamp(id));
         let map2 = map.clone();
         let name2 = name.clone();
         self.message = None;
@@ -696,7 +709,10 @@ impl UsersScreen {
             move |s| async move {
                 let team = s.team();
                 match edit.id {
-                    Some(id) => team.update_template(id, &name, &map).await.map(drop)?,
+                    Some(id) => team
+                        .update_template(id, stamp, &name, &map)
+                        .await
+                        .map(drop)?,
                     None => team.create_template(&name, None, &map).await.map(drop)?,
                 }
                 Ok(Wrote::RoleSaved)
@@ -715,12 +731,23 @@ impl UsersScreen {
         })
     }
 
+    /// The stamp a role template was listed at (sent with its next save or
+    /// delete, U-291; LAN mode requires it, U-292).
+    fn template_stamp(&self, id: Uuid) -> Option<cl_api::RecordStamp> {
+        self.data()
+            .templates
+            .iter()
+            .find(|t| t.id == id)
+            .and_then(|t| t.stamp)
+    }
+
     fn delete_role(&mut self, id: Uuid) {
         if self.holders(id) > 0 {
             // Deleting it would leave its holders with no rights at all.
             self.message = Some(("roles.msg.in_use", false));
             return;
         }
+        let stamp = self.template_stamp(id);
         self.message = None;
         self.write = Some(engine::write(
             &self.link,
@@ -733,7 +760,7 @@ impl UsersScreen {
             },
             move |s| async move {
                 s.team()
-                    .delete_template(id)
+                    .delete_template(id, stamp)
                     .await
                     .map(|()| Wrote::Done("roles.msg.deleted"))
             },

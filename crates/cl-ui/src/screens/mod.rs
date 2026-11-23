@@ -90,6 +90,9 @@ pub mod users;
 // P32: Send to My Accountant and the IIF export.
 pub mod iif_export;
 pub mod send_to_accountant;
+// P33: the office network.
+pub mod conflict_dialog;
+pub mod lan_setup;
 
 /// Every P14 screen's `make`, in menu order (the shell tries each).
 pub(crate) const P14_SCREENS: [crate::shell::MakeScreen; 7] = [
@@ -173,6 +176,9 @@ pub(crate) const P31_SCREENS: [crate::shell::MakeScreen; 3] = [
 /// P32: Send to My Accountant and Export IIF File.
 pub(crate) const P32_SCREENS: [crate::shell::MakeScreen; 2] =
     [send_to_accountant::make, iif_export::make];
+
+/// P33: Office Network (Multi-User).
+pub(crate) const P33_SCREENS: [crate::shell::MakeScreen; 1] = [lan_setup::make];
 
 pub(crate) const A04_SCREENS: [crate::shell::MakeScreen; 1] = [doc_review::make];
 

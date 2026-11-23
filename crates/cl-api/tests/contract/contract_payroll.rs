@@ -1125,8 +1125,13 @@ pub fn restricted_viewer_sees_no_payroll(h: &Harness) {
     );
 
     let bk = crate::contract_sensitive::as_restricted_bookkeeper(h);
-    h.run(owner.accounts().set_sensitive(a.wages, true, key()))
-        .expect("mark");
+    h.run(owner.accounts().set_sensitive(
+        a.wages,
+        &cl_api::RecordVersion::Fingerprint([0; 32]),
+        true,
+        key(),
+    ))
+    .expect("mark");
     let _unmark = crate::contract_sensitive::Unmark { h, id: a.wages };
     for (m, route) in [
         (Method::Get, "/api/v1/payroll-import/sessions".to_string()),

@@ -26,6 +26,8 @@ use crate::company::{CompanyEvent, Task};
 pub(crate) struct Plan {
     /// The kept draft (a failed post or a mismatch), or `None` for a new one.
     pub draft: Option<DailyEntryId>,
+    /// The draft's stamp as last read or saved (U-291).
+    pub draft_stamp: Option<cl_api::RecordStamp>,
     pub body: DailyEntryDraft,
     /// The form's exact over/short (debits − credits).
     pub expected: Money,
@@ -42,10 +44,14 @@ pub(crate) enum Outcome {
     Posted(DailyEntry, Option<Money>),
     /// The engine's preview disagreed with the form (the layout changed
     /// elsewhere) or a line is unmapped: nothing posted; the draft is kept.
-    Mismatch { draft: DailyEntryId },
+    Mismatch {
+        draft: DailyEntryId,
+        stamp: Option<cl_api::RecordStamp>,
+    },
     /// The draft is saved but the post failed: kept for "Try again".
     NotPosted {
         draft: DailyEntryId,
+        stamp: Option<cl_api::RecordStamp>,
         error: ApiError,
     },
 }
@@ -61,7 +67,10 @@ pub(crate) struct SaveIdentity {
 /// The save, over the engine or the books.
 pub(crate) async fn flow<A: DailyApi>(api: &A, plan: Plan) -> Result<Outcome, ApiError> {
     let entry = match plan.draft {
-        Some(id) => match api.update_draft(id, &plan.body, plan.key).await {
+        Some(id) => match api
+            .update_draft(id, plan.draft_stamp, &plan.body, plan.key)
+            .await
+        {
             Ok(e) => e,
             // Posted elsewhere meanwhile: read it again; done.
             Err(ApiError::Validation(v)) => {
@@ -91,7 +100,14 @@ pub(crate) async fn flow<A: DailyApi>(api: &A, plan: Plan) -> Result<Outcome, Ap
                     .find(|d| !plan.known.contains(&d.id));
                 match found {
                     Some(d) => {
-                        api.update_draft(d.id, &plan.body, IdempotencyKey::new())
+                        // The row's own stamp (engine #98); an older
+                        // engine's rows carry none, so the draft is read
+                        // for it (U-291, Q-P33at).
+                        let at = match d.stamp {
+                            Some(s) => Some(s),
+                            None => api.entry(d.id).await?.stamp,
+                        };
+                        api.update_draft(d.id, at, &plan.body, IdempotencyKey::new())
                             .await?
                     }
                     None => return Err(lost),
@@ -105,12 +121,16 @@ pub(crate) async fn flow<A: DailyApi>(api: &A, plan: Plan) -> Result<Outcome, Ap
         Err(error) => {
             return Ok(Outcome::NotPosted {
                 draft: entry.id,
+                stamp: entry.stamp,
                 error,
             });
         }
     };
     if preview.over_short != plan.expected || !preview.unmapped.is_empty() {
-        return Ok(Outcome::Mismatch { draft: entry.id });
+        return Ok(Outcome::Mismatch {
+            draft: entry.id,
+            stamp: entry.stamp,
+        });
     }
     match api.post(entry.id, plan.password).await {
         Ok(posted) => Ok(Outcome::Posted(
@@ -122,6 +142,7 @@ pub(crate) async fn flow<A: DailyApi>(api: &A, plan: Plan) -> Result<Outcome, Ap
         )),
         Err(error) => Ok(Outcome::NotPosted {
             draft: entry.id,
+            stamp: entry.stamp,
             error,
         }),
     }
@@ -252,8 +273,10 @@ impl DailySalesScreen {
             password: password.is_some(),
         });
         let known = self.panel.drafts.iter().map(|d| d.id).collect();
+        let draft_stamp = self.saved.as_ref().and_then(|s| s.stamp);
         let plan = super::save::Plan {
             draft,
+            draft_stamp,
             body,
             expected: checked.expected_over_short,
             password,
@@ -294,9 +317,15 @@ impl DailySalesScreen {
                     self.posted(&e);
                     self.save.tax_differs = differs;
                 }
-                Ok(Reply::Outcome(Outcome::Mismatch { draft })) => self.mismatch(draft),
-                Ok(Reply::Outcome(Outcome::NotPosted { draft, error })) => {
-                    self.keep_draft(draft);
+                Ok(Reply::Outcome(Outcome::Mismatch { draft, stamp })) => {
+                    self.mismatch(draft, stamp);
+                }
+                Ok(Reply::Outcome(Outcome::NotPosted {
+                    draft,
+                    stamp,
+                    error,
+                })) => {
+                    self.keep_draft(draft, stamp);
                     self.save.last_action = Some("not_posted");
                     self.save_failed(error);
                     if self.save.error.is_some() {
@@ -353,20 +382,21 @@ impl DailySalesScreen {
     }
 
     /// The draft the engine now has for this day (kept for the next save).
-    fn keep_draft(&mut self, draft: DailyEntryId) {
+    fn keep_draft(&mut self, draft: DailyEntryId, stamp: Option<cl_api::RecordStamp>) {
         let date = self.header.current().date.unwrap_or(self.today);
         self.saved = Some(Saved {
             id: draft,
             status: EntryStatus::Draft,
             transaction: None,
             date,
+            stamp,
         });
         self.load_panel();
     }
 
     /// The preview disagreed: nothing posted; the layout is read again.
-    fn mismatch(&mut self, draft: DailyEntryId) {
-        self.keep_draft(draft);
+    fn mismatch(&mut self, draft: DailyEntryId, stamp: Option<cl_api::RecordStamp>) {
+        self.keep_draft(draft, stamp);
         self.after_save_nav = None;
         self.save.intent = None;
         self.save.last_action = Some("mismatch");
@@ -427,6 +457,7 @@ impl DailySalesScreen {
             status: e.status.clone(),
             transaction: e.transaction,
             date: e.date,
+            stamp: e.stamp,
         });
         self.load_panel();
         self.nav = super::DayNav::default();

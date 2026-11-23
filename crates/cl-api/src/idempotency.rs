@@ -190,17 +190,38 @@ pub(crate) struct AttemptCreds {
 }
 
 impl AttemptCreds {
-    /// Our own clock says the access token had expired (same machine as the
-    /// engine; P33 revisits for LAN).
+    /// The engine's clock (ours plus the LAN offset, Q-P33o) says the
+    /// access token had expired.
     pub(crate) fn expired_now(&self) -> bool {
         self.access_exp.is_some_and(|exp| exp <= unix_now())
     }
 }
 
-pub(crate) fn unix_now() -> u64 {
-    SystemTime::now()
+/// The engine clock minus this computer's, in ms: zero for the local
+/// engine, measured by the LAN heartbeat on a workstation (Q-P33o). Set on
+/// every ready endpoint; one app talks to one engine at a time.
+static CLOCK_OFFSET_MS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// Records the current endpoint's clock offset.
+pub(crate) fn set_clock_offset_ms(ms: i64) {
+    CLOCK_OFFSET_MS.store(ms, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Now on the engine's clock, in ms since the Unix epoch.
+pub(crate) fn engine_now_ms() -> i64 {
+    now_with_offset_ms(CLOCK_OFFSET_MS.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+fn now_with_offset_ms(offset: i64) -> i64 {
+    let local = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_secs())
+        .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX));
+    local.saturating_add(offset)
+}
+
+/// Now on the engine's clock, in seconds (JWT `exp` comparisons).
+pub(crate) fn unix_now() -> u64 {
+    u64::try_from(engine_now_ms() / 1000).unwrap_or(0)
 }
 
 /// Supplies credentials per attempt and handles the session refresh.
@@ -741,11 +762,16 @@ impl Executor {
             TransportError::BadHeader => ApiError::Decode {
                 what: "request header",
             },
+            TransportError::WriteHeld => ApiError::Lan(crate::LanRefusal::NotSent),
         };
         match e {
             TransportError::NotReady { .. }
             | TransportError::TooLarge
             | TransportError::BadHeader => Step::Done(Err(give_up(e))),
+            // P33 QA-6: the LAN link is down; this attempt sent nothing and
+            // the save is never held for later. An earlier attempt that may
+            // have committed makes it unknown (same key), as ever.
+            TransportError::WriteHeld => Step::Done(Err(keyed_give_up(ctx, r, give_up(e)))),
             // Nothing reached the engine: safe to retry for every class but
             // `Never` (rate-limited and rotating routes stay single-shot).
             TransportError::NotSent { generation } => {
@@ -857,6 +883,28 @@ impl Executor {
         }
     }
 
+    /// LAN (P33, Q-P33al): a save whose link dropped after it was sent is
+    /// never sent again: reconciled by reading (pre-handler-only routes) or
+    /// reported as an unknown outcome.
+    async fn on_link_lost(
+        &self,
+        ctx: &Ctx<'_>,
+        class: RetryClass,
+        generation: u64,
+        r: &mut Retries,
+    ) -> Step {
+        if class == RetryClass::PreHandlerOnly {
+            self.ambiguous(ctx, generation, AmbiguityCause::ServerError(502), r)
+                .await
+        } else {
+            Step::Done(Err(ApiError::OutcomeUnknown {
+                request_id: ctx.call.request_id,
+                idempotency_key: ctx.call.idempotency_key.clone(),
+                keyed: class == RetryClass::KeyedOnce,
+            }))
+        }
+    }
+
     async fn on_final(
         &self,
         ctx: &Ctx<'_>,
@@ -884,6 +932,31 @@ impl Executor {
                 } else {
                     Step::Done(Err(keyed_give_up(ctx, r, e)))
                 }
+            }
+            // LAN (P33): a read that met the host restarting, or a link that
+            // dropped before anything was sent, backs off like a 503. Saves
+            // never do (review S4): those refusals are final for mutations.
+            (
+                RetryClass::Idempotent,
+                ApiError::Lan(
+                    crate::LanRefusal::HostEngineDown
+                    | crate::LanRefusal::NotSent
+                    | crate::LanRefusal::LinkLost,
+                ),
+            ) => {
+                if self.backoff(r, ctx.deadline).await {
+                    Step::Again
+                } else {
+                    Step::Done(Err(e))
+                }
+            }
+            // LAN (P33, Q-P33al): the save left this computer and the link
+            // dropped. It may be in the books, so it is never sent again
+            // here: a keyed save is "unknown, safe to save again with the
+            // same key" (the form replays that key when the owner says so);
+            // an unkeyed one is reconciled by reading, like a 5xx.
+            (class, ApiError::Lan(crate::LanRefusal::LinkLost)) => {
+                self.on_link_lost(ctx, class, generation, r).await
             }
             (
                 RetryClass::Idempotent,
@@ -1191,6 +1264,7 @@ pub(crate) mod tests {
             port,
             token: Secret::new(token),
             generation,
+            clock_offset_ms: 0,
         })
     }
 
@@ -2745,6 +2819,105 @@ pub(crate) mod tests {
             reqs[0].headers.get("idempotency-key"),
             reqs[1].headers.get("idempotency-key")
         );
+    }
+
+    #[test]
+    fn engine_now_follows_the_lan_clock_offset() {
+        // The pure form: the shared offset is left alone (other tests read it).
+        let base = now_with_offset_ms(0);
+        let ahead = now_with_offset_ms(120_000);
+        assert!((ahead - base - 120_000).abs() < 5_000, "{base} {ahead}");
+    }
+
+    /// P33 review S4: a LAN refusal (maintenance, host engine down, not
+    /// sent) is final for a keyed save too: sent once, never retried, and
+    /// reported as "nothing was saved" rather than an unknown outcome.
+    #[tokio::test]
+    async fn lan_refusals_are_never_retried_even_for_keyed_saves() {
+        for (status, code, want) in [
+            (503, "MAINTENANCE", crate::LanRefusal::Maintenance),
+            (503, "HOST_ENGINE_DOWN", crate::LanRefusal::HostEngineDown),
+            (503, "LAN_NOT_SENT", crate::LanRefusal::NotSent),
+            (503, "LAN_UPDATE_NEEDED", crate::LanRefusal::UpdateNeeded),
+            (403, "HOST_ONLY", crate::LanRefusal::HostOnly),
+            (
+                409,
+                "MAINTENANCE_REQUIRED",
+                crate::LanRefusal::MaintenanceRequired,
+            ),
+            (428, "STALE_REQUIRED", crate::LanRefusal::StaleRequired),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(json(
+                    status,
+                    &format!(r#"{{"error":{{"message":"x","code":"{code}"}}}}"#),
+                ))
+                .mount(&server)
+                .await;
+            let ex = exec_at(server.address().port());
+            ex.set_idempotency_v1(true);
+            let e = ex
+                .run(&post_op(), post_call(), &none(), None)
+                .await
+                .expect_err("refused");
+            assert_eq!(e, ApiError::Lan(want), "{code}");
+            assert_eq!(count(&server).await, 1, "{code}: sent once");
+        }
+    }
+
+    /// Q-P33al: the link dropped after a save was sent. Sent once, never
+    /// again on its own; a keyed save says so (the form may replay the key).
+    #[tokio::test]
+    async fn a_link_lost_after_sending_is_an_unknown_outcome_and_never_resent() {
+        // LAN_LINK_LOST: the workstation's hop; LAN_UPSTREAM_FAILED: the
+        // host proxy's hop to the engine (review S9). Both the same.
+        for code in ["LAN_LINK_LOST", "LAN_UPSTREAM_FAILED"] {
+            let server = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(json(
+                    502,
+                    &format!(r#"{{"error":{{"message":"x","code":"{code}"}}}}"#),
+                ))
+                .mount(&server)
+                .await;
+            let ex = exec_at(server.address().port());
+            ex.set_idempotency_v1(true);
+            let e = ex
+                .run(&post_op(), post_call(), &none(), None)
+                .await
+                .expect_err("unknown");
+            assert!(
+                matches!(e, ApiError::OutcomeUnknown { keyed: true, .. }),
+                "{code}: {e:?}"
+            );
+            assert_eq!(count(&server).await, 1, "{code}: sent once");
+        }
+    }
+    /// A read that meets a LAN refusal before any handler ran backs off and
+    /// tries again (the heartbeat may not have noticed the host yet).
+    #[tokio::test]
+    async fn lan_not_sent_and_host_restarting_reads_are_retried() {
+        for code in ["LAN_NOT_SENT", "HOST_ENGINE_DOWN"] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .respond_with(json(
+                    503,
+                    &format!(r#"{{"error":{{"message":"x","code":"{code}"}}}}"#),
+                ))
+                .up_to_n_times(1)
+                .mount(&server)
+                .await;
+            Mock::given(method("GET"))
+                .respond_with(json(200, "{}"))
+                .mount(&server)
+                .await;
+            let ex = exec_at(server.address().port());
+            ex.run(&get_op(), get_call(), &none(), None)
+                .await
+                .unwrap_or_else(|e| panic!("{code}: {e:?}"));
+            assert_eq!(count(&server).await, 2, "{code}");
+        }
     }
 
     #[tokio::test]

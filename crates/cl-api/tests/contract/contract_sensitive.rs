@@ -108,11 +108,21 @@ pub fn payroll_hidden_from_bookkeeper(h: &Harness) {
     let bk = as_restricted_bookkeeper(h);
     // Only the Admin marks it.
     let refused = h
-        .run(bk.accounts().set_sensitive(wages.id, true, key()))
+        .run(bk.accounts().set_sensitive(
+            wages.id,
+            &cl_api::RecordVersion::Fingerprint([0; 32]),
+            true,
+            key(),
+        ))
         .expect_err("a Bookkeeper can't mark");
     assert!(matches!(refused, ApiError::Forbidden { .. }), "{refused:?}");
     let marked = h
-        .run(owner.accounts().set_sensitive(wages.id, true, key()))
+        .run(owner.accounts().set_sensitive(
+            wages.id,
+            &cl_api::RecordVersion::Fingerprint([0; 32]),
+            true,
+            key(),
+        ))
         .expect("owner marks");
     assert!(marked.is_sensitive);
     // Unmarked even when an assert below fails: while anything is marked,
@@ -243,8 +253,13 @@ pub fn doors_match_the_engine(h: &Harness) {
         ))
         .expect("wages")
         .record;
-    h.run(owner.accounts().set_sensitive(wages.id, true, key()))
-        .expect("owner marks");
+    h.run(owner.accounts().set_sensitive(
+        wages.id,
+        &cl_api::RecordVersion::Fingerprint([0; 32]),
+        true,
+        key(),
+    ))
+    .expect("owner marks");
     let _unmark = Unmark { h, id: wages.id };
     // Nothing hidden from the owner; nothing marked before: nothing refused.
     assert_eq!(none, Some(SensitiveDoors::none()));
@@ -336,8 +351,13 @@ pub fn builtin_bookkeeper_sees_sensitive_accounts(h: &Harness) {
         ))
         .expect("wages")
         .record;
-    h.run(owner.accounts().set_sensitive(wages.id, true, key()))
-        .expect("owner marks");
+    h.run(owner.accounts().set_sensitive(
+        wages.id,
+        &cl_api::RecordVersion::Fingerprint([0; 32]),
+        true,
+        key(),
+    ))
+    .expect("owner marks");
     let _unmark = Unmark { h, id: wages.id };
     let (user, bk) = h.bookkeeper();
     let user: cl_core::ids::UserId = user.parse().expect("user id");
@@ -382,9 +402,12 @@ pub(crate) struct Unmark<'a> {
 
 impl Drop for Unmark<'_> {
     fn drop(&mut self) {
-        let r = self
-            .h
-            .run(self.h.s1.accounts().set_sensitive(self.id, false, key()));
+        let r = self.h.run(self.h.s1.accounts().set_sensitive(
+            self.id,
+            &cl_api::RecordVersion::Fingerprint([0; 32]),
+            false,
+            key(),
+        ));
         if let Ok(a) = r {
             assert!(!a.is_sensitive || std::thread::panicking());
         }

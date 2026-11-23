@@ -191,6 +191,11 @@ impl DailySalesScreen {
     /// Saves the layout: `as_new` makes a new layout (ids dropped),
     /// otherwise the layout in use is updated.
     pub(crate) fn save_setup(&mut self, as_new: bool) {
+        let layout_stamp = self
+            .setup
+            .as_ref()
+            .and_then(|s| s.template)
+            .and_then(|id| self.template_stamp(id));
         let Some(s) = self.setup.as_mut() else { return };
         s.error = None;
         s.problems = s.layout.problems();
@@ -203,8 +208,10 @@ impl DailySalesScreen {
         }
         let update = !as_new && s.template.is_some();
         let renamed = s.layout.name.trim() != s.original.name.trim();
+        let id = if update { s.template } else { None };
         let call = Call::SaveLayout {
-            id: if update { s.template } else { None },
+            id,
+            stamp: id.and(layout_stamp),
             name: (!update || renamed).then(|| s.layout.name.trim().to_string()),
             lines: s.inputs(update),
         };
@@ -212,12 +219,22 @@ impl DailySalesScreen {
         self.poll_setup();
     }
 
+    /// The stamp a layout was read at (the screen's list), sent with its
+    /// next save or delete (U-291; LAN mode requires it, U-292).
+    fn template_stamp(&self, id: DailyTemplateId) -> Option<cl_api::RecordStamp> {
+        self.templates
+            .iter()
+            .find(|t| t.id == id)
+            .and_then(|t| t.stamp)
+    }
+
     /// Deletes the layout being set up (its old days keep it).
     pub(crate) fn delete_setup(&mut self) {
         let Some(id) = self.setup.as_ref().and_then(|s| s.template) else {
             return;
         };
-        self.setup_task = self.run(Call::DeleteTemplate(id), true);
+        let stamp = self.template_stamp(id);
+        self.setup_task = self.run(Call::DeleteTemplate(id, stamp), true);
         self.poll_setup();
     }
 

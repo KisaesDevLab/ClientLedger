@@ -118,6 +118,42 @@ pub(crate) fn form_of(
     (form, lines)
 }
 
+/// A saved document of kind from the demo engine.
+pub(crate) fn read_doc_demo(
+    d: &mut crate::company::demo::DemoState,
+    kind: SalesDocKind,
+    id: TransactionId,
+) -> Result<SavedDoc, ApiError> {
+    match kind {
+        SalesDocKind::Invoice => crate::company::demo::invoices::get(d, id)
+            .map(|v| SavedDoc::Invoice(v.record))
+            .ok_or(ApiError::NotFound { code: None }),
+        SalesDocKind::CreditMemo => {
+            crate::company::demo::credit_memos::get_memo(d, id).map(SavedDoc::CreditMemo)
+        }
+        SalesDocKind::SalesReceipt => {
+            crate::company::demo::credit_memos::get_receipt(d, id).map(SavedDoc::SalesReceipt)
+        }
+    }
+}
+
+/// A saved document of kind from the engine.
+pub(crate) async fn read_doc_live(
+    s: &cl_api::Session,
+    kind: SalesDocKind,
+    id: TransactionId,
+) -> Result<SavedDoc, ApiError> {
+    match kind {
+        SalesDocKind::Invoice => s
+            .invoices()
+            .get(id)
+            .await
+            .map(|v| SavedDoc::Invoice(v.record)),
+        SalesDocKind::CreditMemo => s.credit_memos().get(id).await.map(SavedDoc::CreditMemo),
+        SalesDocKind::SalesReceipt => s.sales_receipts().get(id).await.map(SavedDoc::SalesReceipt),
+    }
+}
+
 impl InvoiceScreen {
     /// Commits the dates still being typed. False when a typed date is not
     /// a date.
@@ -428,6 +464,24 @@ impl InvoiceScreen {
         if self.closing_failed(&e, Pending::Save(intent)) {
             return;
         }
+        // P33: someone else saved it first: their version, then the
+        // conflict dialog (or a silent re-save).
+        let stale = matches!(
+            e,
+            ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                ..
+            }
+        ) || invoice_refusal(&e) == Some(InvoiceRefusal::Stale);
+        if stale && self.editing.is_some() {
+            self.conflict_start(intent);
+            return;
+        }
+        // P33: deleted elsewhere: never saved again.
+        if matches!(e, ApiError::NotFound { .. }) && self.editing.is_some() {
+            self.notice = Some(crate::forms::conflict::GONE);
+            return;
+        }
         // U-145, U-146: a save can only meet these on a client change.
         match invoice_refusal(&e) {
             Some(InvoiceRefusal::HasPayments) => {
@@ -589,6 +643,9 @@ impl InvoiceScreen {
             SavedDoc::CreditMemo(r) => super::credit::memo_form_of(r, self.grid.keys()),
             SavedDoc::SalesReceipt(r) => super::credit::receipt_form_of(r, self.grid.keys()),
         };
+        self.conflict.clear();
+        self.conflict_job = None;
+        self.conflict_resave = None;
         self.header.load(form);
         self.grid.load(lines);
         self.editing = Some(Editing::of(v));
@@ -683,7 +740,13 @@ impl InvoiceScreen {
                 },
                 move |s| async move {
                     s.transactions()
-                        .void(e.id, &reason, &options(pw), key)
+                        .void(
+                            e.id,
+                            expected.and_then(cl_api::RecordStamp::of_timestamp),
+                            &reason,
+                            &options(pw),
+                            key,
+                        )
                         .await?;
                     s.credit_memos().get(e.id).await.map(SavedDoc::CreditMemo)
                 },
@@ -699,7 +762,13 @@ impl InvoiceScreen {
                 },
                 move |s| async move {
                     s.transactions()
-                        .void(e.id, &reason, &options(pw), key)
+                        .void(
+                            e.id,
+                            expected.and_then(cl_api::RecordStamp::of_timestamp),
+                            &reason,
+                            &options(pw),
+                            key,
+                        )
                         .await?;
                     s.sales_receipts()
                         .get(e.id)
@@ -818,33 +887,8 @@ impl InvoiceScreen {
         self.load_job = Some(engine::read(
             &self.link,
             self.group.as_ref(),
-            move |d| match kind {
-                SalesDocKind::Invoice => crate::company::demo::invoices::get(d, id)
-                    .map(|v| SavedDoc::Invoice(v.record))
-                    .ok_or(ApiError::NotFound { code: None }),
-                SalesDocKind::CreditMemo => {
-                    crate::company::demo::credit_memos::get_memo(d, id).map(SavedDoc::CreditMemo)
-                }
-                SalesDocKind::SalesReceipt => {
-                    crate::company::demo::credit_memos::get_receipt(d, id)
-                        .map(SavedDoc::SalesReceipt)
-                }
-            },
-            move |s| async move {
-                match kind {
-                    SalesDocKind::Invoice => s
-                        .invoices()
-                        .get(id)
-                        .await
-                        .map(|v| SavedDoc::Invoice(v.record)),
-                    SalesDocKind::CreditMemo => {
-                        s.credit_memos().get(id).await.map(SavedDoc::CreditMemo)
-                    }
-                    SalesDocKind::SalesReceipt => {
-                        s.sales_receipts().get(id).await.map(SavedDoc::SalesReceipt)
-                    }
-                }
-            },
+            move |d| read_doc_demo(d, kind, id),
+            move |s| async move { read_doc_live(&s, kind, id).await },
         ));
         if self.link.is_demo() {
             self.poll();
@@ -933,6 +977,13 @@ impl InvoiceScreen {
                 true
             }
             // Q-PR4d: Esc cancels an open Quick Add prompt first.
+            // P33: Esc in the conflict dialog is Back.
+            "form.revert" if self.conflict.is_open() => {
+                if let Some((open, choice)) = self.conflict.take_back() {
+                    self.run_choice(open, choice);
+                }
+                true
+            }
             "form.revert" => self.quick_add.cancel() || self.revert_field(),
             crate::widgets::quick_add::DEV_RESET => {
                 crate::widgets::quick_add::demo_reset(&self.link)

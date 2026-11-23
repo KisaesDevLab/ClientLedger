@@ -385,6 +385,11 @@ impl EnterBillScreen {
             match r {
                 Ok(a) => {
                     self.attach.path.clear();
+                    // The file moved the record's stamp: its next save goes
+                    // out on the new one (U-291 S2).
+                    if let Some(e) = self.editing.as_mut() {
+                        e.record.version.adopt_stamp(a.stamp_for(&e.id.to_string()));
+                    }
                     if self.editing.is_none() {
                         let file = AttachmentRef {
                             id: a.id.to_string(),

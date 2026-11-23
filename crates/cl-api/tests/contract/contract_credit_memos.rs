@@ -429,6 +429,7 @@ pub fn credit_memo_keep_then_apply_later(h: &Harness) {
     // Void the memo: both invoices reopen, the client owes 750.00 again.
     h.run(s.transactions().void(
         rec.id,
+        None,
         "contract: entered in error",
         &PostingOptions::default(),
         key(),
@@ -599,6 +600,7 @@ pub fn credit_memo_closed_period_password(h: &Harness) {
     let e = h
         .run(s.transactions().void(
             open.id,
+            None,
             "contract: closed",
             &PostingOptions::default(),
             key(),

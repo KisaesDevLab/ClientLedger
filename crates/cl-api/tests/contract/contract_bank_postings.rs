@@ -211,15 +211,20 @@ pub fn each_kind_round_trip_update_and_void(h: &Harness) {
             ),
             "{e:?}"
         );
+        // Before `stale-all-v1` the client's pre-read refuses it unsent;
+        // with it the engine compares the stamp under the row lock (one
+        // PUT, 409, nothing changed).
+        let engine_checks = h.caps.has(cl_api::Capabilities::STALE_ALL);
         assert_eq!(
             h.observer.sent(Method::Put, "/api/v1/transactions/{id}"),
-            puts,
-            "a stale update is never sent"
+            puts + u64::from(engine_checks),
+            "a stale update is refused (unsent before stale-all-v1)"
         );
 
         let voided = h
             .run(s.transactions().void(
                 made.record.id,
+                None,
                 "entered by mistake",
                 &PostingOptions::default(),
                 key(),

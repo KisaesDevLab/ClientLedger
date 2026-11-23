@@ -91,7 +91,10 @@ pub fn not_found_and_deactivate_with_balance(h: &Harness) {
         ),
     );
     let e = h
-        .run(s.accounts().deactivate(cash.id, key()))
+        .run(
+            s.accounts()
+                .deactivate(cash.id, &cl_api::RecordVersion::Fingerprint([0; 32]), key()),
+        )
         .expect_err("non-zero balance");
     assert!(matches!(e, ApiError::Validation(_)), "{e:?}");
 }
@@ -143,7 +146,12 @@ pub fn tag_conflicts_in_use_and_duplicate(h: &Harness) {
             .create_journal_entry(&entry, &PostingOptions::default(), key()),
     )
     .expect("tagged entry");
-    let e = h.run(s.tags().delete(tag.id, key())).expect_err("in use");
+    let e = h
+        .run(
+            s.tags()
+                .delete(tag.id, &cl_api::RecordVersion::Fingerprint([0; 32]), key()),
+        )
+        .expect_err("in use");
     assert!(
         matches!(
             e,

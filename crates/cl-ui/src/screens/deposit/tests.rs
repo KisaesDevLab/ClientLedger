@@ -788,3 +788,106 @@ fn tag_options_on_deposits() {
     assert!(s.start_save(SaveIntent::Save, None), "{}", s.state_json());
     assert_eq!(log.lock().expect("log").saved.len(), 1);
 }
+
+// --- P33: someone else saved the deposit first ------------------------------
+
+use crate::screens::conflict_dialog::ConflictChoice;
+
+/// A plain demo deposit (300.00 to 4000), saved, then open here and in
+/// `other`.
+fn two_windows() -> (
+    DepositScreen,
+    DepositScreen,
+    TransactionId,
+    Arc<CompanyLink>,
+    tempfile::TempDir,
+) {
+    let dir = tempfile::tempdir().expect("tmp");
+    let link = Arc::new(CompanyLink::demo(dir.path()));
+    let mut s = DepositScreen::new(Arc::clone(&link), None, today());
+    set_lines(&mut s, &[(4000, "300.00")]);
+    assert!(
+        s.start_save(SaveIntent::SaveAndNew, None),
+        "{:?}",
+        s.save.error
+    );
+    s.navigate(true);
+    let id = s.editing.as_ref().map(|e| e.id).expect("saved");
+    let mut other = DepositScreen::new(Arc::clone(&link), None, today());
+    assert!(other.open_record(id));
+    assert_eq!(other.state_json()["read_only"], false);
+    (s, other, id, link, dir)
+}
+
+fn stored(link: &CompanyLink, id: TransactionId) -> cl_api::DepositRecord {
+    let got = DemoDeposits.get(link, id).expect("get");
+    cl_api::DepositRecord::from_transaction(got.record, account(1010)).expect("record")
+}
+
+#[test]
+fn p33_keep_mine_takes_their_lines_whole_and_keeps_my_memo() {
+    let (mut s, mut other, id, link, _dir) = two_windows();
+    set_lines(&mut other, &[(4000, "250.00"), (4000, "75.00")]);
+    assert!(
+        other.start_save(SaveIntent::Save, None),
+        "{:?}",
+        other.save.error
+    );
+    s.header.edit_step(|h| h.memo = "mine".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let st = s.state_json();
+    assert_eq!(st["save"]["conflict"]["lines_differ"], true, "{st}");
+    let open = s.conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(merge.undone.is_empty(), "{:?}", merge.undone);
+    s.run_choice(open, ConflictChoice::KeepMine(merge));
+    assert_eq!(s.state_json()["save"]["error"], false);
+    let r = stored(&link, id);
+    assert_eq!(r.txn.memo.as_deref(), Some("mine"));
+    assert_eq!(
+        r.total,
+        money("325.00"),
+        "the engine's total of their lines"
+    );
+}
+
+#[test]
+fn p33_use_theirs_shows_their_deposit() {
+    let (mut s, mut other, _id, _link, _dir) = two_windows();
+    other.header.edit_step(|h| h.memo = "theirs".into());
+    assert!(other.start_save(SaveIntent::Save, None));
+    s.header.edit_step(|h| h.memo = "mine".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert!(
+        s.form_command(cl_model::CommandId::new("form.revert")),
+        "Esc is Back"
+    );
+    assert_eq!(s.header.current().memo, "mine");
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.open.take().expect("dialog again");
+    s.run_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(s.header.current().memo, "theirs");
+    assert!(!s.is_dirty());
+}
+
+#[test]
+fn p33_a_new_stamp_with_nothing_editable_changed_saves_without_asking() {
+    let (mut s, _other, id, link, _dir) = two_windows();
+    if let Some(e) = s.editing.as_mut() {
+        e.version = RecordVersion::Fingerprint([0; 32]);
+    }
+    s.header.edit_step(|h| h.memo = "mine".into());
+    let before = s.save.count;
+    s.start_save(SaveIntent::Save, None);
+    assert!(!s.conflict.is_open());
+    assert_eq!(s.save.count, before + 1);
+    assert_eq!(stored(&link, id).txn.memo.as_deref(), Some("mine"));
+}
+
+#[test]
+fn p33_a_deposit_deleted_elsewhere_is_never_saved_again() {
+    let (mut s, _other, _id, _link, _dir) = two_windows();
+    s.conflict_read(Err(ApiError::NotFound { code: None }), SaveIntent::Save);
+    assert_eq!(s.save.notice, Some(crate::forms::conflict::GONE));
+    assert!(!s.conflict.is_open());
+}

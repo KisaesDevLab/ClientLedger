@@ -104,7 +104,79 @@ fn an_edit_tells_the_account_it_moved_off_and_a_stale_edit_is_refused() {
     s.amount_text = "42.00".into();
     assert!(s.amount_left());
     assert!(!s.start_save(SaveIntent::Save, None));
+    // P33: both changed the amount: the conflict dialog asks; Back keeps
+    // mine and says it changed elsewhere.
+    assert_eq!(s.state_json()["save"]["conflict"]["fields"], 1);
+    let open = s.conflict.take().expect("dialog");
+    s.run_choice(open, crate::screens::conflict_dialog::ConflictChoice::Back);
     assert_eq!(s.state_json()["save"]["stale"], true);
+    assert_eq!(s.form.current().amount, Some(money("42.00")));
+}
+
+/// P33: a saved transfer open here and in `other`.
+fn two_windows() -> (
+    TransferScreen,
+    TransferScreen,
+    TransactionId,
+    Arc<CompanyLink>,
+    tempfile::TempDir,
+) {
+    let (mut s, link, dir) = screen();
+    fill(&mut s, 1010, 2050, "40.00");
+    assert!(s.start_save(SaveIntent::Save, None), "{:?}", s.error);
+    let id = s.last_saved.expect("saved");
+    s.clear();
+    assert!(s.open_record(id));
+    let mut other = TransferScreen::new(Arc::clone(&link), None, s.today);
+    assert!(other.open_record(id));
+    (s, other, id, link, dir)
+}
+
+fn stored_amount_and_memo(link: &CompanyLink, id: TransactionId) -> (Money, Option<String>) {
+    let mut local = engine::DemoTransfers;
+    let v = local.get(link, id).expect("stored");
+    let (form, exact) = form_of(&v.record);
+    assert!(exact, "still one amount on both sides");
+    (form.amount.expect("amount"), v.record.memo)
+}
+
+#[test]
+fn p33_keep_mine_takes_their_memo_and_my_amount() {
+    let (mut s, mut other, id, link, _dir) = two_windows();
+    other.form.edit_step(|f| f.memo = "theirs".into());
+    assert!(other.start_save(SaveIntent::Save, None));
+    s.amount_text = "45.00".into();
+    assert!(s.amount_left());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    assert_eq!(s.state_json()["save"]["conflict"]["fields"], 2);
+    assert_eq!(s.state_json()["save"]["conflict"]["undoes"], 0);
+    let open = s.conflict.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    s.run_choice(
+        open,
+        crate::screens::conflict_dialog::ConflictChoice::KeepMine(merge),
+    );
+    assert_eq!(s.state_json()["save"]["error"], false);
+    assert_eq!(
+        stored_amount_and_memo(&link, id),
+        (money("45.00"), Some("theirs".to_string()))
+    );
+}
+
+#[test]
+fn p33_use_theirs_shows_their_transfer() {
+    let (mut s, mut other, _id, _link, _dir) = two_windows();
+    other.form.edit_step(|f| f.memo = "theirs".into());
+    assert!(other.start_save(SaveIntent::Save, None));
+    s.form.edit_step(|f| f.memo = "mine".into());
+    assert!(!s.start_save(SaveIntent::Save, None));
+    let open = s.conflict.take().expect("dialog");
+    s.run_choice(
+        open,
+        crate::screens::conflict_dialog::ConflictChoice::UseTheirs,
+    );
+    assert_eq!(s.form.current().memo, "theirs");
+    assert!(!s.is_dirty());
 }
 
 #[test]

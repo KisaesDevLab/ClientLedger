@@ -1,0 +1,92 @@
+# The host computer stops answering (P33 D4 step 12, Q-P33n) against
+# `clientledger --demo`. The demo office network is synthetic: no socket.
+# A journal entry with an unsaved memo is open on this workstation when the
+# host goes quiet (dev.lan_host_down): the overlay covers the app, says how
+# many windows keep unsaved changes and that nothing is sent on its own, and
+# the form can't be saved underneath. The host answers again
+# (dev.lan_host_up): the overlay goes, the "Connected to the host again"
+# banner counts the unsaved windows (the demo also opens with a changed
+# check, so two are counted), and the memo is still there. OK hides the
+# banner; the entry is cleared and the demo goes back to "just this
+# computer", so light and dark run the same steps.
+#
+# All data is synthetic.
+name: host_down
+description: The host stops answering with an unsaved form open; the overlay covers the app, the form is kept, and the banner counts it when the host is back.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - key: Ctrl+J
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - assert_state: {key: screen.loaded, equals: true}
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.mode, equals: new}
+
+  # --- 1. An unsaved entry on a connected workstation --------------------------
+  - click: {role: text_input, label: Memo}
+  - type: {text: "Host down scenario"}
+  - key: Tab
+  - assert_state: {key: screen.dirty, equals: true}
+  - command: dev.lan_host_up
+  - assert_state: {key: lan.state, equals: connected}
+  - assert_state: {key: lan.covered, equals: false}
+  # QA-7: one status line, the mode and the host; no engine line.
+  - assert_exists: {role: label, label: "Office network: connected to 192.168.1.20"}
+  - assert_not_exists: {role: label, label_contains: "Books engine"}
+
+  # --- 2. The host stops answering ---------------------------------------------
+  - command: dev.lan_host_down
+  - assert_state: {key: lan.state, equals: host_down}
+  - assert_state: {key: lan.covered, equals: true}
+  - assert_exists: {role: label, label: "ClientLedger is waiting for the host computer. Check that it is on and connected to the office network."}
+  - assert_exists: {role: label, label_contains: "They stay open on this computer, as you left them."}
+  - assert_exists: {role: label, label: "Nothing is sent on its own. If a save was on its way when the connection dropped, its window asks you to check it once the host answers."}
+  - assert_exists: {role: button, label: Check again}
+  - assert_exists: {role: button, label: "Office Network…"}
+  # Only the host's message in the status bar while it is down.
+  - assert_not_exists: {role: label, label_contains: "Books engine"}
+  - assert_not_exists: {role: label, label_contains: "Office network: connected"}
+  - assert_no_clipping: {}
+  - screenshot: overlay
+  # Nothing underneath is saved while the overlay is up.
+  - key: Alt+N
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_state: {key: screen.last_action, equals: clear}
+  - click: {role: button, label: Check again}
+  - assert_state: {key: lan.covered, equals: true}
+  # QA-6: Save & Close behind the overlay saves nothing and nothing waits
+  # to be sent later; the window stays as it was.
+  - key: Alt+S
+  - assert_state: {key: screen.screen, equals: journal_entry}
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_state: {key: screen.last_action, equals: clear}
+  # QA-12: the overlay fits a small window at 200%.
+  - resize: {width: 960, height: 640}
+  - set_zoom: {percent: 200}
+  # The tab strip behind the overlay scrolls by design (top band).
+  - assert_no_clipping:
+      ignore:
+        - {x: 0, y: 0, width: 480, height: 90}
+  - screenshot: overlay-small-zoom
+  - set_zoom: {percent: 100}
+  - resize: {width: 1440, height: 940}
+
+  # --- 3. The host answers again -------------------------------------------------
+  - command: dev.lan_host_up
+  - assert_state: {key: lan.state, equals: connected}
+  - assert_state: {key: lan.covered, equals: false}
+  - assert_state: {key: lan.back_note, equals: true}
+  - assert_exists: {role: label, label_contains: "Connected to the host again."}
+  - assert_state: {key: screen.dirty, equals: true}
+  - assert_state: {key: screen.mode, equals: new}
+  - assert_no_clipping: {}
+  - screenshot: back
+  - click: {role: button, label: OK}
+  - assert_state: {key: lan.back_note, equals: false}
+
+  # --- 4. Back where it began ------------------------------------------------------
+  - click: {role: button, label: Clear}
+  - assert_state: {key: screen.dirty, equals: false}
+  - command: dev.lan_demo_off
+  - assert_state: {key: lan.state, equals: null}
+  - command: file.close_window

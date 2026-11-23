@@ -657,6 +657,10 @@ pub enum ApiError {
     /// The request is too large.
     #[error("payload too large")]
     PayloadTooLarge,
+    /// LAN mode (P33): the host did not carry the request out, and nothing
+    /// was saved. Never retried, keyed saves included (review S4).
+    #[error("LAN refusal: {0:?}")]
+    Lan(LanRefusal),
     /// The engine is not running or did not answer as the engine.
     #[error("engine unavailable (permanent: {permanent})")]
     EngineUnavailable {
@@ -1095,6 +1099,7 @@ impl OwnerFacing for ApiError {
             ApiError::NoCompanyOpen => ("error.api.no_company", Some("fix.api.open_company")),
             ApiError::RateLimited { .. } => ("error.api.busy", Some("fix.api.try_again_soon")),
             ApiError::PayloadTooLarge => ("error.api.too_large", None),
+            ApiError::Lan(r) => (r.message_key(), r.fix_key()),
             ApiError::EngineUnavailable { .. } | ApiError::Timeout => (
                 "error.api.engine_unavailable",
                 Some("fix.api.try_again_soon"),
@@ -1334,6 +1339,12 @@ fn conflict(body: &EngineErrorBody) -> ApiError {
         body.pointer("/error/details/currentVersion")
             .and_then(Value::as_u64)
             .map(RecordVersion::Server)
+            // U-291: `details.updatedAt`, the record's stamp now.
+            .or_else(|| {
+                body.pointer("/error/details")
+                    .and_then(crate::resources::versioning::RecordStamp::of_record)
+                    .map(RecordVersion::Stamp)
+            })
     } else {
         None
     };
@@ -1531,6 +1542,23 @@ fn map_status(status: u16, body: &[u8], retry_after: Option<Duration>, route: Ro
     let has = |c: &str| parsed.as_ref().is_some_and(|b| b.is(c));
     let fin = Mapped::Final;
     match status {
+        // LAN mode (P33): refusals before any handler ran.
+        503 if has("MAINTENANCE") => fin(ApiError::Lan(LanRefusal::Maintenance)),
+        503 if has("HOST_ENGINE_DOWN") => fin(ApiError::Lan(LanRefusal::HostEngineDown)),
+        503 if has("LAN_NOT_SENT") => fin(ApiError::Lan(LanRefusal::NotSent)),
+        503 if has("LAN_UPDATE_NEEDED") => fin(ApiError::Lan(LanRefusal::UpdateNeeded)),
+        403 if has("HOST_ONLY") => fin(ApiError::Lan(LanRefusal::HostOnly)),
+        409 if has("MAINTENANCE_REQUIRED") => fin(ApiError::Lan(LanRefusal::MaintenanceRequired)),
+        409 if has("MAINTENANCE_BUSY") => fin(ApiError::Lan(LanRefusal::MaintenanceBusy)),
+        428 if has("STALE_REQUIRED") => fin(ApiError::Lan(LanRefusal::StaleRequired)),
+        403 if has("LAN_NOT_PAIRED") => fin(ApiError::Lan(LanRefusal::NotPaired)),
+        // Sent, then the link dropped: a save becomes an unknown outcome in
+        // the executor (Q-P33al); a read backs off. The host proxy's own
+        // "sent to the engine, then it stopped answering" is the same
+        // unknown outcome one hop further on (review S9).
+        502 if has("LAN_LINK_LOST") || has("LAN_UPSTREAM_FAILED") => {
+            fin(ApiError::Lan(LanRefusal::LinkLost))
+        }
         400 => match &parsed {
             Some(b) if b.is("VALIDATION_ERROR") => fin(ApiError::Validation(validation(b))),
             Some(b) if b.is("INVALID_JSON") => fin(ApiError::Protocol { status, code }),
@@ -2677,5 +2705,73 @@ mod tests {
             engine_refusal(404, &Value::Null),
             ApiError::NotFound { code: None }
         ));
+    }
+}
+
+/// Why the LAN host did not carry a request out (P33). In every case but
+/// [`LanRefusal::LinkLost`] nothing was saved, so the form is kept and
+/// nothing is retried automatically.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LanRefusal {
+    /// 503 `MAINTENANCE`: someone is restoring or importing on the host.
+    Maintenance,
+    /// 503 `HOST_ENGINE_DOWN`: the host's books are restarting.
+    HostEngineDown,
+    /// 503 `LAN_NOT_SENT`: the host could not be reached; nothing left this
+    /// computer.
+    NotSent,
+    /// 503 `LAN_UPDATE_NEEDED`: this computer runs another version than the
+    /// host.
+    UpdateNeeded,
+    /// 403 `HOST_ONLY`: this can only be done on the host computer.
+    HostOnly,
+    /// 409 `MAINTENANCE_REQUIRED`: the host must be in maintenance first.
+    MaintenanceRequired,
+    /// 409 `MAINTENANCE_BUSY`: maintenance could not start (saves still
+    /// running).
+    MaintenanceBusy,
+    /// 428 `STALE_REQUIRED`: a save went without its record stamp. A bug in
+    /// this app, never the owner's.
+    StaleRequired,
+    /// 403 `LAN_NOT_PAIRED`: the host no longer knows this computer.
+    NotPaired,
+    /// 502 `LAN_LINK_LOST`: the request left this computer and the link
+    /// dropped before the answer came. Only reads end here (after backing
+    /// off); a save becomes [`ApiError::OutcomeUnknown`] and is never sent
+    /// again on its own (Q-P33al).
+    LinkLost,
+}
+
+impl LanRefusal {
+    /// The i18n key of the plain message.
+    #[must_use]
+    pub fn message_key(self) -> &'static str {
+        match self {
+            LanRefusal::Maintenance => "error.lan.maintenance",
+            LanRefusal::HostEngineDown => "error.lan.host_engine_down",
+            LanRefusal::NotSent => "error.lan.not_sent",
+            LanRefusal::UpdateNeeded => "error.lan.update_needed",
+            LanRefusal::HostOnly => "error.lan.host_only",
+            LanRefusal::MaintenanceRequired => "error.lan.maintenance_required",
+            LanRefusal::MaintenanceBusy => "error.lan.maintenance_busy",
+            LanRefusal::StaleRequired => "error.lan.stale_required",
+            LanRefusal::NotPaired => "error.lan.not_paired",
+            LanRefusal::LinkLost => "error.lan.link_lost",
+        }
+    }
+
+    /// The i18n key of the suggested fix, if any.
+    #[must_use]
+    pub fn fix_key(self) -> Option<&'static str> {
+        match self {
+            LanRefusal::Maintenance | LanRefusal::HostEngineDown | LanRefusal::MaintenanceBusy => {
+                Some("fix.api.try_again_soon")
+            }
+            LanRefusal::NotSent | LanRefusal::LinkLost => Some("fix.lan.check_host"),
+            LanRefusal::UpdateNeeded => Some("fix.lan.update"),
+            LanRefusal::HostOnly | LanRefusal::MaintenanceRequired => Some("fix.lan.on_host"),
+            LanRefusal::StaleRequired => Some("fix.api.report"),
+            LanRefusal::NotPaired => Some("fix.lan.pair_again"),
+        }
     }
 }

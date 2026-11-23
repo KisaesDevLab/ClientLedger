@@ -102,6 +102,7 @@ pub fn round_trip_create_read_update_void_list(h: &Harness) {
     let voided = h
         .run(s.transactions().void(
             made.record.id,
+            None,
             "entered twice",
             &PostingOptions::default(),
             key(),
@@ -157,10 +158,13 @@ pub fn lost_reply_is_reconciled_to_exactly_one_posting(h: &Harness) {
     h.observer
         .drop_next_reply(Method::Post, "/api/v1/transactions/{id}/void");
     let voided = h
-        .run(
-            s.transactions()
-                .void(made.record.id, "lost", &PostingOptions::default(), key()),
-        )
+        .run(s.transactions().void(
+            made.record.id,
+            None,
+            "lost",
+            &PostingOptions::default(),
+            key(),
+        ))
         .expect("void reconciled");
     assert_eq!(h.observer.dropped(), 2);
     assert_eq!(voided.record.status, TxnStatus::Void);

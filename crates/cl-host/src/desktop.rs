@@ -145,6 +145,54 @@ pub(crate) fn parse_info(body: &str) -> Result<DesktopInfo, DesktopError> {
     })
 }
 
+/// `POST /api/v1/desktop/maintenance/reset` (U-293, launch token): clears
+/// a maintenance hold a file-level restore brought back with the database
+/// (and rotates the change feed's epoch), so the restored books never come
+/// up locked for everyone. Run after any file-level restore, before the
+/// LAN proxy reopens. Answers how many holds were cleared (0 or 1).
+///
+/// # Errors
+/// See [`DesktopError`]; an engine without `maintenance-v1` answers 404
+/// (`Refused`), which callers may ignore.
+pub fn maintenance_reset(port: u16, token: &Secret) -> Result<u64, DesktopError> {
+    maintenance_reset_within(port, token, TIMEOUT)
+}
+
+/// [`maintenance_reset`] with its own time limit (the supervisor's start
+/// path uses a short one).
+pub(crate) fn maintenance_reset_within(
+    port: u16,
+    token: &Secret,
+    timeout: Duration,
+) -> Result<u64, DesktopError> {
+    let r = http::request(
+        port,
+        "POST",
+        "/api/v1/desktop/maintenance/reset",
+        token,
+        Some("{}"),
+        timeout,
+    )
+    .map_err(|e| DesktopError::Unreachable(e.kind().to_string()))?;
+    if r.status != 200 && r.status != 201 {
+        return Err(DesktopError::Refused {
+            status: r.status,
+            code: error_code(&r.body),
+        });
+    }
+    parse_reset(&r.body)
+}
+
+pub(crate) fn parse_reset(body: &str) -> Result<u64, DesktopError> {
+    let v: Value = serde_json::from_str(body).map_err(|_| DesktopError::Malformed)?;
+    let v = v.get("data").unwrap_or(&v);
+    match v.get("cleared") {
+        Some(Value::Bool(b)) => Ok(u64::from(*b)),
+        Some(Value::Number(n)) => n.as_u64().ok_or(DesktopError::Malformed),
+        _ => Err(DesktopError::Malformed),
+    }
+}
+
 /// Build the JSON body for `/initialize`.
 pub(crate) fn initialize_body(
     admin: &AdminAccount,
@@ -241,6 +289,16 @@ pub(crate) fn parse_initialized(body: &str) -> Result<Initialized, DesktopError>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn maintenance_reset_answers_parse() {
+        use super::parse_reset;
+        assert_eq!(parse_reset(r#"{"cleared":true}"#).unwrap(), 1);
+        assert_eq!(parse_reset(r#"{"cleared":false}"#).unwrap(), 0);
+        assert_eq!(parse_reset(r#"{"data":{"cleared":1}}"#).unwrap(), 1);
+        assert!(parse_reset(r#"{"other":1}"#).is_err());
+        assert!(parse_reset("not json").is_err());
+    }
+
     use super::*;
 
     fn admin(pw: &str) -> AdminAccount {

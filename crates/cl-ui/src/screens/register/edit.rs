@@ -342,6 +342,7 @@ impl RegisterScreen {
 
     fn load_routed(&mut self, id: TransactionId, splits: bool, route: Route) {
         self.read_only = None;
+        self.txn_conflict.clear();
         self.entry.problems.clear();
         self.entry.error = None;
         let task = if let Some(mut demo) = self.link.demo_state() {
@@ -459,7 +460,7 @@ impl RegisterScreen {
         self.open_seed(s, want_splits);
     }
 
-    fn open_seed(&mut self, s: Seed, want_splits: bool) {
+    pub(super) fn open_seed(&mut self, s: Seed, want_splits: bool) {
         let (editing, draft, lines) = match s {
             Seed::ReadOnly(lines) => {
                 self.read_only = Some(lines);

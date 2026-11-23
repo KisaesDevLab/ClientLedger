@@ -521,6 +521,8 @@ pub const COMMANDS: &[Command] = &[
     built("company.users", "Users and Permissions", Some(Menu::Company), 1, None),
     // P29 WP2: change your own password, automatic sign-in, idle lock
     built("company.my_sign_in", "My Sign-in", Some(Menu::Company), 1, None),
+    // P33: share the books on the office network, or use another computer's.
+    built("company.lan_setup", "Office Network (Multi-User)", Some(Menu::Company), 1, None),
     // P32: the transfer file for the accountant's MyBooks (no shortcut).
     built("company.send_to_accountant", "Send to My Accountant", Some(Menu::Company), 2, None),
     built("company.audit_trail", "Audit Trail", Some(Menu::Company), 2, None),
@@ -771,6 +773,55 @@ pub const DEV_COMMANDS: &[Command] = &[
     dev_action(
         "dev.transfer_demo_waiting_documents",
         "Demo Documents Waiting for Review (developer)",
+    ),
+    // P33: the LAN scenarios (demo backend only).
+    dev_action(
+        "dev.lan_demo_host",
+        "Demo Office Network: This Computer Shares (developer)",
+    ),
+    dev_action(
+        "dev.lan_demo_workstation",
+        "Demo Office Network: Use Another Computer (developer)",
+    ),
+    dev_action(
+        "dev.lan_demo_pair_request",
+        "Demo Office Network: A Computer Asks to Join (developer)",
+    ),
+    dev_action(
+        "dev.lan_demo_code_burned",
+        "Demo Office Network: Pairing Code Used Up by Wrong Tries (developer)",
+    ),
+    dev_action(
+        "dev.lan_demo_cert_missing",
+        "Demo Office Network: Host Certificate File Missing (developer)",
+    ),
+    dev_action(
+        "dev.lan_simulate_edit",
+        "Demo Office Network: Someone Else Saves This Entry (developer)",
+    ),
+    dev_action(
+        "dev.lan_simulate_touch",
+        "Demo Office Network: Someone Else Attaches a File to This Entry (developer)",
+    ),
+    dev_action(
+        "dev.lan_host_down",
+        "Demo Office Network: Host Stops Answering (developer)",
+    ),
+    dev_action(
+        "dev.lan_host_up",
+        "Demo Office Network: Host Answers Again (developer)",
+    ),
+    dev_action(
+        "dev.lan_maintenance",
+        "Demo Office Network: Host Starts Maintenance (developer)",
+    ),
+    dev_action(
+        "dev.lan_maintenance_off",
+        "Demo Office Network: Host Ends Maintenance (developer)",
+    ),
+    dev_action(
+        "dev.lan_demo_off",
+        "Demo Office Network: Just This Computer (developer)",
     ),
     dev_action(
         "dev.iif_demo_unbalanced",
@@ -1090,6 +1141,8 @@ mod tests {
             // P32
             "company.send_to_accountant",
             "file.export_iif",
+            // P33
+            "company.lan_setup",
         ];
         for c in COMMANDS.iter().filter(|c| c.opens) {
             if built_now.contains(&c.id.as_str()) {

@@ -110,7 +110,9 @@ pub enum CompanyEvent {
 struct Live {
     client: Client,
     queue: Arc<ApiQueue>,
-    supervisor: Arc<Supervisor>,
+    /// None on an office-network workstation: the books run on the host
+    /// computer (P33).
+    supervisor: Option<Arc<Supervisor>>,
 }
 
 /// The engine as the company screens see it.
@@ -198,12 +200,50 @@ impl CompanyLink {
         secrets: Arc<dyn SecretStore>,
         backup_dir: PathBuf,
     ) -> CompanyLink {
-        CompanyLink {
-            live: Some(Live {
+        Self::with_live(
+            Live {
                 client,
                 queue: Arc::new(queue),
-                supervisor,
-            }),
+                supervisor: Some(supervisor),
+            },
+            store,
+            secrets,
+            backup_dir,
+        )
+    }
+
+    /// An office-network workstation (P33): the client talks to the
+    /// loopback forwarder, which pins and forwards to the host computer.
+    /// No local database or engine runs; sign-in, the company list and
+    /// every book come from the host.
+    #[must_use]
+    pub fn workstation(
+        client: Client,
+        queue: ApiQueue,
+        store: RecentStore,
+        secrets: Arc<dyn SecretStore>,
+        backup_dir: PathBuf,
+    ) -> CompanyLink {
+        Self::with_live(
+            Live {
+                client,
+                queue: Arc::new(queue),
+                supervisor: None,
+            },
+            store,
+            secrets,
+            backup_dir,
+        )
+    }
+
+    fn with_live(
+        live: Live,
+        store: RecentStore,
+        secrets: Arc<dyn SecretStore>,
+        backup_dir: PathBuf,
+    ) -> CompanyLink {
+        CompanyLink {
+            live: Some(live),
             store,
             secrets,
             session: Mutex::new(None),
@@ -272,7 +312,14 @@ impl CompanyLink {
     /// The supervisor, for first-run setup (None in demo).
     #[must_use]
     pub fn supervisor(&self) -> Option<&Arc<Supervisor>> {
-        self.live.as_ref().map(|l| &l.supervisor)
+        self.live.as_ref().and_then(|l| l.supervisor.as_ref())
+    }
+
+    /// True on an office-network workstation: the books are the host's
+    /// (P33). No local database or engine; host-only work is refused.
+    #[must_use]
+    pub fn is_workstation(&self) -> bool {
+        self.live.as_ref().is_some_and(|l| l.supervisor.is_none())
     }
 
     /// Refreshes table statistics after a company is created, imported or

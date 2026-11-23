@@ -629,7 +629,7 @@ impl Intake {
             s.attachments()
                 .link(attachment, to, key)
                 .await
-                .map(|()| JobDone::Done)
+                .map(|_| JobDone::Done)
         }) {
             Ok(p) => self.jobs.push(Job {
                 kind: JobKind::Rekey(entry, draft),
@@ -920,7 +920,7 @@ impl Intake {
                 Err(e) => return Err(e),
             }
             match s.attachments().delete(a, key).await {
-                Ok(()) | Err(cl_api::ApiError::NotFound { .. }) => Ok(JobDone::Done),
+                Ok(_) | Err(cl_api::ApiError::NotFound { .. }) => Ok(JobDone::Done),
                 // A live draft reads it after all: never deleted.
                 Err(cl_api::ApiError::Conflict {
                     reason: cl_api::ConflictReason::InUse,

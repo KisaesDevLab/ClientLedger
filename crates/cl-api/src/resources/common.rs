@@ -10,8 +10,8 @@ use crate::idempotency::{IdempotencyKey, Reconciler};
 use crate::resources::operations::Operation;
 use crate::resources::reconcile::{OutcomeMatcher, Probe, Search, row_fp};
 use crate::resources::versioning::{
-    EditableFields, GuardedUpdate, RecordVersion, Versioned, fingerprint_of, get_versioned, pick,
-    saved_from, update_guarded,
+    EditableFields, GuardedUpdate, RecordStamp, RecordVersion, Versioned, fingerprint_of,
+    get_versioned, pick, saved_from, stamp_delete, update_guarded,
 };
 use crate::session::Session;
 use crate::wire::{Page, PageRequest};
@@ -186,14 +186,18 @@ pub(crate) async fn update<T: DeserializeOwned + EditableFields>(
     update_guarded(s, expected, u).await
 }
 
+/// A `DELETE` of one record, carrying the stamp it was read at
+/// (`expectedUpdatedAt` in the body, U-291; LAN mode requires it, U-292).
 pub(crate) async fn delete(
     s: &Session,
     spec: &Spec,
     id: &str,
+    stamp: Option<RecordStamp>,
     key: IdempotencyKey,
     rec: Option<&dyn Reconciler>,
 ) -> Result<EngineReply, ApiError> {
     let mut call = Call::new(Method::Delete, spec.delete.route(), spec.path(id));
+    stamp_delete(s, &mut call, stamp);
     call.idempotency_key = Some(key);
     s.send(spec.delete, call, rec).await
 }
@@ -261,6 +265,7 @@ pub(crate) async fn deactivate(
     s: &Session,
     spec: &'static Spec,
     id: &str,
+    stamp: Option<RecordStamp>,
     key: IdempotencyKey,
 ) -> Result<EngineReply, ApiError> {
     // One company for the probe and the write (pinned view).
@@ -273,7 +278,7 @@ pub(crate) async fn deactivate(
         value: Value::Bool(false),
     };
     let probe = Probe::new(s, matcher, false).await;
-    delete(s, spec, id, key, Some(&probe)).await
+    delete(s, spec, id, stamp, key, Some(&probe)).await
 }
 
 /// Deletes for real with reconciliation (gone = committed).
@@ -281,6 +286,7 @@ pub(crate) async fn delete_record(
     s: &Session,
     spec: &'static Spec,
     id: &str,
+    stamp: Option<RecordStamp>,
     key: IdempotencyKey,
 ) -> Result<EngineReply, ApiError> {
     // One company for the probe and the write (pinned view).
@@ -290,5 +296,5 @@ pub(crate) async fn delete_record(
         path: spec.path(id),
     };
     let probe = Probe::new(s, matcher, false).await;
-    delete(s, spec, id, key, Some(&probe)).await
+    delete(s, spec, id, stamp, key, Some(&probe)).await
 }

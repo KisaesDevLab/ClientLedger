@@ -45,7 +45,11 @@ pub fn reactivate_and_unique_names(h: &Harness) {
         item.fields.unit_price.map(Money::to_wire).as_deref(),
         Some("45.0450")
     );
-    h.run(s.items().deactivate(item.id, key())).expect("off");
+    h.run(
+        s.items()
+            .deactivate(item.id, &cl_api::RecordVersion::Fingerprint([0; 32]), key()),
+    )
+    .expect("off");
     let off = h.run(s.items().get(item.id)).expect("get");
     assert!(!off.record.is_active);
     let inactive = ItemFilter {
@@ -86,7 +90,11 @@ pub fn reactivate_and_unique_names(h: &Harness) {
         .expect("on");
     assert!(on.record.is_active);
     assert_eq!(on.record.fields, item.fields);
-    h.run(s.items().deactivate(item.id, key())).expect("off");
+    h.run(
+        s.items()
+            .deactivate(item.id, &cl_api::RecordVersion::Fingerprint([0; 32]), key()),
+    )
+    .expect("off");
 }
 
 /// U-39b: the purchase side and the unit label are not kept yet (the sales
@@ -157,7 +165,11 @@ pub fn sales_kinds_u39a(h: &Harness) {
     let t = h.run(s.items().create(&sub, key())).expect("subtotal");
     assert_eq!(t.record.fields.item_type, cl_api::ItemType::Subtotal);
     for id in [d.record.id, t.record.id] {
-        h.run(s.items().deactivate(id, key())).expect("off");
+        h.run(
+            s.items()
+                .deactivate(id, &cl_api::RecordVersion::Fingerprint([0; 32]), key()),
+        )
+        .expect("off");
     }
 }
 
@@ -206,11 +218,15 @@ pub fn price_levels_u40(h: &Harness) {
             is_active: false,
             ..draft
         };
-        let upd = h.run(levels.update(made.id, &off)).expect("update");
+        let upd = h.run(levels.update(made.id, None, &off)).expect("update");
         assert!(!upd.is_active);
-        h.run(levels.delete(made.id)).expect("delete");
-        h.run(s.items().deactivate(item.record.id, key()))
-            .expect("off");
+        h.run(levels.delete(made.id, None)).expect("delete");
+        h.run(s.items().deactivate(
+            item.record.id,
+            &cl_api::RecordVersion::Fingerprint([0; 32]),
+            key(),
+        ))
+        .expect("off");
     } else {
         assert_eq!(raw.status, 404, "no such route today: {}", raw.body);
     }

@@ -26,7 +26,8 @@ use crate::resources::operations::{
 };
 use crate::resources::reconcile::row_fp;
 use crate::resources::versioning::{
-    EditableFields, GuardedUpdate, RecordVersion, Versioned, get_versioned, pick, update_guarded,
+    EditableFields, GuardedUpdate, RecordStamp, RecordVersion, Versioned, get_versioned, pick,
+    update_guarded,
 };
 use crate::session::{Scope, Session, decode, json_body};
 use crate::wire::Capabilities;
@@ -609,6 +610,33 @@ impl std::fmt::Debug for ClosingDateChange {
 }
 
 impl Session {
+    /// A body for a write of the company row (`PUT /company/settings`,
+    /// `/company/closing-password`, `/checks/settings`) with the company's
+    /// stamp (U-291; LAN mode requires it, U-292). These are partial
+    /// writes (the engine merges the fields sent) whose reads and answers
+    /// carry no stamp (`GET /company/settings` has no `updatedAt`), so the
+    /// stamp is read from `GET /company` just before the write (Q-P33as):
+    /// it guards against a change racing the write, not a change made since
+    /// the pane opened. Without `stale-all-v1` the body goes as it is.
+    pub(crate) async fn company_row_body(&self, body: Vec<u8>) -> Result<Vec<u8>, ApiError> {
+        Ok(match self.company_row_stamp().await? {
+            Some(stamp) => crate::resources::versioning::with_expected_stamp(&body, stamp),
+            None => body,
+        })
+    }
+
+    /// The company row's stamp for [`Session::company_row_body`]; `None`
+    /// without `stale-all-v1` (nothing read).
+    pub(crate) async fn company_row_stamp(&self) -> Result<Option<RecordStamp>, ApiError> {
+        if !crate::resources::versioning::engine_checks_stamps(self) {
+            return Ok(None);
+        }
+        let call = Call::at(Method::Get, COMPANY_GET.route());
+        let reply = self.send(&COMPANY_GET, call, None).await?;
+        let v: Value = decode(&reply, "company")?;
+        Ok(v.get("company").and_then(RecordStamp::of_record))
+    }
+
     fn require_company(&self) -> Result<(), ApiError> {
         match self.scope() {
             Scope::Company { .. } => Ok(()),
@@ -675,8 +703,8 @@ impl Session {
         {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
         }
-        let mut call =
-            Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(json_body(update)?);
+        let body = self.company_row_body(json_body(update)?).await?;
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
         call.idempotency_key = Some(key);
         let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
         settings_from(&reply)
@@ -701,6 +729,8 @@ impl Session {
             lock_date: Option<String>,
             #[serde(skip_serializing_if = "Option::is_none")]
             closing_password: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            expected_updated_at: Option<String>,
         }
         self.require_company()?;
         if !self
@@ -712,9 +742,11 @@ impl Session {
                 LocalValidation::ClosingDateWriteUnavailable,
             ));
         }
+        let stamp = self.company_row_stamp().await?;
         let body = json_body(&Body {
             lock_date: change.closing_date.map(CalendarDate::to_wire),
             closing_password: change.closing_password.as_ref().map(Secret::expose),
+            expected_updated_at: stamp.map(|s| s.text()),
         })?;
         let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
         call.idempotency_key = Some(key);
@@ -747,7 +779,8 @@ impl Session {
         let body = json_body(&serde_json::json!({
             "billDiscountAccountId": account.map(|a| a.to_string()),
         }))?;
-        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route())
+            .json_body(self.company_row_body(body).await?);
         call.idempotency_key = Some(key);
         let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
         settings_from(&reply)
@@ -777,7 +810,8 @@ impl Session {
         let body = json_body(&serde_json::json!({
             "billableMarkupAccountId": account.map(|a| a.to_string()),
         }))?;
-        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route())
+            .json_body(self.company_row_body(body).await?);
         call.idempotency_key = Some(key);
         let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
         settings_from(&reply)
@@ -800,7 +834,8 @@ impl Session {
             return Ok(None);
         }
         let body = json_body(&u.body(&self.client().capabilities())?)?;
-        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route())
+            .json_body(self.company_row_body(body).await?);
         call.idempotency_key = Some(key);
         let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
         settings_from(&reply).map(Some)
@@ -823,7 +858,8 @@ impl Session {
             return Ok(None);
         }
         let body = json_body(&u.body(&self.client().capabilities())?)?;
-        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route())
+            .json_body(self.company_row_body(body).await?);
         call.idempotency_key = Some(key);
         let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
         settings_from(&reply).map(Some)
@@ -845,7 +881,8 @@ impl Session {
             return Ok(None);
         }
         let body = json_body(&u.body(&self.client().capabilities())?)?;
-        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route())
+            .json_body(self.company_row_body(body).await?);
         call.idempotency_key = Some(key);
         let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
         settings_from(&reply).map(Some)
@@ -875,7 +912,8 @@ impl Session {
             return Err(ApiError::Local(LocalValidation::Unsupported));
         }
         let body = json_body(&serde_json::json!({ "inventoryEnabled": on }))?;
-        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route()).json_body(body);
+        let mut call = Call::at(Method::Put, COMPANY_SETTINGS_PUT.route())
+            .json_body(self.company_row_body(body).await?);
         call.idempotency_key = Some(key);
         let reply = self.send(&COMPANY_SETTINGS_PUT, call, None).await?;
         settings_from(&reply)
@@ -985,6 +1023,8 @@ impl Session {
             #[serde(skip_serializing_if = "Option::is_none")]
             current_password: Option<&'a str>,
             new_password: Option<&'a str>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            expected_updated_at: Option<String>,
         }
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase")]
@@ -1000,9 +1040,13 @@ impl Session {
                 return Err(ApiError::Local(LocalValidation::InvalidValue));
             }
         }
+        // The stamp goes in before the body is built: the passwords are
+        // never parsed again into copies that are not zeroized.
+        let stamp = self.company_row_stamp().await?;
         let body = json_body(&Body {
             current_password: current.map(Secret::expose),
             new_password: new.map(Secret::expose),
+            expected_updated_at: stamp.map(|s| s.text()),
         })?;
         let mut call = Call::at(Method::Put, CLOSING_PASSWORD_PUT.route()).json_body(body);
         call.idempotency_key = Some(key);
@@ -1159,7 +1203,12 @@ mod tests {
             v.record.profile.entity_type,
             Some(EntityType::SingleMemberLlc)
         );
-        assert!(matches!(v.version, RecordVersion::Fingerprint(_)));
+        // A fingerprint version (the company row's `updatedAt` rides along,
+        // P33 U-291).
+        assert!(matches!(
+            v.version,
+            RecordVersion::Fingerprint(_) | RecordVersion::Stamped { .. }
+        ));
 
         let mut update = v.record.profile.clone();
         update.business_name = "New Name".into();

@@ -316,6 +316,7 @@ impl EndpointSource for SupervisorSource {
                 port: ep.port,
                 token: Secret::new(ep.token.expose().to_string()),
                 generation: ep.generation,
+                clock_offset_ms: 0,
             }),
             (HostState::Running | HostState::Restarting { .. }, _) => EndpointState::Restarting,
             (HostState::Starting, _) => EndpointState::Starting,

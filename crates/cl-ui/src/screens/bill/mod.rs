@@ -34,6 +34,7 @@
 //! `i18n/bill.rs`.
 
 mod attach;
+mod conflict;
 pub mod doc_read;
 // A04 WP-F2: draft mode (a document from Review Documents).
 pub(crate) mod doc_read_local;
@@ -405,6 +406,8 @@ pub struct EnterBillScreen {
     /// A04 draft mode: the document draft this form enters (Accept is
     /// Save & Close / Save & New, sent to `convert`; `draft.rs`).
     pub(crate) draft: Option<crate::screens::doc_review::review::DraftSession>,
+    /// P33: their version being read after a stale save, then the dialog.
+    pub(crate) conflict: crate::forms::conflict::ConflictFlow<Versioned<cl_api::BillRecord>>,
 }
 
 /// A blank header dated `date` (no lines: the grids hold them).
@@ -503,6 +506,7 @@ impl EnterBillScreen {
             lists_stale: false,
             lists_keep_inputs: false,
             draft: None,
+            conflict: crate::forms::conflict::ConflictFlow::default(),
         };
         s.bus = s.link.bus().subscribe();
         s.start_load();
@@ -1102,6 +1106,7 @@ impl EnterBillScreen {
             || self.terms_dates_task.is_some()
             || self.save.task.is_some()
             || self.save.attach_retry.is_some()
+            || self.conflict.busy()
             || self.load_task.is_some()
             || self.nav.task.is_some()
             || self.void.task.is_some()
@@ -1163,6 +1168,7 @@ impl EnterBillScreen {
                 "error": self.save.error.is_some(),
                 "refusal": self.save.refusal,
                 "stale": self.save.stale,
+                "conflict": self.conflict.state(),
                 "attach_failed": self.save.attach_failed.is_some(),
             },
             "lost": self.save.lost.state_json(),
@@ -1254,6 +1260,8 @@ impl Screen for EnterBillScreen {
         self.panel_tick();
         self.compare_before();
         self.draw(ui);
+        let ctx = ui.ctx().clone();
+        self.conflict_ui(&ctx);
         self.fill_remaining();
         self.compare_after();
         if let Some(d) = self.draft.as_mut() {

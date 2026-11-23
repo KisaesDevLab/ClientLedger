@@ -816,7 +816,13 @@ pub fn stale_u84(h: &Harness) {
             },
             ..third.record.clone()
         },
-        version: third.version,
+        // With `stale-all-v1` the version's stamp is what the engine
+        // checks: the first read's.
+        version: if h.caps.has(Capabilities::STALE_ALL) {
+            first.version
+        } else {
+            third.version
+        },
         stock_warnings: Vec::new(),
     };
     let e = h

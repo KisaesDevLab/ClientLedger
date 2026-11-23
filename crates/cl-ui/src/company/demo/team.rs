@@ -267,6 +267,7 @@ impl DemoAuth {
             name: name.trim().to_owned(),
             description: None,
             permissions: permissions.clone(),
+            stamp: None,
         };
         self.templates.push(t.clone());
         Ok(t)

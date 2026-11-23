@@ -71,6 +71,7 @@ pub(crate) fn layout(h: &Harness, s: &Session) -> Layout {
     let t = h
         .run(ds.replace_lines(
             made.id,
+            None,
             &[
                 line(
                     Section::Sales,
@@ -280,10 +281,10 @@ pub fn over_short(h: &Harness) {
     assert!(drafts.iter().any(|d| d.id == draft.id));
     // A draft can be updated, then deleted.
     let fixed = h
-        .run(ds.update_draft(draft.id, &day(&l, on, "500.00"), key()))
+        .run(ds.update_draft(draft.id, None, &day(&l, on, "500.00"), key()))
         .expect("update");
     assert_eq!(fixed.values.len(), 4);
-    h.run(ds.delete_draft(draft.id)).expect("delete");
+    h.run(ds.delete_draft(draft.id, None)).expect("delete");
     assert!(matches!(
         h.run(ds.entry(draft.id)),
         Err(ApiError::NotFound { .. })
@@ -298,7 +299,8 @@ pub fn over_short(h: &Harness) {
     assert_eq!(t.status, TxnStatus::Void);
     h.run(ds.void(posted_over.id, &DailyPostOptions::default(), key()))
         .expect("void over");
-    h.run(ds.delete_template(l.t.id)).expect("delete layout");
+    h.run(ds.delete_template(l.t.id, None))
+        .expect("delete layout");
     let left = h.run(ds.templates()).expect("layouts");
     assert!(left.iter().all(|t| t.id != l.t.id));
 }
@@ -330,7 +332,8 @@ pub fn preview_property(h: &Harness) {
         assert_eq!(p.over_short, local_over_short(&l.t, &values));
         assert_eq!(p.debits.checked_sub(p.credits).expect("sub"), p.over_short);
     }
-    h.run(ds.delete_template(l.t.id)).expect("delete layout");
+    h.run(ds.delete_template(l.t.id, None))
+        .expect("delete layout");
 }
 
 /// A day in a closed period (second company).
@@ -377,7 +380,7 @@ pub fn closed_period(h: &Harness) {
                         .expect("clear password")
                 );
             } else {
-                h.run(ds.delete_draft(draft.id)).expect("delete");
+                h.run(ds.delete_draft(draft.id, None)).expect("delete");
             }
         }
         Ok(day) => {
@@ -393,5 +396,6 @@ pub fn closed_period(h: &Harness) {
         Err(e) => panic!("closed-period post: {e:?}"),
     }
     settings(serde_json::Value::Null);
-    h.run(ds.delete_template(l.t.id)).expect("delete layout");
+    h.run(ds.delete_template(l.t.id, None))
+        .expect("delete layout");
 }

@@ -447,6 +447,19 @@ impl JournalScreen {
         if self.closing_failed(&e, Pending::Save(intent)) {
             return;
         }
+        // P33: an edit someone else saved first: their version, then the
+        // conflict dialog (or a silent re-save).
+        if matches!(
+            e,
+            ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                ..
+            }
+        ) && self.editing.is_some()
+        {
+            self.conflict_start(intent);
+            return;
+        }
         self.engine_refusal(e);
     }
 
@@ -586,7 +599,7 @@ impl JournalScreen {
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
             s.transactions()
-                .void(e.id, &reason, &options(password), key)
+                .void(e.id, e.version.stamp(), &reason, &options(password), key)
                 .await?;
             Ok(())
         }) {
@@ -625,7 +638,11 @@ impl JournalScreen {
                 reason: None,
                 closing_password: password,
             };
-            let r = s.transactions().delete(e.id, &opts, key).await.map(|_| ());
+            let r = s
+                .transactions()
+                .delete(e.id, e.version.stamp(), &opts, key)
+                .await
+                .map(|_| ());
             delete_answer(r, retry)
         }) {
             self.action_task = Some((Pending::Delete, Task::Pending(p)));
@@ -849,6 +866,19 @@ impl JournalScreen {
     pub(crate) fn form_command(&mut self, id: CommandId) -> bool {
         match id.as_str() {
             KIND => true,
+            // P33 (demo only): someone else saves the open entry.
+            "dev.lan_simulate_edit" => {
+                let (Some(e), Some(mut d)) = (self.editing.as_ref(), self.link.demo_state()) else {
+                    return false;
+                };
+                crate::company::demo::journal::simulate_other_edit(&mut d, e.id)
+            }
+            "dev.lan_simulate_touch" => {
+                let (Some(e), Some(mut d)) = (self.editing.as_ref(), self.link.demo_state()) else {
+                    return false;
+                };
+                crate::company::demo::journal::simulate_other_touch(&mut d, e.id)
+            }
             "form.save_new" => {
                 self.start_save(SaveIntent::SaveAndNew, None);
                 true
@@ -889,6 +919,14 @@ impl JournalScreen {
                     self.sync_inputs();
                 }
                 done
+            }
+            // P33: Esc in the conflict dialog is Back (the shell takes the
+            // key before the dialog sees it).
+            "form.revert" if self.conflict.is_some() => {
+                if let Some(open) = self.conflict.take() {
+                    self.run_choice(open, crate::screens::conflict_dialog::ConflictChoice::Back);
+                }
+                true
             }
             "form.revert" => self.revert_field(),
             _ => false,

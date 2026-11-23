@@ -158,6 +158,7 @@ pub fn tag_groups() -> Vec<TagGroup> {
         },
         sort_order: Some(i64::from(n)),
         tags: Vec::new(),
+        updated_at: None,
     })
     .collect()
 }

@@ -44,7 +44,14 @@ pub(crate) struct LaunchPlan<'a> {
     pub extra_env: &'a [(String, String)],
     /// The "work offline" setting, passed on as `CL_OFFLINE`.
     pub offline: OfflineSetting,
+    /// LAN host mode (P33, Q-P33z): the workstation-class launch token.
+    /// Set, the engine gets `CL_LAN=1`, `CL_LAN_TOKEN` and the LAN session
+    /// cap; `None` is the single-computer engine.
+    pub lan_token: Option<&'a Secret>,
 }
+
+/// Sessions per user in LAN host mode (Q-P33m).
+pub(crate) const LAN_MAX_SESSIONS_PER_USER: u32 = 6;
 
 /// The owner's "work offline" preference (P09 shows it). The engine reads it
 /// as `CL_OFFLINE`: `auto` keeps online features available when the owner has
@@ -137,6 +144,14 @@ pub(crate) fn build_env(plan: &LaunchPlan<'_>) -> Result<Vec<(String, OsString)>
         env.push(("windir".into(), root));
     } else {
         env.push(("PATH".into(), text("/usr/bin:/bin")));
+    }
+    if let Some(lan) = plan.lan_token {
+        env.push(("CL_LAN".into(), text("1")));
+        env.push(("CL_LAN_TOKEN".into(), text(lan.expose())));
+        env.push((
+            "MAX_SESSIONS_PER_USER".into(),
+            text(&LAN_MAX_SESSIONS_PER_USER.to_string()),
+        ));
     }
     for (k, _) in plan.extra_env {
         // Test-only switches for the fake engine. They can never override the
@@ -503,6 +518,7 @@ mod tests {
             secrets: &secrets,
             extra_env: extra,
             offline: OfflineSetting::Auto,
+            lan_token: None,
         };
         build_env(&plan).unwrap().into_iter().collect()
     }
@@ -594,6 +610,7 @@ mod tests {
                 secrets: &secrets,
                 extra_env: &extra,
                 offline: OfflineSetting::Auto,
+                lan_token: None,
             };
             assert!(
                 matches!(build_env(&plan), Err(HostError::BadEngineEnv(_))),
@@ -609,6 +626,7 @@ mod tests {
             secrets: &secrets,
             extra_env: &ok,
             offline: OfflineSetting::Auto,
+            lan_token: None,
         };
         assert!(build_env(&plan).is_ok());
     }
@@ -626,6 +644,7 @@ mod tests {
                 secrets: &secrets,
                 extra_env: &[],
                 offline: setting,
+                lan_token: None,
             };
             let env: std::collections::BTreeMap<_, _> =
                 build_env(&plan).unwrap().into_iter().collect();
@@ -642,8 +661,39 @@ mod tests {
             secrets: &secrets,
             extra_env: &extra,
             offline: OfflineSetting::Auto,
+            lan_token: None,
         };
         assert!(matches!(build_env(&plan), Err(HostError::BadEngineEnv(_))));
+    }
+
+    #[test]
+    fn lan_host_mode_adds_the_workstation_token_and_session_cap() {
+        let (paths, token, db, secrets) = plan_parts();
+        let exe = std::env::temp_dir().join("engine.exe");
+        let lan = Secret::new("LAN-TOKEN-fedcba9876543210");
+        let plan = LaunchPlan {
+            exe: &exe,
+            paths: &paths,
+            token: &token,
+            db_url: &db,
+            secrets: &secrets,
+            extra_env: &[],
+            offline: OfflineSetting::Auto,
+            lan_token: Some(&lan),
+        };
+        let env: std::collections::BTreeMap<_, _> = build_env(&plan).unwrap().into_iter().collect();
+        let get = |k: &str| env.get(k).unwrap().to_string_lossy().into_owned();
+        assert_eq!(get("CL_LAN"), "1");
+        assert_eq!(get("CL_LAN_TOKEN"), "LAN-TOKEN-fedcba9876543210");
+        assert_eq!(get("MAX_SESSIONS_PER_USER"), "6");
+        // The bind stays loopback (the engine refuses anything else).
+        assert_eq!(get("CL_BIND"), "127.0.0.1:0");
+        assert_ne!(get("CL_TOKEN"), get("CL_LAN_TOKEN"));
+        // Single-computer mode has none of them.
+        let single = env_map(&[]);
+        for k in ["CL_LAN", "CL_LAN_TOKEN", "MAX_SESSIONS_PER_USER"] {
+            assert!(!single.contains_key(k), "{k}");
+        }
     }
 
     #[test]
@@ -657,6 +707,7 @@ mod tests {
             secrets: &secrets,
             extra_env: &[],
             offline: OfflineSetting::Auto,
+            lan_token: None,
         };
         assert!(matches!(
             build_env(&plan),

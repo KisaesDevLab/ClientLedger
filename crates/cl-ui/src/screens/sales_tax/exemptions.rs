@@ -303,7 +303,19 @@ impl ExemptionsScreen {
         if let Some((k, mut job)) = self.upload_job.take() {
             match job.take() {
                 None => self.upload_job = Some((k, job)),
-                Some(Ok(a)) => self.file = Some(a.id),
+                Some(Ok(a)) => {
+                    // The upload moved the client's stamp (U-291 S2): an
+                    // open contact panel takes it.
+                    if let (Some(stamp), Ok(client)) = (
+                        a.parent_stamp,
+                        cl_core::ids::ContactId::parse(&a.attachable_id),
+                    ) {
+                        self.link
+                            .bus()
+                            .publish(crate::data_bus::Change::ContactStamp(client, stamp));
+                    }
+                    self.file = Some(a.id);
+                }
                 Some(Err(e)) => {
                     self.problem = Some(match e {
                         ApiError::Local(cl_api::LocalValidation::AttachmentTooLarge) => {

@@ -187,9 +187,15 @@ fn items(
         // Q-P32u: nothing that closes or replaces the company (or the app)
         // while a transfer file is made.
         let blocked = crate::screens::send_to_accountant::blocked_now(row.id.as_str());
+        // P33 (Q-P33y): host-only on a workstation.
+        let host_only = crate::lan_status::host_only_now(row.id.as_str());
         let r = ui
-            .add_enabled(!blocked, button)
-            .on_disabled_hover_text(crate::i18n::t("send.busy_tip"));
+            .add_enabled(!blocked && !host_only, button)
+            .on_disabled_hover_text(crate::i18n::t(if host_only {
+                "lan.host_only.tip"
+            } else {
+                "send.busy_tip"
+            }));
         if r.clicked() {
             queued.push(row.id);
             ui.close();

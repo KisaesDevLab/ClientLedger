@@ -146,7 +146,8 @@ pub(crate) fn read(s: &mut BankFeedScreen) {
 
 enum Do {
     Save(FeedRule),
-    Delete(String),
+    /// The rule and the stamp it was read at (U-291).
+    Delete(String, Option<cl_api::RecordStamp>),
     Dismiss(RuleSuggestion),
 }
 
@@ -156,7 +157,7 @@ fn act(s: &mut BankFeedScreen, what: Do) {
     }
     let live = match &what {
         Do::Save(r) => Do::Save(r.clone()),
-        Do::Delete(id) => Do::Delete(id.clone()),
+        Do::Delete(id, at) => Do::Delete(id.clone(), *at),
         Do::Dismiss(x) => Do::Dismiss(x.clone()),
     };
     s.rules.act = Some(run(
@@ -169,7 +170,7 @@ fn act(s: &mut BankFeedScreen, what: Do) {
                 demo::save_rule(d, &r)?;
                 Ok(demo::reprocess_rules(d, None).ok().map(|x| x.matched))
             }
-            Do::Delete(id) => demo::delete_rule(d, &id).map(|()| None),
+            Do::Delete(id, _) => demo::delete_rule(d, &id).map(|()| None),
             Do::Dismiss(x) => {
                 demo::dismiss_suggestion(d, &x);
                 Ok(None)
@@ -184,7 +185,7 @@ fn act(s: &mut BankFeedScreen, what: Do) {
                     // applies to the next bank file.
                     Ok(r.reprocess(None).await.ok().map(|x| x.matched))
                 }
-                Do::Delete(id) => r.delete(&id).await.map(|()| None),
+                Do::Delete(id, at) => r.delete(&id, at).await.map(|()| None),
                 Do::Dismiss(x) => r.dismiss(&x).await.map(|()| None),
             }
         },
@@ -339,8 +340,14 @@ fn editor(s: &mut BankFeedScreen, ui: &mut Ui, tokens: &Tokens) {
     });
     if save {
         save_draft(s);
-    } else if delete && let Some(id) = s.rules.draft.as_ref().and_then(|d| d.rule.id.clone()) {
-        act(s, Do::Delete(id));
+    } else if delete
+        && let Some((id, at)) = s
+            .rules
+            .draft
+            .as_ref()
+            .and_then(|d| d.rule.id.clone().map(|id| (id, d.rule.stamp())))
+    {
+        act(s, Do::Delete(id, at));
     } else if cancel {
         s.rules.draft = None;
     }

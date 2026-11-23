@@ -275,10 +275,13 @@ pub fn pay_reduces_owed_exactly(h: &Harness) {
         .expect("edit after unlink");
 
     // A void gives back what the State payment paid.
-    h.run(
-        x.s.transactions()
-            .void(paid.id, "Paid twice", &PostingOptions::default(), key()),
-    )
+    h.run(x.s.transactions().void(
+        paid.id,
+        None,
+        "Paid twice",
+        &PostingOptions::default(),
+        key(),
+    ))
     .expect("void");
     assert_eq!(x.owed(h, x.state_agency, date(2026, 11, 30)), m("169.45"));
     assert!(h.run(pays.get(paid.id)).expect("voided").is_void());

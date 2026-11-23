@@ -51,7 +51,8 @@ use crate::resources::printing::{DocumentNumberWarning, number_warnings};
 use crate::resources::sales::{MAX_LINES, NewInvoice};
 use crate::resources::transactions::{Transaction, TxnStatus, TxnType};
 use crate::resources::versioning::{
-    EditableFields, Versioned, get_versioned, saved_from, saved_unreadable,
+    EditableFields, RecordStamp, Versioned, get_versioned, saved_from, saved_unreadable,
+    stamp_body, stamp_delete,
 };
 use crate::session::{Session, decode, json_body};
 use crate::wire::{Capabilities, Page, PageRequest};
@@ -1505,6 +1506,15 @@ pub struct PriceLevel {
     pub updated_at: Option<Timestamp>,
 }
 
+impl PriceLevel {
+    /// The stamp it was read at (`updatedAt`), sent with its next save or
+    /// delete (U-291).
+    #[must_use]
+    pub fn stamp(&self) -> Option<RecordStamp> {
+        self.updated_at.and_then(RecordStamp::of_timestamp)
+    }
+}
+
 impl fmt::Debug for PriceLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("PriceLevel")
@@ -1577,6 +1587,10 @@ pub struct ClientSales {
     pub default_markup_percent: Option<SignedPercent>,
     /// The layout the client's new invoices start on (U-130).
     pub default_invoice_layout_id: Option<InvoiceLayoutId>,
+    /// The contact's stamp as read (`updatedAt`): sent back by
+    /// [`Invoices::set_client_sales`] and [`Invoices::set_client_layout`]
+    /// (U-291; LAN mode requires it, U-292).
+    pub stamp: Option<RecordStamp>,
 }
 
 impl fmt::Debug for ClientSales {
@@ -1602,6 +1616,8 @@ struct ClientSalesWire {
     default_markup_percent: Option<SignedPercent>,
     #[serde(default)]
     default_invoice_layout_id: Option<InvoiceLayoutId>,
+    #[serde(default)]
+    updated_at: Option<String>,
 }
 
 // ---- Options -----------------------------------------------------------------------
@@ -2173,6 +2189,7 @@ impl Invoices<'_> {
             price_level_id: w.price_level_id,
             default_markup_percent: w.default_markup_percent,
             default_invoice_layout_id: w.default_invoice_layout_id,
+            stamp: w.updated_at.as_deref().and_then(RecordStamp::parse),
         })
     }
 
@@ -2183,13 +2200,16 @@ impl Invoices<'_> {
     ///
     /// # Errors
     /// `Local(Unsupported)` when neither capability is advertised;
-    /// `Local(InvalidValue)` for a negative markup; any [`ApiError`].
+    /// `Local(InvalidValue)` for a negative markup; `Conflict { Stale }`
+    /// when the contact changed since `stamp` was read (`expectedUpdatedAt`,
+    /// U-291); any [`ApiError`]. Answers the contact's new stamp.
     pub async fn set_client_sales(
         &self,
         client: ContactId,
+        stamp: Option<RecordStamp>,
         price_level: Option<PriceLevelId>,
         markup: Option<SignedPercent>,
-    ) -> Result<(), ApiError> {
+    ) -> Result<Option<RecordStamp>, ApiError> {
         let caps = self.0.client().capabilities();
         let levels = caps.has(Capabilities::PRICE_LEVELS);
         let billable = caps.has(Capabilities::BILLABLE_COSTS);
@@ -2206,14 +2226,16 @@ impl Invoices<'_> {
         if billable {
             m.insert("defaultMarkupPercent".into(), json!(markup));
         }
+        let mut body = Value::Object(m);
+        stamp_body(self.0, &mut body, stamp);
         let call = Call::new(
             Method::Put,
             CONTACT_PUT.route(),
             format!("/api/v1/contacts/{client}"),
         )
-        .json_body(json_body(&Value::Object(m))?);
-        self.0.send(&CONTACT_PUT, call, None).await?;
-        Ok(())
+        .json_body(json_body(&body)?);
+        let reply = self.0.send(&CONTACT_PUT, call, None).await?;
+        Ok(contact_stamp(&reply.body))
     }
 
     /// Sets (or with `None` clears) the layout a client's new invoices
@@ -2223,21 +2245,26 @@ impl Invoices<'_> {
     /// # Errors
     /// `Local(Unsupported)` without the capability (nothing sent); 400
     /// `INVOICE_LAYOUT_NOT_FOUND` / `INVOICE_LAYOUT_ARCHIVED`; any
-    /// [`ApiError`].
+    /// [`ApiError`]; `Conflict { Stale }` when the contact changed since
+    /// `stamp` was read (`expectedUpdatedAt`, U-291). Answers the
+    /// contact's new stamp.
     pub async fn set_client_layout(
         &self,
         client: ContactId,
+        stamp: Option<RecordStamp>,
         layout: Option<InvoiceLayoutId>,
-    ) -> Result<(), ApiError> {
+    ) -> Result<Option<RecordStamp>, ApiError> {
         require(self.0, Capabilities::INVOICE_LAYOUTS)?;
+        let mut body = json!({ "defaultInvoiceLayoutId": layout });
+        stamp_body(self.0, &mut body, stamp);
         let call = Call::new(
             Method::Put,
             CONTACT_PUT.route(),
             format!("/api/v1/contacts/{client}"),
         )
-        .json_body(json_body(&json!({ "defaultInvoiceLayoutId": layout }))?);
-        self.0.send(&CONTACT_PUT, call, None).await?;
-        Ok(())
+        .json_body(json_body(&body)?);
+        let reply = self.0.send(&CONTACT_PUT, call, None).await?;
+        Ok(contact_stamp(&reply.body))
     }
 
     /// Price levels (`price-levels-v1`).
@@ -2245,6 +2272,13 @@ impl Invoices<'_> {
     pub fn price_levels(&self) -> PriceLevels<'_> {
         PriceLevels(self.0)
     }
+}
+
+/// The `contact.updatedAt` of a contact write's answer, when it is a stamp.
+fn contact_stamp(body: &[u8]) -> Option<RecordStamp> {
+    serde_json::from_slice::<Value>(body)
+        .ok()
+        .and_then(|v| v.get("contact").and_then(RecordStamp::of_record))
 }
 
 /// Price level operations (`session.invoices().price_levels()`; contract
@@ -2319,35 +2353,47 @@ impl PriceLevels<'_> {
         .await
     }
 
-    /// Replaces a price level.
+    /// Replaces a price level read at `stamp` ([`PriceLevel::stamp`], sent
+    /// as `expectedUpdatedAt`, U-291).
     ///
     /// # Errors
-    /// As [`PriceLevels::create`], plus `NotFound`.
+    /// As [`PriceLevels::create`], plus `NotFound` and `Conflict { Stale }`.
     pub async fn update(
         &self,
         id: PriceLevelId,
+        stamp: Option<RecordStamp>,
         draft: &PriceLevelDraft,
     ) -> Result<PriceLevel, ApiError> {
         draft.check()?;
+        let mut body = serde_json::to_value(draft).map_err(|_| ApiError::Decode {
+            what: "request body",
+        })?;
+        stamp_body(self.0, &mut body, stamp);
         self.one(
             &PRICE_LEVEL_PUT,
             format!("{LEVELS}/{id}"),
-            Some(json_body(draft)?),
+            Some(json_body(&body)?),
         )
         .await
     }
 
-    /// Deletes a price level (clients on it go back to item prices).
+    /// Deletes a price level read at `stamp` (`expectedUpdatedAt` in the body,
+    /// U-291; clients on it go back to item prices).
     ///
     /// # Errors
-    /// As [`PriceLevels::get`].
-    pub async fn delete(&self, id: PriceLevelId) -> Result<(), ApiError> {
+    /// As [`PriceLevels::get`], plus `Conflict { Stale }`.
+    pub async fn delete(
+        &self,
+        id: PriceLevelId,
+        stamp: Option<RecordStamp>,
+    ) -> Result<(), ApiError> {
         require(self.0, Capabilities::PRICE_LEVELS)?;
-        let call = Call::new(
+        let mut call = Call::new(
             Method::Delete,
             PRICE_LEVEL_DELETE.route(),
             format!("{LEVELS}/{id}"),
         );
+        stamp_delete(self.0, &mut call, stamp);
         self.0.send(&PRICE_LEVEL_DELETE, call, None).await?;
         Ok(())
     }

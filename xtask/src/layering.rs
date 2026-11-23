@@ -47,7 +47,10 @@ fn allowed_internal(name: &str) -> Option<Vec<&'static str>> {
         // Everything except apps (and itself).
         "cl-ui" => Some(BELOW_UI.to_vec()),
         // Remaining library crates may use anything below the UI.
-        "cl-host" | "cl-company" | "cl-print" | "cl-automation" | "cl-lan" => {
+        // P33 (Q-P33x): the LAN crate sees only value types, the keychain
+        // store and cl-api (it implements `EndpointSource`).
+        "cl-lan" => below(&["cl-core", "cl-settings", "cl-api"]),
+        "cl-host" | "cl-company" | "cl-print" | "cl-automation" => {
             Some(BELOW_UI.iter().copied().filter(|c| *c != name).collect())
         }
         // Apps may use any library crate.
@@ -80,7 +83,8 @@ fn allowed_dev_internal(name: &str) -> &'static [&'static str] {
 
 /// Cargo features that exist only for tests. They must never be switched on
 /// by a normal dependency edge, by an app, or by a default feature.
-const TEST_FEATURES: [&str; 2] = ["test-support", "testing"];
+/// `lan-test-listener` (P33, T15) lets the LAN proxy listen on loopback.
+const TEST_FEATURES: [&str; 3] = ["test-support", "testing", "lan-test-listener"];
 
 /// Apps are release artefacts: no edge of theirs may enable a test feature.
 const APPS: [&str; 3] = ["clientledger", "clientledger-cli", "clientledger-docread"];
@@ -320,6 +324,35 @@ mod tests {
                 "{user}"
             );
         }
+    }
+
+    #[test]
+    fn lan_uses_only_core_settings_and_api() {
+        assert_eq!(
+            check(&[m(
+                "cl-lan",
+                &[("cl-core", true), ("cl-settings", true), ("cl-api", true)]
+            )]),
+            Vec::<String>::new()
+        );
+        for bad in ["cl-host", "cl-pg", "cl-company", "cl-model", "cl-ui"] {
+            assert_eq!(check(&[m("cl-lan", &[(bad, true)])]).len(), 1, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_lan_test_listener_never_reaches_an_app() {
+        assert_eq!(
+            check(&[dev("clientledger", "cl-lan", &["lan-test-listener"])]).len(),
+            1
+        );
+        let mut mm = m("cl-ui", &[("cl-lan", true)]);
+        mm.deps[0].normal_features = vec!["lan-test-listener".into()];
+        assert_eq!(check(&[mm]).len(), 1);
+        assert_eq!(
+            test_features_in_tree("cl-lan feature \"lan-test-listener\"\n").len(),
+            1
+        );
     }
 
     #[test]

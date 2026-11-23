@@ -372,9 +372,70 @@ pub fn acquire_or_focus(paths: &AppPaths) -> Result<Option<InstanceGuard>> {
     }
 }
 
+/// How long the app waits for a background host to hand over.
+const TAKE_OVER_WAIT: Duration = Duration::from_secs(20);
+
+/// Like [`acquire_or_focus`], but a running **background LAN host**
+/// (`--lan-serve`, whose status starts with [`crate::service::BACKGROUND_TAG`])
+/// is asked to stop, and this process becomes the instance once it has
+/// (Q-P33w). A normal running app is focused as before.
+///
+/// # Errors
+/// Fails like [`acquire`].
+pub fn acquire_or_take_over(paths: &AppPaths) -> Result<Option<InstanceGuard>> {
+    match acquire(paths)? {
+        Acquired::First(g) => Ok(Some(g)),
+        Acquired::Second => {
+            let background = send(paths, Request::Status)
+                .is_ok_and(|s| s.starts_with(crate::service::BACKGROUND_TAG));
+            if !background {
+                if let Err(e) = send(paths, Request::Focus) {
+                    tracing::warn!("could not ask the running instance to focus: {e}");
+                }
+                return Ok(None);
+            }
+            tracing::info!("taking over from the background LAN host");
+            let _ = send(paths, Request::Stop);
+            let deadline = Instant::now() + TAKE_OVER_WAIT;
+            while Instant::now() < deadline {
+                if let Acquired::First(g) = acquire(paths)? {
+                    return Ok(Some(g));
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+            tracing::warn!("the background LAN host did not stop in time");
+            Ok(None)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn take_over_stops_a_background_host_but_focuses_a_normal_app() {
+        let paths = scratch("takeover");
+        // A normal app: focused, not stopped.
+        let first = guard(acquire(&paths).unwrap());
+        first.set_status("state=running");
+        assert!(acquire_or_take_over(&paths).unwrap().is_none());
+        assert!(first.take_focus_request());
+        assert!(!first.stop_requested());
+        // A background host: asked to stop, then replaced.
+        first.set_status(&format!("{} state=running", crate::service::BACKGROUND_TAG));
+        let watcher = std::thread::spawn(move || {
+            while !first.stop_requested() {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            drop(first);
+        });
+        let g = acquire_or_take_over(&paths).unwrap();
+        assert!(g.is_some());
+        watcher.join().unwrap();
+        drop(g);
+        let _ = fs::remove_dir_all(paths.root());
+    }
 
     fn scratch(name: &str) -> AppPaths {
         let root = std::env::temp_dir().join(format!("cl-host-inst-{name}-{}", std::process::id()));

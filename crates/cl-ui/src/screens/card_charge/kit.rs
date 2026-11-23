@@ -513,6 +513,20 @@ pub(crate) type Answers = (
     Option<Result<(), ApiError>>,
 );
 
+impl SaveFlow {
+    /// Takes record `id`'s new stamp after a write on something it owns (a
+    /// file, U-291 S2), so the next save or void is not a conflict with
+    /// itself. `id` is the attachable id as text.
+    pub(crate) fn adopt_parent_stamp(&mut self, id: &str, stamp: Option<cl_api::RecordStamp>) {
+        if let Some(e) = self.editing.as_mut().filter(|e| e.id.to_string() == id) {
+            e.version.adopt_stamp(stamp);
+        }
+        if let Some(s) = self.last.as_mut().filter(|s| s.id.to_string() == id) {
+            s.version.adopt_stamp(stamp);
+        }
+    }
+}
+
 /// The save and void of one helper form.
 #[derive(Default)]
 pub(crate) struct SaveFlow {
@@ -548,6 +562,9 @@ pub(crate) struct SaveFlow {
     /// A save whose outcome is unknown: [`Self::send`] sends nothing until
     /// the recheck or the owner answers (B2), for every helper form.
     pub lost: crate::forms::lost_save::LostSave,
+    /// P33: the intent of a save refused as stale (a form with the
+    /// conflict dialog takes it; the others show Reload).
+    pub stale_intent: Option<SaveIntent>,
 }
 
 /// The engine takes the closing-date password.
@@ -811,6 +828,10 @@ impl SaveFlow {
             }
             None => Pending::Save(SaveIntent::Save),
         };
+        let intent = match &pending {
+            Pending::Save(i) => Some(*i),
+            Pending::Void(_) => None,
+        };
         let supported = closing_supported(link);
         if self.closing_prompt.failed(&e, pending, supported, closing) {
             return;
@@ -819,7 +840,10 @@ impl SaveFlow {
             ApiError::Conflict {
                 reason: ConflictReason::Stale,
                 ..
-            } => self.stale = true,
+            } => {
+                self.stale = true;
+                self.stale_intent = intent;
+            }
             e => self.error = Some(e),
         }
     }
@@ -852,9 +876,15 @@ impl SaveFlow {
     /// What Void voids: the open record, else the one this window saved
     /// last; (id, date in the books).
     pub(crate) fn void_target(&self) -> Option<(TransactionId, CalendarDate)> {
+        self.void_record().map(|(id, date, _)| (id, date))
+    }
+
+    /// [`Self::void_target`] with the stamp it was read (or saved) at,
+    /// which the void sends back (U-291; LAN mode requires it, U-292).
+    fn void_record(&self) -> Option<(TransactionId, CalendarDate, Option<cl_api::RecordStamp>)> {
         self.editing
-            .map(|e| (e.id, e.old_date))
-            .or_else(|| self.last.map(|r| (r.id, r.date)))
+            .map(|e| (e.id, e.old_date, e.version.stamp()))
+            .or_else(|| self.last.map(|r| (r.id, r.date, r.version.stamp())))
     }
 
     /// Edit > Void Transaction: the open record (or the one saved last).
@@ -880,7 +910,7 @@ impl SaveFlow {
         closing: Option<CalendarDate>,
         password: Option<Secret>,
     ) -> bool {
-        let Some((id, date)) = self.void_target() else {
+        let Some((id, date, stamp)) = self.void_record() else {
             return false;
         };
         let reason = self.void_reason.trim().to_string();
@@ -933,7 +963,7 @@ impl SaveFlow {
         };
         if let Ok(p) = group.write(&session, label, move |s| async move {
             Ok(s.transactions()
-                .void(id, &reason, &options(password), key)
+                .void(id, stamp, &reason, &options(password), key)
                 .await?
                 .stock_warnings)
         }) {

@@ -70,10 +70,13 @@ fn remaining(h: &Harness, s: &Session, memo: TransactionId) -> Money {
 }
 
 fn void(h: &Harness, s: &Session, id: TransactionId) -> Result<(), ApiError> {
-    h.run(
-        s.transactions()
-            .void(id, "contract: refund", &PostingOptions::default(), key()),
-    )
+    h.run(s.transactions().void(
+        id,
+        None,
+        "contract: refund",
+        &PostingOptions::default(),
+        key(),
+    ))
     .map(|_| ())
 }
 

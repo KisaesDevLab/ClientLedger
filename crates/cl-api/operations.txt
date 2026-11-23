@@ -145,6 +145,14 @@ POST    /api/v1/company/smtp/test               pre-handler-only
 PUT     /api/v1/desktop/session-secrets         pre-handler-only
 GET     /api/v1/desktop/session-secrets         idempotent
 DELETE  /api/v1/desktop/session-secrets/{name}  pre-handler-only
+GET     /api/v1/desktop/sessions                idempotent
+DELETE  /api/v1/desktop/sessions/{id}           pre-handler-only
+DELETE  /api/v1/desktop/sessions                pre-handler-only
+POST    /api/v1/desktop/audit-events            never
+GET     /api/v1/desktop/maintenance             idempotent
+POST    /api/v1/desktop/maintenance             never
+DELETE  /api/v1/desktop/maintenance             never
+GET     /api/v1/changes                         idempotent
 POST    /api/v1/contacts/merge                  pre-handler-only
 GET     /api/v1/contacts/{id}/transactions      idempotent
 GET     /api/v1/reports/customer-balance-summary idempotent

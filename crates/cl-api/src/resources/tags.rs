@@ -37,7 +37,8 @@ use crate::resources::operations::{
 };
 use crate::resources::reconcile::row_fp;
 use crate::resources::versioning::{
-    EditableFields, GuardedUpdate, RecordVersion, Versioned, fingerprint_of, pick, update_guarded,
+    EditableFields, GuardedUpdate, RecordStamp, RecordVersion, Versioned, fingerprint_of, pick,
+    update_guarded,
 };
 use crate::session::{Session, decode, json_body};
 use crate::wire::{Capabilities, Page, PageRequest};
@@ -141,6 +142,17 @@ pub struct Tag {
     /// Last changed.
     #[serde(default)]
     pub updated_at: Option<Timestamp>,
+}
+
+impl Tag {
+    /// The version this row was read at: its fingerprint, stamped with its
+    /// `updatedAt` when it has one, so an edit of a listed tag is checked by
+    /// the engine under `stale-all-v1` (and carries the stamp LAN mode
+    /// requires).
+    #[must_use]
+    pub fn version(&self) -> RecordVersion {
+        RecordVersion::read_at(self.fingerprint(), self.updated_at)
+    }
 }
 
 impl EditableFields for Tag {
@@ -302,9 +314,16 @@ impl Tags<'_> {
     /// Deletes a tag.
     ///
     /// # Errors
-    /// `Conflict { InUse }` while transactions use it; any [`ApiError`].
-    pub async fn delete(&self, id: TagId, key: IdempotencyKey) -> Result<(), ApiError> {
-        common::delete_record(self.0, &SPEC, &id.to_string(), key)
+    /// `Conflict { InUse }` while transactions use it; `Conflict { Stale }`
+    /// when it changed since `expected` was read (`expectedUpdatedAt` in the body,
+    /// U-291); any [`ApiError`].
+    pub async fn delete(
+        &self,
+        id: TagId,
+        expected: &RecordVersion,
+        key: IdempotencyKey,
+    ) -> Result<(), ApiError> {
+        common::delete_record(self.0, &SPEC, &id.to_string(), expected.stamp(), key)
             .await
             .map(drop)
     }
@@ -339,6 +358,18 @@ pub struct TagGroup {
     /// The group's active tags (list answers only).
     #[serde(default)]
     pub tags: Vec<Tag>,
+    /// Last changed: the stamp a save or delete sends back (U-291).
+    #[serde(default)]
+    pub updated_at: Option<Timestamp>,
+}
+
+impl TagGroup {
+    /// The stamp this group was read at (`updatedAt`), sent with its next
+    /// save or delete (U-291; LAN mode requires it, U-292).
+    #[must_use]
+    pub fn stamp(&self) -> Option<RecordStamp> {
+        self.updated_at.and_then(RecordStamp::of_timestamp)
+    }
 }
 
 /// Where a tag is used (`GET /tags/{id}/usage`).
@@ -423,37 +454,51 @@ impl Tags<'_> {
         group_from(&reply.body)
     }
 
-    /// Changes a tag group (groups carry no version: the last save wins).
+    /// Changes a tag group read at `stamp` ([`TagGroup::stamp`]; sent as
+    /// `expectedUpdatedAt`, U-291). The answer carries the new stamp.
     ///
     /// # Errors
-    /// `Validation`; any [`ApiError`].
+    /// `Conflict { Stale }` when it changed since; `Validation`; any
+    /// [`ApiError`].
     pub async fn update_group(
         &self,
         id: TagGroupId,
+        stamp: Option<RecordStamp>,
         fields: &TagGroupFields,
         key: IdempotencyKey,
     ) -> Result<TagGroup, ApiError> {
+        let mut body = serde_json::to_value(fields).map_err(|_| ApiError::Decode {
+            what: "request body",
+        })?;
+        crate::resources::versioning::stamp_body(self.0, &mut body, stamp);
         let mut call = Call::new(
             Method::Put,
             TAG_GROUP_PUT.route(),
             format!("/api/v1/tags/groups/{id}"),
         )
-        .json_body(json_body(fields)?);
+        .json_body(json_body(&body)?);
         call.idempotency_key = Some(key);
         let reply = self.0.send(&TAG_GROUP_PUT, call, None).await?;
         group_from(&reply.body)
     }
 
-    /// Deletes a tag group; its tags stay, ungrouped.
+    /// Deletes a tag group read at `stamp` (`expectedUpdatedAt` in the body, U-291);
+    /// its tags stay, ungrouped.
     ///
     /// # Errors
-    /// Any [`ApiError`].
-    pub async fn delete_group(&self, id: TagGroupId, key: IdempotencyKey) -> Result<(), ApiError> {
+    /// `Conflict { Stale }` when it changed since; any [`ApiError`].
+    pub async fn delete_group(
+        &self,
+        id: TagGroupId,
+        stamp: Option<RecordStamp>,
+        key: IdempotencyKey,
+    ) -> Result<(), ApiError> {
         let mut call = Call::new(
             Method::Delete,
             TAG_GROUP_DELETE.route(),
             format!("/api/v1/tags/groups/{id}"),
         );
+        crate::resources::versioning::stamp_delete(self.0, &mut call, stamp);
         call.idempotency_key = Some(key);
         self.0.send(&TAG_GROUP_DELETE, call, None).await.map(drop)
     }
@@ -487,11 +532,12 @@ impl Tags<'_> {
     /// `Local(ClosedPeriodOverrideUnavailable)` (a password without
     /// `merge-closing-date-v1`). From the engine: `ClosedPeriod`,
     /// `ClosingPasswordRejected`, `ClosingPasswordRateLimited`; any
-    /// [`ApiError`].
+    /// [`ApiError`]; `Conflict { Stale }` when either tag changed since
+    /// its version was read (per-item `stamps`, U-291).
     pub async fn merge(
         &self,
-        source: TagId,
-        target: TagId,
+        source: (TagId, &RecordVersion),
+        target: (TagId, &RecordVersion),
         closing_password: Option<&cl_core::Secret>,
         key: IdempotencyKey,
     ) -> Result<(), ApiError> {
@@ -503,15 +549,28 @@ impl Tags<'_> {
             #[serde(skip_serializing_if = "Option::is_none")]
             closing_password: Option<&'a str>,
         }
+        let ((source, source_v), (target, target_v)) = (source, target);
         if source == target {
             return Err(ApiError::Local(LocalValidation::InvalidValue));
         }
         let closing_password = super::contacts::merge_password(self.0, closing_password)?;
-        let mut call = Call::at(Method::Post, TAG_MERGE.route()).json_body(json_body(&Body {
+        let mut body = serde_json::to_value(Body {
             source_tag_id: source,
             target_tag_id: target,
             closing_password,
-        })?);
+        })
+        .map_err(|_| ApiError::Decode {
+            what: "request body",
+        })?;
+        crate::resources::versioning::stamp_items(
+            self.0,
+            &mut body,
+            [
+                (source.to_string(), source_v.stamp()),
+                (target.to_string(), target_v.stamp()),
+            ],
+        );
+        let mut call = Call::at(Method::Post, TAG_MERGE.route()).json_body(json_body(&body)?);
         call.idempotency_key = Some(key);
         self.0.send(&TAG_MERGE, call, None).await.map(drop)
     }
@@ -797,7 +856,11 @@ pub(crate) mod tests {
         ));
         let used = s
             .tags()
-            .delete(page.data[0].id, IdempotencyKey::new())
+            .delete(
+                page.data[0].id,
+                &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                IdempotencyKey::new(),
+            )
             .await
             .expect_err("in use");
         assert!(matches!(
@@ -880,12 +943,12 @@ pub(crate) mod tests {
         assert_eq!(post["isSingleSelect"], true);
         let unreadable = s
             .tags()
-            .update_group(made.id, &fields, IdempotencyKey::new())
+            .update_group(made.id, None, &fields, IdempotencyKey::new())
             .await
             .expect_err("no group in the answer");
         assert!(matches!(unreadable, ApiError::SavedUnreadable { .. }));
         s.tags()
-            .delete_group(made.id, IdempotencyKey::new())
+            .delete_group(made.id, None, IdempotencyKey::new())
             .await
             .expect("delete");
 
@@ -903,12 +966,34 @@ pub(crate) mod tests {
         );
         let other = TagId::parse("5a0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a02").expect("id");
         s.tags()
-            .merge(tag.id, other, None, IdempotencyKey::new())
+            .merge(
+                (
+                    tag.id,
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                (
+                    other,
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                None,
+                IdempotencyKey::new(),
+            )
             .await
             .expect("merge");
         let me = s
             .tags()
-            .merge(tag.id, tag.id, None, IdempotencyKey::new())
+            .merge(
+                (
+                    tag.id,
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                (
+                    tag.id,
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                None,
+                IdempotencyKey::new(),
+            )
             .await
             .expect_err("self");
         assert_eq!(me, ApiError::Local(LocalValidation::InvalidValue));
@@ -921,7 +1006,18 @@ pub(crate) mod tests {
         let pw = cl_core::Secret::new("pw-canary-123");
         let gated = s
             .tags()
-            .merge(tag.id, other, Some(&pw), IdempotencyKey::new())
+            .merge(
+                (
+                    tag.id,
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                (
+                    other,
+                    &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                ),
+                Some(&pw),
+                IdempotencyKey::new(),
+            )
             .await
             .expect_err("no merge-closing-date-v1");
         assert_eq!(

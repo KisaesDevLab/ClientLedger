@@ -619,6 +619,7 @@ impl RefundScreen {
             .unwrap_or_else(|| t("refund.void.default_reason"));
         let key = IdempotencyKey::new();
         let id = rec.id;
+        let stamp = cl_api::RecordStamp::of_timestamp(rec.updated_at);
         let pw = password.clone();
         self.void_job = Some(engine::write(
             &self.link,
@@ -632,7 +633,9 @@ impl RefundScreen {
                 let opts = cl_api::PostingOptions {
                     closed_period: password.map(cl_api::ClosedPeriodAuthorization::with_password),
                 };
-                s.transactions().void(id, &reason, &opts, key).await?;
+                s.transactions()
+                    .void(id, stamp, &reason, &opts, key)
+                    .await?;
                 s.customer_refunds().get(id).await
             },
         ));

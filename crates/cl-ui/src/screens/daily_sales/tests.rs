@@ -107,6 +107,7 @@ fn counter() -> DailyTemplate {
             ),
             line(Section::Sales, "Dept 2", None, NormalSide::Credit, 5),
         ],
+        stamp: None,
     }
 }
 
@@ -185,6 +186,7 @@ fn entry_of(id: DailyEntryId, d: &DailyEntryDraft) -> DailyEntry {
         over_short: Money::ZERO,
         totals: DailyTotals::default(),
         layout: None,
+        stamp: None,
     }
 }
 
@@ -295,6 +297,7 @@ impl DailyBooks for Fake {
                 transaction: e.transaction,
                 over_short: e.over_short,
                 sales: e.totals.sales,
+                stamp: e.stamp,
             })
             .collect())
     }

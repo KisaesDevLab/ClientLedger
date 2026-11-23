@@ -10,6 +10,7 @@
 
 pub mod closing_prompt;
 pub mod condensed;
+pub(crate) mod conflict;
 pub mod enter;
 pub mod header;
 pub mod invoice_lines_grid;

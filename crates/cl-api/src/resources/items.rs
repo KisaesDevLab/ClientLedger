@@ -368,6 +368,16 @@ pub struct UnitPrice {
     pub unit_price: Option<Money>,
 }
 
+impl Item {
+    /// The version this row was read at: its fingerprint, stamped with its
+    /// `updatedAt` when it has one (U-291; an edit or deactivation of a
+    /// listed item sends the stamp, which LAN mode requires, U-292).
+    #[must_use]
+    pub fn version(&self) -> RecordVersion {
+        RecordVersion::read_at(self.fingerprint(), self.updated_at)
+    }
+}
+
 impl EditableFields for Item {
     const EDITABLE: &'static [&'static str] = &[
         "name",
@@ -608,9 +618,15 @@ impl Items<'_> {
     /// Deactivates an item.
     ///
     /// # Errors
-    /// Any [`ApiError`].
-    pub async fn deactivate(&self, id: ItemId, key: IdempotencyKey) -> Result<(), ApiError> {
-        common::deactivate(self.0, &SPEC, &id.to_string(), key)
+    /// `Conflict { Stale }` when it changed since `expected` was read
+    /// (`expectedUpdatedAt` in the body, U-291); any [`ApiError`].
+    pub async fn deactivate(
+        &self,
+        id: ItemId,
+        expected: &RecordVersion,
+        key: IdempotencyKey,
+    ) -> Result<(), ApiError> {
+        common::deactivate(self.0, &SPEC, &id.to_string(), expected.stamp(), key)
             .await
             .map(drop)
     }
@@ -895,7 +911,11 @@ pub(crate) mod tests {
             "isActive=true&limit=500&offset=0"
         );
         s.items()
-            .deactivate(it.id, IdempotencyKey::new())
+            .deactivate(
+                it.id,
+                &crate::resources::versioning::RecordVersion::Fingerprint([0; 32]),
+                IdempotencyKey::new(),
+            )
             .await
             .expect("off");
     }

@@ -74,7 +74,10 @@ pub fn deactivate_and_reactivate(h: &Harness) {
     let s = &h.s1;
     let a = account(h, s, AccountType::Expense, "Seasonal");
     let off = h
-        .run(s.accounts().deactivate(a.id, key()))
+        .run(
+            s.accounts()
+                .deactivate(a.id, &cl_api::RecordVersion::Fingerprint([0; 32]), key()),
+        )
         .expect("deactivate");
     assert!(!off.record.is_active);
     let got = h.run(s.accounts().get(a.id)).expect("get");

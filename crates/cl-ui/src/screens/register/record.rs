@@ -441,6 +441,19 @@ impl RegisterScreen {
             Ok(SaveStart::Busy | SaveStart::Unconfirmed) | Err(_) => return false,
         }
         if self.link.is_demo() {
+            // P33: the demo's version check: the transaction must still be
+            // the one the edit read.
+            if let Some(e) = &update
+                && self.demo_txn(e.id).map(|v| v.version) != Some(e.version)
+            {
+                let gone = self.demo_txn(e.id).is_none();
+                self.record_failed(if gone {
+                    ApiError::NotFound { code: None }
+                } else {
+                    super::conflict::stale_error()
+                });
+                return false;
+            }
             let dates: Vec<_> = old_date.into_iter().chain([new_date]).collect();
             let saved = crate::company::demo::register::check_closing(
                 self.model.closing,
@@ -705,6 +718,7 @@ impl RegisterScreen {
         let lists = Arc::clone(&self.lists);
         let stored = self.entry.draft().clone();
         self.entry.form.save_ok(stored, &*lists);
+        self.silent_resaved = false;
         self.entry.saved += 1;
         self.entry.last_saved = Some(match (&self.entry.editing, self.draft_kind()) {
             (Some(_), _) => "update",
@@ -741,7 +755,20 @@ impl RegisterScreen {
         if self.closing_failed(&e, super::dialogs::Pending::Save) {
             return;
         }
+        // P33: someone else saved the edited transaction first (or removed
+        // it): read theirs; the dialog, a silent re-save or the note follows.
+        let changed = matches!(
+            e,
+            ApiError::Conflict {
+                reason: cl_api::ConflictReason::Stale,
+                ..
+            } | ApiError::NotFound { .. }
+        );
+        let editing = self.entry.editing.is_some();
         self.entry.error = Some(e);
+        if changed && editing {
+            self.txn_conflict_start();
+        }
     }
 
     /// Back to an empty new row, keeping the date.
@@ -754,6 +781,7 @@ impl RegisterScreen {
         }
         self.entry.form.load(fresh, &*lists);
         self.entry.editing = None;
+        self.txn_conflict.clear();
         self.entry.proposed = None;
         // What the edit was told (e.g. "Remove the extra split lines
         // first") doesn't carry to the new-entry row (A05 QA).

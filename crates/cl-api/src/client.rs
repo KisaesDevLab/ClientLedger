@@ -384,6 +384,9 @@ pub(crate) enum TransportError {
     TooLarge,
     /// A header value could not be built (a malformed token).
     BadHeader,
+    /// A save on a source whose writes never wait (a LAN workstation)
+    /// found the engine away: nothing was sent (P33 QA-6).
+    WriteHeld,
 }
 
 /// One-attempt HTTP transport over loopback.
@@ -393,6 +396,8 @@ pub(crate) struct Transport {
     write: reqwest::Client,
     cfg: ClientConfig,
     last_generation: AtomicU64,
+    /// The generation moved since the last `desktop_info` (P33 S12).
+    generation_moved: std::sync::atomic::AtomicBool,
     /// Test-only request observer (feature `test-support`).
     #[cfg(feature = "test-support")]
     pub(crate) observer: crate::testing::ObserverSlot,
@@ -426,6 +431,7 @@ impl Transport {
             write,
             cfg,
             last_generation: AtomicU64::new(0),
+            generation_moved: std::sync::atomic::AtomicBool::new(false),
             #[cfg(feature = "test-support")]
             observer: crate::testing::ObserverSlot::default(),
             #[cfg(test)]
@@ -440,8 +446,31 @@ impl Transport {
         self
     }
 
+    /// True (once) when the engine's generation moved since the last call:
+    /// the engine restarted, or a LAN workstation now talks to a restarted
+    /// host engine, so `desktop_info` runs again (P33 S12).
+    pub(crate) fn take_generation_moved(&self) -> bool {
+        self.generation_moved.swap(false, Ordering::SeqCst)
+    }
+
+    /// Marks the generation as moved again (a `desktop_info` re-run failed).
+    pub(crate) fn mark_generation_moved(&self) {
+        self.generation_moved.store(true, Ordering::SeqCst);
+    }
+
     pub(crate) fn config(&self) -> &ClientConfig {
         &self.cfg
+    }
+
+    /// Saves never wait for this source's engine (a LAN workstation).
+    pub(crate) fn writes_never_wait(&self) -> bool {
+        !self.source.writes_wait()
+    }
+
+    /// A save now would be refused as not sent: its source never waits and
+    /// the engine is away (P33 QA-6).
+    pub(crate) fn write_held(&self) -> bool {
+        self.writes_never_wait() && !matches!(self.source.current(), EndpointState::Ready(_))
     }
 
     /// The current endpoint state (never cached).
@@ -454,18 +483,29 @@ impl Transport {
         &self,
         deadline: Instant,
         purpose: Purpose,
+        may_wait: bool,
     ) -> Result<EngineEndpoint, TransportError> {
         loop {
-            match self.source.current_for(purpose) {
+            let state = self.source.current_for(purpose);
+            match state {
                 EndpointState::Ready(ep) => {
+                    crate::idempotency::set_clock_offset_ms(ep.clock_offset_ms);
                     let prev = self.last_generation.swap(ep.generation, Ordering::Relaxed);
                     if prev != 0 && prev != ep.generation {
                         tracing::info!(generation = ep.generation, "engine restarted");
+                        self.generation_moved.store(true, Ordering::SeqCst);
                     }
                     return Ok(ep);
                 }
                 EndpointState::Down { permanent: true } => {
                     return Err(TransportError::NotReady { permanent: true });
+                }
+                EndpointState::Starting
+                | EndpointState::Restarting
+                | EndpointState::Down { permanent: false }
+                    if !may_wait =>
+                {
+                    return Err(TransportError::WriteHeld);
                 }
                 EndpointState::Starting
                 | EndpointState::Restarting
@@ -496,7 +536,10 @@ impl Transport {
         } else {
             Purpose::Ordinary
         };
-        let ep = self.wait_ready(deadline, purpose).await?;
+        // P33 QA-6: a save never waits through a LAN link that is down; it
+        // is refused as not sent, and goes only when the owner saves again.
+        let may_wait = call.method.is_read() || self.source.writes_wait();
+        let ep = self.wait_ready(deadline, purpose, may_wait).await?;
         let budget = self.cfg.timeouts.budget(call.timeout);
         let per_attempt = if call.method.is_read() {
             budget
@@ -953,6 +996,7 @@ pub(crate) mod tests {
             port: b.address().port(),
             token: Secret::new("second-token"),
             generation: 2,
+            clock_offset_ms: 0,
         }));
         let r2 = t
             .attempt(&call, &AttemptAuth::default(), 2, soon())
@@ -985,6 +1029,7 @@ pub(crate) mod tests {
                 port,
                 token: Secret::new(TOKEN),
                 generation: 5,
+                clock_offset_ms: 0,
             }));
         });
         let reply = t
@@ -1024,6 +1069,72 @@ pub(crate) mod tests {
             .await
             .expect_err("never ready");
         assert_eq!(e, TransportError::NotReady { permanent: false });
+    }
+
+    /// A source whose saves never wait (a LAN workstation's link).
+    struct NoWaitSource(Arc<FixedEndpoint>);
+    impl EndpointSource for NoWaitSource {
+        fn current(&self) -> EndpointState {
+            self.0.current()
+        }
+        fn writes_wait(&self) -> bool {
+            false
+        }
+    }
+
+    /// P33 QA-6: with the host away a save is refused at once and nothing
+    /// is held; when the host comes back nothing is sent until the next
+    /// save. Reads still wait as before.
+    #[tokio::test]
+    async fn a_save_never_waits_through_a_down_lan_link() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("{}"))
+            .mount(&server)
+            .await;
+        let port = server.address().port();
+        let fixed = Arc::new(FixedEndpoint::with_state(EndpointState::Down {
+            permanent: false,
+        }));
+        let t =
+            Transport::new(Arc::new(NoWaitSource(fixed.clone())), fast_config()).expect("client");
+        let setter = fixed.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            setter.set(EndpointState::Ready(EngineEndpoint {
+                port,
+                token: Secret::new(TOKEN),
+                generation: 2,
+                clock_offset_ms: 0,
+            }));
+        });
+        let save = Call::at(Method::Put, "/api/v1/x").json_body(b"{}".to_vec());
+        let started = Instant::now();
+        let e = t
+            .attempt(&save, &AttemptAuth::default(), 1, soon())
+            .await
+            .expect_err("held");
+        assert_eq!(e, TransportError::WriteHeld);
+        assert!(started.elapsed() < Duration::from_millis(100));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            server
+                .received_requests()
+                .await
+                .unwrap_or_default()
+                .is_empty(),
+            "nothing reached the engine on its own"
+        );
+        // The owner saves again: it goes now.
+        let reply = t
+            .attempt(&save, &AttemptAuth::default(), 1, soon())
+            .await
+            .expect("sent");
+        assert_eq!(reply.status, 200);
+        assert_eq!(
+            server.received_requests().await.unwrap_or_default().len(),
+            1
+        );
     }
 
     /// A port nothing listened on a moment ago. Only for a single immediate

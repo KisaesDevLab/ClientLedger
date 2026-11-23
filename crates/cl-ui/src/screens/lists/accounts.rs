@@ -33,8 +33,7 @@ use std::sync::Arc;
 
 use cl_api::{
     Account, AccountFields, AccountFilter, AccountReport, AccountUpdate, ApiError, CardLast4,
-    ConflictReason, EditableFields, IdempotencyKey, OrphanLabel, RecordVersion, RequestGroup,
-    Versioned,
+    ConflictReason, EditableFields, IdempotencyKey, OrphanLabel, RequestGroup, Versioned,
 };
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, TenantId};
@@ -103,6 +102,10 @@ struct FormPanel {
     error: Option<ApiError>,
     focus: Option<DraftField>,
     task: Option<Task<Versioned<Account>>>,
+    /// P33: the account as the panel opened it (an edit is guarded by it).
+    opened: Option<Account>,
+    /// P33: what the save in flight is for.
+    intent: SaveIntent,
 }
 
 impl FormPanel {
@@ -114,6 +117,8 @@ impl FormPanel {
             error: None,
             focus: Some(DraftField::Kind),
             task: None,
+            opened: None,
+            intent: SaveIntent::Save,
         }
     }
 
@@ -219,6 +224,12 @@ pub struct ChartScreen {
     /// The chart being read again after a save elsewhere: the cursor
     /// stays where it was and the keyboard is not moved.
     refreshing: bool,
+    /// P33: their account being read after a stale save, then the dialog.
+    acct_conflict: crate::forms::conflict::ConflictFlow<Versioned<Account>>,
+    /// P33: the account that read is for.
+    conflict_for: Option<AccountId>,
+    /// P33: one silent re-save per owner save.
+    resave_left: bool,
 }
 
 fn new_grid(salt: &str, spec: cl_grid::GridSpec) -> Grid {
@@ -269,6 +280,9 @@ impl ChartScreen {
             just_hidden: None,
             bus: crate::data_bus::Subscription::detached(),
             refreshing: false,
+            acct_conflict: crate::forms::conflict::ConflictFlow::default(),
+            conflict_for: None,
+            resave_left: false,
         };
         s.bus = s.link.bus().subscribe();
         s.read_prefs();
@@ -552,6 +566,7 @@ impl ChartScreen {
             .map_or(AccountKind::Expense, |e| e.kind);
         self.warn = None;
         self.panel = Panel::Form(Box::new(FormPanel::new(None, AccountDraft::new(kind))));
+        self.acct_conflict.clear();
     }
 
     /// Enter or Ctrl+E on a row.
@@ -564,13 +579,22 @@ impl ChartScreen {
             self.warn = Some("lists.accounts.finish_first");
             return;
         }
-        let Some(entry) = self.model.chart().entry(id) else {
+        let Some(mut panel) = self.edit_panel(id) else {
             return;
         };
         self.warn = None;
-        let mut panel = FormPanel::new(Some(id), AccountDraft::from_entry(entry));
         panel.focus = Some(DraftField::Name);
         self.panel = Panel::Form(Box::new(panel));
+        self.acct_conflict.clear();
+    }
+
+    /// The panel over account id as the chart holds it, keeping the
+    /// account it opened (P33: an edit is guarded by that copy).
+    fn edit_panel(&self, id: AccountId) -> Option<FormPanel> {
+        let entry = self.model.chart().entry(id)?;
+        let mut panel = FormPanel::new(Some(id), AccountDraft::from_entry(entry));
+        panel.opened = self.account(id).cloned();
+        Some(panel)
     }
 
     /// Ctrl+Shift+I: make the selected account inactive, or active again.
@@ -609,7 +633,7 @@ impl ChartScreen {
                 *a = changed.clone();
             }
             Task::ready(Versioned {
-                version: RecordVersion::Fingerprint(changed.fingerprint()),
+                version: changed.version(),
                 record: changed,
                 stock_warnings: Vec::new(),
             })
@@ -623,11 +647,12 @@ impl ChartScreen {
                 key: Some(key.clone()),
             };
             let pending = if account.is_active {
+                let version = account.version();
                 group.write(&session, label, move |s| async move {
-                    s.accounts().deactivate(id, key).await
+                    s.accounts().deactivate(id, &version, key).await
                 })
             } else {
-                let version = RecordVersion::Fingerprint(account.fingerprint());
+                let version = account.version();
                 let update = AccountUpdate {
                     fields: account.fields.clone(),
                     is_active: true,
@@ -665,6 +690,7 @@ impl ChartScreen {
         }
         let title = self.model.chart().display_name(id).unwrap_or_default();
         self.warn = None;
+        self.acct_conflict.clear();
         self.panel = Panel::Report(Box::new(ReportPanel {
             account: id,
             title,
@@ -718,6 +744,16 @@ impl ChartScreen {
     /// Alt+N / Alt+S / Enter in a field. Returns true when the save
     /// finished at once (demo) or nothing needed saving.
     pub fn save_form(&mut self, intent: SaveIntent) -> bool {
+        // P33: never while their account is being read or the dialog is open.
+        if self.acct_conflict.busy() || self.acct_conflict.is_open() {
+            return false;
+        }
+        self.resave_left = true;
+        self.save_inner(intent)
+    }
+
+    /// The save itself (also the conflict flow's re-save).
+    fn save_inner(&mut self, intent: SaveIntent) -> bool {
         let Panel::Form(panel) = &mut self.panel else {
             return false;
         };
@@ -734,6 +770,7 @@ impl ChartScreen {
         };
         panel.problems.clear();
         panel.error = None;
+        panel.intent = intent;
         match panel.form.begin_save(intent) {
             SaveStart::Send(_) => {}
             SaveStart::Skip(after) => {
@@ -742,8 +779,15 @@ impl ChartScreen {
             }
             SaveStart::Busy | SaveStart::Unconfirmed => return false,
         }
+        // P33: an edit is guarded by the account as the panel opened it,
+        // never by the chart as it is now (a refresh would hide their change).
         let editing = panel.editing;
-        let existing = editing.and_then(|id| self.accounts.iter().find(|a| a.id == id).cloned());
+        let existing = editing.and_then(|id| {
+            panel
+                .opened
+                .clone()
+                .or_else(|| self.accounts.iter().find(|a| a.id == id).cloned())
+        });
         // The chart shows the owner-facing name (Q-202); saving it unchanged
         // keeps the name the engine stores.
         let name = existing.as_ref().map_or_else(
@@ -768,6 +812,12 @@ impl ChartScreen {
             .as_ref()
             .and_then(|c| CardLast4::parse(c.as_str()));
         if self.link.is_demo() {
+            if let Some(a) = &existing
+                && let Err(e) = demo_guard_account(&self.link, a)
+            {
+                self.account_save_failed(e);
+                return false;
+            }
             let mut saved = demo_save(&self.link, editing, existing, fields);
             if card_on {
                 demo_set_card(&self.link, &mut saved, digits);
@@ -791,7 +841,7 @@ impl ChartScreen {
             // guarded by the version the form was opened on.
             (Some(_), Some(a)) if card_on && a.card_last4 != digits => {
                 let current = Versioned {
-                    version: RecordVersion::Fingerprint(a.fingerprint()),
+                    version: a.version(),
                     record: Account { fields, ..a },
                     stock_warnings: Vec::new(),
                 };
@@ -800,7 +850,7 @@ impl ChartScreen {
                 })
             }
             (Some(id), Some(a)) => {
-                let version = RecordVersion::Fingerprint(a.fingerprint());
+                let version = a.version();
                 let update = AccountUpdate {
                     fields,
                     is_active: a.is_active,
@@ -886,19 +936,49 @@ impl ChartScreen {
                 true
             }
             Err(e) => {
-                panel.save_failed(e);
+                self.account_save_failed(e);
                 false
             }
         }
     }
 
+    /// A refused account save. P33: someone else saved it first: their
+    /// account, then the conflict dialog (or a silent re-save); deleted
+    /// elsewhere: never re-created.
+    fn account_save_failed(&mut self, e: ApiError) {
+        let Panel::Form(panel) = &mut self.panel else {
+            return;
+        };
+        let stale = matches!(
+            e,
+            ApiError::Conflict {
+                reason: ConflictReason::Stale,
+                ..
+            }
+        );
+        let gone = matches!(e, ApiError::NotFound { .. });
+        let (editing, intent) = (panel.editing, panel.intent);
+        panel.save_failed(e);
+        match editing {
+            Some(id) if stale => {
+                panel.error = None;
+                self.account_conflict_start(id, intent);
+            }
+            Some(_) if gone => {
+                panel.error = None;
+                self.warn = Some(crate::forms::conflict::GONE);
+            }
+            _ => {}
+        }
+    }
+
     fn after_save(&mut self, after: AfterSave, saved: Option<AccountId>) {
+        self.acct_conflict.clear();
         match after {
             AfterSave::Stay => {
                 if let Some(id) = saved
-                    && let Some(entry) = self.model.chart().entry(id)
+                    && let Some(mut panel) = self.edit_panel(id)
                 {
-                    let mut panel = FormPanel::new(Some(id), AccountDraft::from_entry(entry));
                     panel.focus = None;
                     self.panel = Panel::Form(Box::new(panel));
                 }
@@ -972,13 +1052,25 @@ impl ChartScreen {
             self.warn = Some("sensitive.not_saved");
             return;
         };
+        // The account as listed: its stamp goes with the mark (U-291; LAN
+        // mode requires it, U-292). The answer replaces the row, new stamp
+        // and all (`poll_mark`).
+        let Some(version) = self
+            .accounts
+            .iter()
+            .find(|a| a.id == id)
+            .map(Account::version)
+        else {
+            self.warn = Some("sensitive.not_saved");
+            return;
+        };
         let key = IdempotencyKey::new();
         let label = OrphanLabel {
             what: "orphan.account_save",
             key: Some(key.clone()),
         };
         match group.write(&session, label, move |s| async move {
-            s.accounts().set_sensitive(id, on, key).await
+            s.accounts().set_sensitive(id, &version, on, key).await
         }) {
             Ok(p) => self.mark = Some((id, Task::Pending(p))),
             Err(_) => self.warn = Some("sensitive.not_saved"),
@@ -1023,8 +1115,7 @@ impl ChartScreen {
         if f.editing != Some(id) || f.form.is_dirty() || f.task.is_some() {
             return;
         }
-        if let Some(entry) = self.model.chart().entry(id) {
-            let mut panel = FormPanel::new(Some(id), AccountDraft::from_entry(entry));
+        if let Some(mut panel) = self.edit_panel(id) {
             panel.focus = None;
             self.panel = Panel::Form(Box::new(panel));
         }
@@ -1571,6 +1662,7 @@ impl ChartScreen {
     fn close_panel(&mut self) {
         let keep = self.selected();
         self.panel = Panel::None;
+        self.acct_conflict.clear();
         self.place_cursor(keep);
     }
 }
@@ -1619,9 +1711,31 @@ pub(crate) fn demo_save(
         }
     }
     Versioned {
-        version: RecordVersion::Fingerprint(account.fingerprint()),
+        version: account.version(),
         record: account,
         stock_warnings: Vec::new(),
+    }
+}
+
+/// P33: the demo's version check (`expectedUpdatedAt`): the stored
+/// account must still be the one the panel opened.
+fn demo_guard_account(link: &CompanyLink, opened: &Account) -> Result<(), ApiError> {
+    let d = link.demo_state().ok_or(ApiError::NoCompanyOpen)?;
+    let now = d
+        .chart
+        .as_ref()
+        .and_then(|c| c.iter().find(|x| x.id == opened.id))
+        .ok_or(ApiError::NotFound { code: None })?;
+    if now.fingerprint() == opened.fingerprint() {
+        Ok(())
+    } else {
+        Err(ApiError::Conflict {
+            reason: ConflictReason::Stale,
+            current_version: None,
+            code: None,
+            message: cl_api::UserText::default(),
+            details: cl_api::ConflictDetails::default(),
+        })
     }
 }
 
@@ -1638,7 +1752,7 @@ fn demo_set_card(link: &CompanyLink, saved: &mut Versioned<Account>, digits: Opt
         return;
     }
     saved.record.card_last4 = digits;
-    saved.version = RecordVersion::Fingerprint(saved.record.fingerprint());
+    saved.version = saved.record.version();
     if let Some(mut d) = link.demo_state()
         && let Some(chart) = d.chart.as_mut()
         && let Some(a) = chart.iter_mut().find(|a| a.id == saved.record.id)
@@ -1772,6 +1886,7 @@ impl Screen for ChartScreen {
     fn ui(&mut self, ui: &mut Ui) {
         self.parts = EnvParts::capture(ui.ctx());
         self.poll();
+        self.poll_account_conflict();
         self.hear_changes();
         self.sync_compact();
         let tokens = Tokens::of(ui.ctx());
@@ -1820,6 +1935,8 @@ impl Screen for ChartScreen {
             }
         });
         self.layout = frame.end();
+        let ctx = ui.ctx().clone();
+        self.account_conflict_ui(&ctx);
     }
 
     fn fixed_layout(&self) -> bool {
@@ -1871,6 +1988,12 @@ impl Screen for ChartScreen {
                     p.form.undo();
                 } else {
                     p.form.redo();
+                }
+            }
+            // P33: Esc in the conflict dialog is Back.
+            "form.revert" if self.acct_conflict.is_open() => {
+                if let Some((open, choice)) = self.acct_conflict.take_back() {
+                    self.run_account_choice(open, choice);
                 }
             }
             "form.revert" => {
@@ -1977,6 +2100,7 @@ impl Screen for ChartScreen {
             "error": error,
             "saving": saving,
             "toggling": self.toggle.is_some(),
+            "conflict": self.acct_conflict.state(),
             "warning": self.warn.map(|w| w.rsplit('.').next().unwrap_or_default()),
             "note": self.note.map(|n| n.rsplit('.').next().unwrap_or_default()),
             "sensitive_kept_local": self.kept_local,
@@ -1990,3 +2114,5 @@ impl Screen for ChartScreen {
 
 #[cfg(test)]
 mod tests;
+
+mod conflict;

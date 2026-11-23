@@ -97,10 +97,13 @@ pub fn voided_check_leaves_the_queue_u115(h: &Harness) {
     let bank = detail_account(h, s, AccountType::Asset, "bank");
     let id = queued(h, s, bank, date(2026, 11, 9));
     assert!(in_queue(h, s, bank, id));
-    h.run(
-        s.transactions()
-            .void(id, "contract clean-up", &PostingOptions::default(), key()),
-    )
+    h.run(s.transactions().void(
+        id,
+        None,
+        "contract clean-up",
+        &PostingOptions::default(),
+        key(),
+    ))
     .expect("void");
     assert!(!in_queue(h, s, bank, id), "a void check leaves the queue");
     let e = print(h, s, bank, vec![id], 6101).expect_err("void");
@@ -125,10 +128,13 @@ pub fn voided_checks_read_back(h: &Harness) {
     let s = &h.s1;
     let bank = detail_account(h, s, AccountType::Asset, "bank");
     let void = |id| {
-        h.run(
-            s.transactions()
-                .void(id, "contract clean-up", &PostingOptions::default(), key()),
-        )
+        h.run(s.transactions().void(
+            id,
+            None,
+            "contract clean-up",
+            &PostingOptions::default(),
+            key(),
+        ))
         .expect("void");
     };
 
@@ -182,10 +188,13 @@ pub fn requeue_skips_void_u117(h: &Harness) {
     let a = queued(h, s, bank, date(2026, 11, 9));
     let b = queued(h, s, bank, date(2026, 11, 9));
     print(h, s, bank, vec![a, b], 6301).expect("print");
-    h.run(
-        s.transactions()
-            .void(a, "contract clean-up", &PostingOptions::default(), key()),
-    )
+    h.run(s.transactions().void(
+        a,
+        None,
+        "contract clean-up",
+        &PostingOptions::default(),
+        key(),
+    ))
     .expect("void");
     let r = h
         .run(s.printing().requeue(&[a, b], &PostingOptions::default()))

@@ -63,7 +63,11 @@ pub fn accounts(h: &Harness) {
     assert_eq!(none.data.len(), 0);
 
     let off = h
-        .run(s.accounts().deactivate(made.record.id, key()))
+        .run(s.accounts().deactivate(
+            made.record.id,
+            &cl_api::RecordVersion::Fingerprint([0; 32]),
+            key(),
+        ))
         .expect("deactivate");
     assert!(!off.record.is_active);
     let inactive = AccountFilter {
@@ -128,7 +132,11 @@ pub fn contacts(h: &Harness) {
     assert_eq!(none.data.len(), 0);
 
     let off = h
-        .run(s.contacts().deactivate(made.record.id, key()))
+        .run(s.contacts().deactivate(
+            made.record.id,
+            &cl_api::RecordVersion::Fingerprint([0; 32]),
+            key(),
+        ))
         .expect("deactivate");
     assert!(!off.record.is_active);
 }
@@ -190,8 +198,12 @@ pub fn items(h: &Harness) {
         .expect("list");
     assert_eq!(none.data.len(), 0);
 
-    h.run(s.items().deactivate(made.record.id, key()))
-        .expect("deactivate");
+    h.run(s.items().deactivate(
+        made.record.id,
+        &cl_api::RecordVersion::Fingerprint([0; 32]),
+        key(),
+    ))
+    .expect("deactivate");
     let after = h.run(s.items().get(made.record.id)).expect("get");
     assert!(!after.record.is_active);
 }
@@ -236,8 +248,12 @@ pub fn tags(h: &Harness) {
     assert_eq!(page.data.len(), 1);
     assert_eq!(page.data[0].id, made.record.id);
 
-    h.run(s.tags().delete(made.record.id, key()))
-        .expect("delete");
+    h.run(s.tags().delete(
+        made.record.id,
+        &cl_api::RecordVersion::Fingerprint([0; 32]),
+        key(),
+    ))
+    .expect("delete");
     let gone = h.run(s.tags().get(made.record.id)).expect_err("deleted");
     assert!(matches!(gone, ApiError::NotFound { .. }), "{gone:?}");
 }

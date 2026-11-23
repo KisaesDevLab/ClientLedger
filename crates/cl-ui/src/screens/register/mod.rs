@@ -17,6 +17,7 @@
 //!
 //! Every engine call runs on the request queue and is polled each frame.
 
+mod conflict;
 mod dialogs;
 mod docs;
 mod edit;
@@ -200,6 +201,13 @@ pub struct RegisterScreen {
     feed_link_for: Option<(cl_core::ids::TransactionId, Option<cl_core::Money>)>,
     /// The edited transaction read again after a change elsewhere.
     edit_check: Option<edit::EditCheck>,
+    /// P33: their transaction being read after a stale edit save, then
+    /// the dialog.
+    txn_conflict: crate::forms::conflict::ConflictFlow<cl_api::Versioned<cl_api::Transaction>>,
+    /// P33: the transaction that read is for.
+    txn_conflict_for: Option<cl_core::ids::TransactionId>,
+    /// P33: the last stale save was already re-sent once without asking.
+    silent_resaved: bool,
     /// A transaction the register can't change, shown read-only.
     read_only: Option<Vec<edit::ReadLine>>,
     /// The quick filters as typed.
@@ -316,6 +324,9 @@ impl RegisterScreen {
             feed_link_job: None,
             feed_link_for: None,
             edit_check: None,
+            txn_conflict: crate::forms::conflict::ConflictFlow::default(),
+            txn_conflict_for: None,
+            silent_resaved: false,
             read_only: None,
             quick: filters::QuickInput::default(),
             goto: goto::GotoBar::default(),
@@ -620,6 +631,7 @@ impl RegisterScreen {
         self.poll_entry();
         self.poll_edit();
         self.poll_edit_check();
+        self.poll_txn_conflict();
         self.poll_actions();
         self.drive_goto();
         self.poll_report();
@@ -1197,6 +1209,8 @@ impl Screen for RegisterScreen {
             });
         }
         self.layout = frame.end();
+        let ctx = ui.ctx().clone();
+        self.txn_conflict_ui(&ctx);
         self.sync_docs(ui.ctx());
         self.request_pages();
         if empty {
@@ -1229,6 +1243,13 @@ impl Screen for RegisterScreen {
     }
 
     fn command(&mut self, id: CommandId) -> bool {
+        // P33: Esc in the conflict dialog is Back.
+        if id.as_str() == "form.revert" && self.txn_conflict.is_open() {
+            if let Some((open, choice)) = self.txn_conflict.take_back() {
+                self.run_txn_choice(open, choice);
+            }
+            return true;
+        }
         // Esc closes the payee filter's list first and keeps its text.
         if id.as_str() == "form.revert" && self.quick.payee_list {
             self.quick.payee_list = false;
@@ -1291,6 +1312,7 @@ impl Screen for RegisterScreen {
         json!({
             "screen": "register",
             "layout": self.layout.json(),
+            "conflict": self.txn_conflict.state(),
             "company_open": self.tenant.is_some(),
             "account_id": self.account.map(|a| a.to_string()),
             "account_class": self.account.map(|_| filters::class_name(self.class)),

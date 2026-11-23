@@ -700,3 +700,196 @@ fn detail_types_read_in_plain_words() {
     assert_eq!(detail_text(Some("bank")), "Bank");
     assert_eq!(detail_text(None), "");
 }
+
+// --- P33: someone else saved the account first ------------------------------
+
+use crate::screens::conflict_dialog::ConflictChoice;
+
+fn demo_account(r: &Rig, id: cl_core::ids::AccountId) -> cl_api::Account {
+    let d = r.link.demo_state().expect("demo");
+    d.chart
+        .as_ref()
+        .and_then(|c| c.iter().find(|a| a.id == id).cloned())
+        .expect("account")
+}
+
+fn change_in_books(r: &Rig, id: cl_core::ids::AccountId, f: impl FnOnce(&mut cl_api::Account)) {
+    let mut d = r.link.demo_state().expect("demo");
+    let a = d
+        .chart
+        .as_mut()
+        .and_then(|c| c.iter_mut().find(|a| a.id == id))
+        .expect("account");
+    f(a);
+}
+
+/// Plates and Permits, open in the panel; someone else then sets its
+/// description in the books, and the chart is read again.
+fn opened_then_changed_elsewhere(r: &mut Rig) -> cl_core::ids::AccountId {
+    let id = account_id(6721);
+    r.select(6721);
+    r.s.command(cl_model::CommandId::new("edit.edit_transaction"));
+    r.frames(2);
+    change_in_books(r, id, |a| a.fields.description = Some("theirs".into()));
+    r.s.start_load();
+    r.frames(2);
+    id
+}
+
+#[test]
+fn p33_an_edit_is_guarded_by_the_account_as_opened_not_the_reloaded_chart() {
+    let mut r = Rig::new(true);
+    let id = opened_then_changed_elsewhere(&mut r);
+    let before = demo_account(&r, id).fields.name;
+    r.form().form.edit(F_NAME, |d| d.name = "Mine".into());
+    r.s.save_form(SaveIntent::Save);
+    assert!(r.s.acct_conflict.is_open(), "their change is never hidden");
+    assert_eq!(
+        demo_account(&r, id).fields.name,
+        before,
+        "nothing saved yet"
+    );
+    assert!(r.s.state()["conflict"].is_object());
+    assert!(!r.s.save_form(SaveIntent::Save), "no save while it is open");
+}
+
+#[test]
+fn p33_keep_mine_takes_their_description_and_keeps_my_name() {
+    let mut r = Rig::new(true);
+    let id = opened_then_changed_elsewhere(&mut r);
+    r.form().form.edit(F_NAME, |d| d.name = "Mine".into());
+    r.s.save_form(SaveIntent::Save);
+    let open = r.s.acct_conflict.open.take().expect("dialog");
+    let merge = open.dialog.conflict().keep_mine();
+    assert!(merge.undone.is_empty(), "{:?}", merge.undone);
+    r.s.run_account_choice(open, ConflictChoice::KeepMine(merge));
+    let a = demo_account(&r, id);
+    assert_eq!(a.fields.name, "Mine");
+    assert_eq!(a.fields.description.as_deref(), Some("theirs"));
+}
+
+#[test]
+fn p33_use_theirs_shows_their_account_and_esc_is_back() {
+    let mut r = Rig::new(true);
+    let id = opened_then_changed_elsewhere(&mut r);
+    r.form()
+        .form
+        .edit(super::F_DESCRIPTION, |d| d.description = "mine".into());
+    r.s.save_form(SaveIntent::Save);
+    assert!(r.s.acct_conflict.is_open());
+    assert!(
+        r.s.command(cl_model::CommandId::new("form.revert")),
+        "Esc is Back"
+    );
+    assert!(!r.s.acct_conflict.is_open());
+    assert_eq!(
+        r.form().form.current().description,
+        "mine",
+        "Back keeps mine"
+    );
+    assert_eq!(r.s.state()["warning"], "changed_elsewhere");
+    r.s.save_form(SaveIntent::Save);
+    let open = r.s.acct_conflict.open.take().expect("dialog again");
+    r.s.run_account_choice(open, ConflictChoice::UseTheirs);
+    assert_eq!(r.form().form.current().description, "theirs");
+    assert!(!r.form().form.is_dirty());
+    assert_eq!(
+        demo_account(&r, id).fields.description.as_deref(),
+        Some("theirs")
+    );
+}
+
+#[test]
+fn p33_a_new_version_with_nothing_editable_changed_saves_without_asking() {
+    let mut r = Rig::new(true);
+    let id = account_id(6721);
+    r.select(6721);
+    r.s.command(cl_model::CommandId::new("edit.edit_transaction"));
+    r.frames(2);
+    // The panel's copy is older than the books (made inactive and active
+    // again elsewhere: not a field the panel edits).
+    if let Some(o) = r.form().opened.as_mut() {
+        o.is_active = !o.is_active;
+    }
+    r.form().form.edit(F_NAME, |d| d.name = "Mine".into());
+    r.s.save_form(SaveIntent::Save);
+    assert!(!r.s.acct_conflict.is_open());
+    let a = demo_account(&r, id);
+    assert_eq!(a.fields.name, "Mine");
+    assert!(a.is_active, "their active flag is kept");
+}
+
+#[test]
+fn p33_a_second_stale_save_in_a_row_says_so_instead_of_looping() {
+    let mut r = Rig::new(true);
+    let id = account_id(6721);
+    r.select(6721);
+    r.s.command(cl_model::CommandId::new("edit.edit_transaction"));
+    r.frames(2);
+    let before = demo_account(&r, id).fields.name;
+    r.form().form.edit(F_NAME, |d| d.name = "Mine".into());
+    let theirs = demo_account(&r, id);
+    r.s.conflict_for = Some(id);
+    r.s.resave_left = false;
+    r.s.account_conflict_read(
+        Ok(cl_api::Versioned {
+            version: cl_api::RecordVersion::Fingerprint(cl_api::EditableFields::fingerprint(
+                &theirs,
+            )),
+            record: theirs,
+            stock_warnings: Vec::new(),
+        }),
+        SaveIntent::Save,
+    );
+    assert_eq!(r.s.state()["warning"], "changed_elsewhere");
+    assert_eq!(demo_account(&r, id).fields.name, before, "nothing saved");
+}
+
+#[test]
+fn p33_an_account_deleted_elsewhere_is_never_recreated() {
+    let mut r = Rig::new(true);
+    let id = opened_then_changed_elsewhere(&mut r);
+    if let Some(c) = r.link.demo_state().expect("demo").chart.as_mut() {
+        c.retain(|a| a.id != id);
+    }
+    r.form().form.edit(F_NAME, |d| d.name = "Mine".into());
+    r.s.save_form(SaveIntent::Save);
+    assert_eq!(r.s.warn, Some(crate::forms::conflict::GONE));
+    let d = r.link.demo_state().expect("demo");
+    assert!(d.chart.as_ref().expect("chart").iter().all(|a| a.id != id));
+}
+
+#[test]
+fn p33_the_dialog_names_the_parent_account_never_its_id() {
+    let mut r = Rig::new(true);
+    let id = account_id(6721);
+    r.select(6721);
+    r.s.command(cl_model::CommandId::new("edit.edit_transaction"));
+    r.frames(2);
+    let parent = demo_account(&r, id).fields.parent_id;
+    let other =
+        r.s.accounts
+            .iter()
+            .map(|a| a.id)
+            .find(|a| *a != id && Some(*a) != parent)
+            .expect("another account");
+    change_in_books(&r, id, |a| a.fields.parent_id = Some(other));
+    r.form().form.edit(F_NAME, |d| d.name = "Mine".into());
+    r.s.save_form(SaveIntent::Save);
+    let open = r.s.acct_conflict.open.as_ref().expect("dialog");
+    let texts = open.dialog.field_texts();
+    let row = texts
+        .iter()
+        .find(|x| x[0] == crate::i18n::t("lan.field.parent"))
+        .expect("parent row");
+    assert_eq!(
+        Some(row[3].clone()),
+        r.s.model.chart().display_name(other),
+        "{row:?}"
+    );
+    for x in &texts {
+        for v in &x[1..] {
+            assert!(cl_core::ids::AccountId::parse(v).is_err(), "{x:?}");
+        }
+    }
+}

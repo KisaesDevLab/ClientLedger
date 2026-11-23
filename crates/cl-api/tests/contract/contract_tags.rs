@@ -83,6 +83,7 @@ pub fn groups_round_trip(h: &Harness) {
     let renamed = h
         .run(s.tags().update_group(
             g.id,
+            None,
             &TagGroupFields {
                 name: unique("Area"),
                 description: Some("where the work is".into()),
@@ -97,7 +98,8 @@ pub fn groups_round_trip(h: &Harness) {
         Some("where the work is")
     );
 
-    h.run(s.tags().delete_group(g.id, key())).expect("delete");
+    h.run(s.tags().delete_group(g.id, None, key()))
+        .expect("delete");
     let after = h.run(s.tags().get(t.id)).expect("tag");
     assert_eq!(after.record.fields.group_id, None, "ungrouped, not deleted");
     let groups = h.run(s.tags().groups()).expect("groups");
@@ -141,8 +143,13 @@ pub fn rename_usage_and_header_merge(h: &Harness) {
         .expect("rename");
     assert_eq!(renamed.record.fields.name, fields.name);
 
-    h.run(s.tags().merge(source.id, target.id, None, key()))
-        .expect("merge");
+    h.run(s.tags().merge(
+        (source.id, &cl_api::RecordVersion::Fingerprint([0; 32])),
+        (target.id, &cl_api::RecordVersion::Fingerprint([0; 32])),
+        None,
+        key(),
+    ))
+    .expect("merge");
     assert!(h.run(s.tags().get(source.id)).is_err(), "source deleted");
     let moved = h.run(s.tags().usage(target.id)).expect("usage");
     assert_eq!(moved.transactions, 1);
@@ -159,7 +166,12 @@ pub fn line_tag_merge_u41(h: &Harness) {
     let usage = h.run(s.tags().usage(source.id)).expect("usage");
     assert_eq!(usage.transaction_lines, 1);
     assert!(!usage.merge_safe());
-    let merged = h.run(s.tags().merge(source.id, target.id, None, key()));
+    let merged = h.run(s.tags().merge(
+        (source.id, &cl_api::RecordVersion::Fingerprint([0; 32])),
+        (target.id, &cl_api::RecordVersion::Fingerprint([0; 32])),
+        None,
+        key(),
+    ));
     if h.caps.has(Capabilities::MERGE_CLOSING_DATE) {
         merged.expect("merge moves line tags (merge-closing-date-v1)");
         assert!(h.run(s.tags().get(source.id)).is_err(), "source deleted");
@@ -215,7 +227,8 @@ pub fn group_reorder_u41(h: &Harness) {
         );
     }
     for g in [a, b] {
-        h.run(s.tags().delete_group(g.id, key())).expect("clean up");
+        h.run(s.tags().delete_group(g.id, None, key()))
+            .expect("clean up");
     }
 }
 
@@ -350,7 +363,11 @@ pub fn numbers_u75(h: &Harness) {
         );
         let id = cl_core::ids::TagId::parse(raw.body["tag"]["id"].as_str().expect("id"))
             .expect("tag id");
-        h.run(s.tags().delete(id, key())).expect("clean up");
+        h.run(
+            s.tags()
+                .delete(id, &cl_api::RecordVersion::Fingerprint([0; 32]), key()),
+        )
+        .expect("clean up");
         return;
     }
 
@@ -496,7 +513,11 @@ pub fn numbers_u75(h: &Harness) {
         "search matches the number"
     );
     for id in [first.id, other.record.id, reused.record.id] {
-        h.run(s.tags().delete(id, key())).expect("clean up");
+        h.run(
+            s.tags()
+                .delete(id, &cl_api::RecordVersion::Fingerprint([0; 32]), key()),
+        )
+        .expect("clean up");
     }
 }
 
