@@ -8,11 +8,9 @@
 //!   `fix_after_backup` writes a verified before-fix backup first; the
 //!   check after it finds nothing fixable.
 //!
-//! Until the engine pin carries `tenant-archive-test-restore-v1` and
-//! `integrity-v1` (Lane A's A3 pin bump) each part prints `SKIPPED` for
-//! its capability, even with `CL_API_REQUIRE=1`; remove that skip with the
-//! pin bump. Without the engine or `PostgreSQL` it skips as the other live
-//! tests do. Loopback only; synthetic data.
+//! The pinned engine (f52b64ae, engine PRs #102 and #103) carries both
+//! capabilities; their absence fails. Without the engine or `PostgreSQL`
+//! it skips as the other live tests do. Loopback only; synthetic data.
 #![allow(clippy::too_many_lines, reason = "one linear scenario")]
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -104,7 +102,11 @@ async fn scenario(sup: &Supervisor, client: &Client, password: &Secret, scratch:
     let caps = s.client().capabilities();
 
     // --- Test restore -------------------------------------------------------
-    if caps.has(Capabilities::TENANT_ARCHIVE_TEST_RESTORE) {
+    assert!(
+        caps.has(Capabilities::TENANT_ARCHIVE_TEST_RESTORE),
+        "the pinned engine (f52b64ae) advertises tenant-archive-test-restore-v1"
+    );
+    {
         let tenants_before = s.tenants().list().await.expect("tenants").len();
         let made = cl_company::backup(
             &s,
@@ -149,12 +151,14 @@ async fn scenario(sup: &Supervisor, client: &Client, password: &Secret, scratch:
             tenants_before,
             "no company was created"
         );
-    } else {
-        eprintln!("SKIPPED (test restore): the engine pin lacks tenant-archive-test-restore-v1");
     }
 
     // --- Verify Data ----------------------------------------------------------
-    if caps.has(Capabilities::INTEGRITY) {
+    assert!(
+        caps.has(Capabilities::INTEGRITY),
+        "the pinned engine (f52b64ae) advertises integrity-v1"
+    );
+    {
         s.open_company(tenant).await.expect("open");
         // Drift one account's cached balance (its entries stay as they are).
         sup.exec_sql_for_tests(&format!(
@@ -203,8 +207,6 @@ async fn scenario(sup: &Supervisor, client: &Client, password: &Secret, scratch:
                 .count(),
             0
         );
-    } else {
-        eprintln!("SKIPPED (Verify Data): the engine pin lacks integrity-v1");
     }
     let _ = s.logout().await;
 }

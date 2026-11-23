@@ -291,13 +291,6 @@ pub const MAINTENANCE_CALLS: &[(&str, &str)] = &[
     ("POST /integrity/fixes", ".integrity().fix("),
 ];
 
-/// Rows of [`MAINTENANCE_CALLS`] whose engine route arrives with a later
-/// engine pin (P34: U-12 lands with the A3 pin bump). The route-list check
-/// counts them only once the engine's route files have them; remove each
-/// entry when the pin carries it.
-#[cfg(test)]
-const PENDING_ENGINE_ROUTES: &[&str] = &["POST /integrity/fixes"];
-
 /// Runs `work` under maintenance when this computer is the LAN host (its
 /// engine runs with LAN on, PR-8 S7: also when sharing itself could not
 /// start) and the engine has `maintenance-v1` (U-293): restore, import
@@ -1128,7 +1121,6 @@ mod tests {
             let listed: std::collections::BTreeSet<String> = MAINTENANCE_CALLS
                 .iter()
                 .map(|(r, _)| (*r).to_string())
-                .filter(|r| !PENDING_ENGINE_ROUTES.contains(&r.as_str()) || found.contains(r))
                 .collect();
             assert_eq!(found, listed, "the engine's maintenance routes changed");
         } else {
