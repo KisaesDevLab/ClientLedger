@@ -13,7 +13,7 @@ Revision 2, 2026-11-21: owner decisions folded in (see "Decisions").
 | `{DEV_REPO}` | Source repo (becomes private) | KisaesDevLab/ClientLedger |
 | `{PUB_REPO}` | New public release repo | KisaesDevLab/clientledger-releases |
 | `{PUB_DIR}` | Local checkout of the public repo | C:\Projects\clientledger-releases |
-| `{SUPPORT_EMAIL}` | Address for support and source requests | (owner to supply) |
+| `{SUPPORT_EMAIL}` | Address for support and source requests | support@kisaes.com (Q-ADD9l) |
 
 ### Notes for this repo
 
