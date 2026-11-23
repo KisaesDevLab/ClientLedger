@@ -24,6 +24,8 @@ compile_error!(
     "the `test-support` feature is for tests only and must not be enabled in a release build"
 );
 
+/// Whole-database backup and restore with the supervisor stopped (P34 A4).
+pub mod cluster_ops;
 mod database;
 mod desktop;
 mod docread_worker;

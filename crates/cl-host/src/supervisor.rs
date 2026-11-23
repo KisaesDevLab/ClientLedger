@@ -428,7 +428,9 @@ pub struct Supervisor {
     start_budget: Duration,
     /// Held for the supervisor's whole life, so two supervisors can never run
     /// for one user. Declared last: released after everything has stopped.
-    guard: InstanceGuard,
+    /// `None` only inside [`Supervisor::stop_keeping_guard`], which consumes
+    /// the supervisor.
+    guard: Option<InstanceGuard>,
 }
 
 impl Supervisor {
@@ -514,7 +516,7 @@ impl Supervisor {
             stop_tx: Some(stop_tx),
             thread,
             start_budget,
-            guard,
+            guard: Some(guard),
         }
     }
 
@@ -531,8 +533,15 @@ impl Supervisor {
     /// The single-instance guard this supervisor holds: use it to publish
     /// status and to see `focus` and `stop` requests.
     #[must_use]
+    ///
+    /// # Panics
+    /// Never: a live supervisor always holds its guard.
     pub fn instance(&self) -> &InstanceGuard {
-        &self.guard
+        // Invariant: the guard is taken only by stop_keeping_guard, which
+        // consumes the supervisor, so a live supervisor always holds it.
+        self.guard
+            .as_ref()
+            .expect("a live supervisor holds its instance guard")
     }
 
     /// One consistent reading of the host: status, endpoint and generation
@@ -724,6 +733,22 @@ impl Supervisor {
             .clone()
             .ok_or(HostError::NotRunning)?;
         cl_pg::exec_sql_for_tests(&url, sql).map_err(HostError::from)
+    }
+
+    /// Stop the engine, then the database, and wait for both, keeping the
+    /// single-instance guard: no second app can start while the caller works
+    /// on the data folder (a whole-cluster backup or restore, A4). Start
+    /// again with [`Supervisor::spawn`] and the returned guard.
+    ///
+    /// # Panics
+    /// Never: the guard is present until this consumes the supervisor.
+    #[must_use]
+    pub fn stop_keeping_guard(mut self) -> InstanceGuard {
+        self.shutdown();
+        // Invariant: set in spawn_with, taken only here (self is consumed).
+        self.guard
+            .take()
+            .expect("a live supervisor holds its instance guard")
     }
 
     /// Stop the engine, then the database, and wait for both.

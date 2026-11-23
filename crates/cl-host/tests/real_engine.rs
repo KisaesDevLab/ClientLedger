@@ -36,6 +36,13 @@ fn skip<T>(why: &str) -> Option<T> {
 
 /// The engine executable under `target/engine/<target>/`.
 fn engine_exe() -> Option<PathBuf> {
+    // With a separate cargo build-dir the test program is not under the
+    // checkout's `target/`: CL_ENGINE_EXE names the engine then.
+    if let Some(p) = std::env::var_os("CL_ENGINE_EXE").map(PathBuf::from)
+        && p.is_file()
+    {
+        return Some(p);
+    }
     let exe = std::env::current_exe().ok()?;
     let name = if cfg!(windows) {
         "clientledger-engine.exe"
@@ -252,5 +259,94 @@ fn killing_the_engine_or_the_database_restarts_them() {
     assert_eq!(health.superuser, Some(false));
     // The refresher follows the restarted database (Q-335).
     sup.refresh_statistics().unwrap();
+    // P34: the restart after the kill replayed the journal.
+    assert!(sup.database_recovered());
+    sup.stop();
+}
+
+/// P34 A4: a whole-database backup and restore with the supervisor stopped
+/// and started again; a maintenance hold restored with the database is
+/// cleared when the engine starts (P33 follow-up 8).
+#[test]
+fn a_full_backup_and_restore_bring_the_data_back_and_clear_a_restored_hold() {
+    let _one_at_a_time = serial();
+    let Some(env) = env() else { return };
+    let scratch = Scratch::new("real-cluster-ops");
+    let pg_store = Arc::new(MemoryStore::new());
+    let secrets = Arc::new(MemoryStore::new());
+    let sup = start_real(real_config(&scratch, &env, &pg_store, &secrets));
+    assert!(!sup.database_recovered(), "a fresh cluster replays nothing");
+    sup.exec_sql_for_tests(
+        "CREATE TABLE p34_marker (v int); INSERT INTO p34_marker VALUES (1);
+         INSERT INTO desktop_maintenance (id, holder_session, holder_user)
+         VALUES (1, gen_random_uuid(), gen_random_uuid())",
+    )
+    .unwrap();
+    let dest = scratch.paths().root().join("full").join("cluster.tar.gz");
+
+    let (sup, backup) = cl_host::cluster_ops::full_backup(
+        sup,
+        real_config(&scratch, &env, &pg_store, &secrets),
+        &dest,
+    );
+    let info = backup.unwrap();
+    assert!(info.path.is_file() && info.files > 0);
+    sup.wait_ready(Duration::from_mins(3)).unwrap();
+    // After the backup's restart the hold is gone and the data is there.
+    sup.exec_sql_for_tests(
+        "DO $$ BEGIN
+           IF EXISTS (SELECT 1 FROM desktop_maintenance) THEN RAISE EXCEPTION 'hold kept'; END IF;
+           IF (SELECT v FROM p34_marker) <> 1 THEN RAISE EXCEPTION 'marker'; END IF;
+         END $$;
+         UPDATE p34_marker SET v = 2;",
+    )
+    .unwrap();
+
+    // A file this install did not write is refused without confirmation; the
+    // supervisor comes back on the old database.
+    let foreign = scratch.paths().root().join("full").join("copy.tar.gz");
+    std::fs::copy(&dest, &foreign).unwrap();
+    let mut bytes = std::fs::read(&foreign).unwrap();
+    bytes.push(0);
+    std::fs::write(&foreign, bytes).unwrap();
+    let (sup, refused) = cl_host::cluster_ops::full_restore(
+        sup,
+        real_config(&scratch, &env, &pg_store, &secrets),
+        &foreign,
+        false,
+    );
+    assert!(
+        matches!(
+            refused,
+            Err(cl_host::cluster_ops::ClusterOpError::Unregistered)
+        ),
+        "{refused:?}"
+    );
+    sup.wait_ready(Duration::from_mins(3)).unwrap();
+    sup.exec_sql_for_tests("DO $$ BEGIN IF (SELECT v FROM p34_marker) <> 2 THEN RAISE EXCEPTION 'changed'; END IF; END $$")
+        .unwrap();
+
+    let (sup, restored) = cl_host::cluster_ops::full_restore(
+        sup,
+        real_config(&scratch, &env, &pg_store, &secrets),
+        &dest,
+        false,
+    );
+    let r = restored.unwrap();
+    assert!(
+        r.previous.as_ref().is_some_and(|p| p.is_dir()),
+        "the old data folder is kept"
+    );
+    sup.wait_ready(Duration::from_mins(3)).unwrap();
+    // The backup held a hold row: the engine start cleared it; the data is the backup's.
+    sup.exec_sql_for_tests(
+        "DO $$ BEGIN
+           IF EXISTS (SELECT 1 FROM desktop_maintenance) THEN RAISE EXCEPTION 'restored hold kept'; END IF;
+           IF (SELECT v FROM p34_marker) <> 1 THEN RAISE EXCEPTION 'not the backup'; END IF;
+         END $$",
+    )
+    .unwrap();
+    let ep = sup.endpoint().unwrap();
+    check_health(ep.port, &ep.token, Duration::from_secs(5)).unwrap();
     sup.stop();
 }
