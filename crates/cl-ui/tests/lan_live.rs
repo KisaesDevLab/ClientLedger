@@ -771,7 +771,7 @@ fn host_restore(host: &Host, b: &Desk, scratch: &Path) {
     let restored = rt
         .block_on(cl_ui::lan_status::with_maintenance(
             &hs,
-            true,
+            cl_ui::lan_status::Hold::Restore,
             cl_company::restore(
                 &hs,
                 &store,
@@ -1120,7 +1120,7 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
     // away without ending it, as a crash or a power cut would.
     let held = host
         .host_rt()
-        .block_on(hs.start_maintenance())
+        .block_on(hs.start_maintenance(false))
         .expect("the host starts maintenance");
     assert!(held.active, "{held:?}");
     // Refused: 503 MAINTENANCE, or its sign-in already ended by the start.

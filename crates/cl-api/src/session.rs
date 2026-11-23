@@ -76,6 +76,9 @@ struct ClientInner {
     exec: Executor,
     workspace: Mutex<Option<TenantId>>,
     caps: Mutex<Capabilities>,
+    /// The engine runs in LAN mode (`/desktop/info` `lan`, U-289). Kept when a
+    /// re-read fails (the capability flags drop then, which skips the hold).
+    lan: std::sync::atomic::AtomicBool,
 }
 
 impl fmt::Debug for Client {
@@ -96,6 +99,7 @@ impl Client {
                 exec: Executor::new(transport),
                 workspace: Mutex::new(None),
                 caps: Mutex::new(Capabilities::default()),
+                lan: std::sync::atomic::AtomicBool::new(false),
             }),
         })
     }
@@ -125,6 +129,9 @@ impl Client {
         }
         // This read is the re-run a moved generation asks for.
         let _ = self.exec().transport().take_generation_moved();
+        self.inner
+            .lan
+            .store(info.lan, std::sync::atomic::Ordering::Relaxed);
         self.apply_capabilities(&info.capabilities);
         Ok(info)
     }
@@ -220,6 +227,17 @@ impl Client {
             )
             .await?;
         decode(&reply, "health")
+    }
+
+    /// The engine runs in LAN mode and this client is on the host itself
+    /// (its saves wait for the engine; a workstation's link never does):
+    /// restore, the imports and their undo, payroll post and reverse need
+    /// the maintenance hold first (Q-P33y). Decided from what the engine
+    /// runs with, not from whether sharing started (PR-8 S7).
+    #[must_use]
+    pub fn lan_host_engine(&self) -> bool {
+        self.inner.lan.load(std::sync::atomic::Ordering::Relaxed)
+            && !self.exec().transport().writes_never_wait()
     }
 
     /// Capabilities from the last successful [`Client::desktop_info`].

@@ -879,7 +879,15 @@ impl CsvTransactionsScreen {
                     d.txn_import
                         .commit(batch, &backup_ref, &k_demo, password.as_ref(), closing)
                 },
-                move |s| async move { s.import_transactions().commit(batch, &req, k_real).await },
+                // P33: on a LAN host, under maintenance (U-293; PR-8 B2).
+                move |s| async move {
+                    crate::lan_status::with_maintenance(
+                        &s,
+                        crate::lan_status::Hold::Routine,
+                        s.import_transactions().commit(batch, &req, k_real),
+                    )
+                    .await
+                },
             ),
             Action::Undo => self.write(
                 "orphan.txn_import_undo",
@@ -889,7 +897,14 @@ impl CsvTransactionsScreen {
                     d.txn_import
                         .undo(batch, &k_demo, password.as_ref(), closing)
                 },
-                move |s| async move { s.import_transactions().undo(batch, &req, k_real).await },
+                move |s| async move {
+                    crate::lan_status::with_maintenance(
+                        &s,
+                        crate::lan_status::Hold::Routine,
+                        s.import_transactions().undo(batch, &req, k_real),
+                    )
+                    .await
+                },
             ),
         });
     }

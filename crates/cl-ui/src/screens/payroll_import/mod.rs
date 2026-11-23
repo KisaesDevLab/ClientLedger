@@ -1988,7 +1988,16 @@ impl PayrollImportScreen {
                 let closing = crate::company::demo::home::closing_date(d);
                 d.payroll.post(id, force, &k2, password.as_ref(), closing)
             },
-            move |s| async move { s.payroll().post(id, &req, k3).await },
+            // P33: on a LAN host, under maintenance (U-293; PR-8 B2), taken
+            // after the backup and held for the post only.
+            move |s| async move {
+                crate::lan_status::with_maintenance(
+                    &s,
+                    crate::lan_status::Hold::Routine,
+                    s.payroll().post(id, &req, k3),
+                )
+                .await
+            },
         ));
     }
 
@@ -2388,10 +2397,9 @@ impl PayrollImportScreen {
             move |s| async move {
                 let auth = pw2.map(cl_api::ClosedPeriodAuthorization::with_password);
                 // P33: on a LAN host, under maintenance (U-293).
-                let lan = crate::lan_link::host_running();
                 crate::lan_status::with_maintenance(
                     &s,
-                    lan,
+                    crate::lan_status::Hold::Routine,
                     s.payroll().reverse(id, &reason, auth, k3),
                 )
                 .await

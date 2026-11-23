@@ -279,16 +279,27 @@ impl Session {
     }
 
     /// Takes maintenance: the engine stops new saves, waits for running
-    /// ones, then ends the other sessions. Never retried; a busy engine
-    /// answers `Lan(MaintenanceBusy)`.
+    /// ones, then ends the other sessions, unless `keep_sessions` (a
+    /// routine hold: payroll, imports; PR-8 S6): the others then only get
+    /// 503 `MAINTENANCE` while it lasts and stay signed in. An engine
+    /// without `maintenance-sessions-v1` ignores the flag and ends them.
+    /// Never retried; a busy engine answers `Lan(MaintenanceBusy)`.
     ///
     /// # Errors
     /// `Local(Unsupported)`; `Lan(MaintenanceBusy)`; `Forbidden`; any
     /// [`ApiError`].
-    pub async fn start_maintenance(&self) -> Result<MaintenanceState, ApiError> {
+    pub async fn start_maintenance(
+        &self,
+        keep_sessions: bool,
+    ) -> Result<MaintenanceState, ApiError> {
         self.require(Capabilities::MAINTENANCE)?;
+        let body: &[u8] = if keep_sessions {
+            br#"{"keepSessions":true}"#
+        } else {
+            b"{}"
+        };
         let call = Call::at(Method::Post, MAINTENANCE_START.route())
-            .json_body(b"{}".to_vec())
+            .json_body(body.to_vec())
             .timeout(TimeoutClass::Write);
         let reply = self.send(&MAINTENANCE_START, call, None).await?;
         decode(&reply, "maintenance")
@@ -514,10 +525,74 @@ mod tests {
         let g = requests(&server, "GET").await;
         assert!(g.iter().any(|r| query(r) == "cursor=8"));
         assert!(matches!(
-            s.start_maintenance().await,
+            s.start_maintenance(false).await,
             Err(ApiError::Lan(crate::LanRefusal::MaintenanceBusy))
         ));
         // Never retried.
         assert_eq!(requests(&server, "POST").await.len(), 1);
+    }
+
+    /// PR-8 S6: a routine hold asks the engine to keep the other sessions;
+    /// a restore's hold sends nothing extra (they end).
+    #[tokio::test]
+    async fn a_routine_hold_asks_to_keep_the_other_sessions() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/desktop/maintenance"))
+            .respond_with(json(
+                200,
+                r#"{"active":true,"holderSession":"c","holderUser":"u","startedAt":"x"}"#,
+            ))
+            .mount(&server)
+            .await;
+        let s = session_with_caps(&server, &[Capabilities::MAINTENANCE]).await;
+        s.start_maintenance(true).await.expect("routine");
+        s.start_maintenance(false).await.expect("restore");
+        let posts = requests(&server, "POST").await;
+        let body = |i: usize| String::from_utf8(posts[i].body.clone()).expect("utf8");
+        assert_eq!(body(0), r#"{"keepSessions":true}"#);
+        assert_eq!(body(1), "{}");
+    }
+
+    /// PR-8 S7: the hold follows the engine's own LAN flag, not whether
+    /// this app's sharing started; never on a workstation's link.
+    #[tokio::test]
+    async fn the_engine_lan_flag_decides_the_hold_on_the_host_only() {
+        use crate::endpoint::{EndpointSource, EndpointState, FixedEndpoint};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/desktop/info"))
+            .respond_with(json(
+                200,
+                r#"{"initialized":true,"lan":true,"capabilities":["maintenance-v1"]}"#,
+            ))
+            .mount(&server)
+            .await;
+        let s = crate::resources::testkit::company_session(&server);
+        assert!(!s.client().lan_host_engine(), "unknown before the info read");
+        s.client().desktop_info().await.expect("info");
+        assert!(s.client().lan_host_engine());
+        // The same engine seen through a workstation's link (saves never wait).
+        struct NoWait(std::sync::Arc<FixedEndpoint>);
+        impl EndpointSource for NoWait {
+            fn current(&self) -> EndpointState {
+                self.0.current()
+            }
+            fn writes_wait(&self) -> bool {
+                false
+            }
+        }
+        let port = server.address().port();
+        let fixed = std::sync::Arc::new(FixedEndpoint::new(
+            port,
+            cl_core::Secret::new("t".repeat(64)),
+            1,
+        ));
+        let ws = crate::session::tests::session_with(
+            std::sync::Arc::new(NoWait(fixed)),
+            crate::session::Scope::Workspace,
+        );
+        ws.client().desktop_info().await.expect("info");
+        assert!(!ws.client().lan_host_engine());
     }
 }

@@ -244,21 +244,56 @@ pub fn host_only(workstation: bool, id: &str) -> bool {
     workstation && HOST_ONLY.contains(&id)
 }
 
-/// Runs `work` under maintenance when this computer is a LAN host (`on`)
-/// and the engine has `maintenance-v1` (U-293): restore, import commit and
-/// undo, payroll post and reverse. The engine drains writes in flight and
-/// ends the workstations' sessions first, then refuses them with 503
-/// `MAINTENANCE` (never retried) until the hold ends. The hold always ends,
-/// whatever `work` answered; a refused start (`MAINTENANCE_BUSY` or
-/// `MAINTENANCE_HELD`) runs nothing.
+/// What a maintenance hold is for (PR-8 S6).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Hold {
+    /// A restore replaces the books under everyone: the workstations are
+    /// signed out (they open the restored company again).
+    Restore,
+    /// Payroll post and reverse, an import's commit and undo: the
+    /// workstations stay signed in and only wait (503 `MAINTENANCE`) while
+    /// it lasts, so their open windows and unsaved work are kept.
+    Routine,
+}
+
+/// The engine routes that need the hold in LAN mode
+/// (`requireMaintenanceInLan`, Q-P33y) and the cl-api calls this app makes
+/// to them. Every call must run inside [`with_maintenance`]
+/// (`every_maintenance_route_is_called_under_a_hold` checks both lists).
+pub const MAINTENANCE_CALLS: &[(&str, &str)] = &[
+    ("POST /tenant-archives/import", "cl_company::restore("),
+    ("POST /imports/:id/commit", ".imports().commit("),
+    ("POST /imports/batches/:id/commit", ".import_transactions().commit("),
+    ("POST /imports/batches/:id/undo", ".import_transactions().undo("),
+    ("POST /imports/batches/:id/undo", ".imports().undo("),
+    ("POST /payroll-import/sessions/:id/post", ".payroll().post("),
+    ("POST /payroll-import/sessions/:id/reverse", ".payroll().reverse("),
+    // No caller in the app: the payroll check-register and checks posts.
+    ("POST /payroll-import/sessions/:id/check-register/post", ""),
+    ("POST /payroll-import/sessions/:id/checks/post", ""),
+];
+
+/// Runs `work` under maintenance when this computer is the LAN host (its
+/// engine runs with LAN on, PR-8 S7: also when sharing itself could not
+/// start) and the engine has `maintenance-v1` (U-293): restore, import
+/// commit and undo, payroll post and reverse. The engine drains writes in
+/// flight, ends the workstations' sessions for a [`Hold::Restore`] only,
+/// then refuses them with 503 `MAINTENANCE` (never retried) until the hold
+/// ends. The hold always ends, whatever `work` answered; a refused start
+/// (`MAINTENANCE_BUSY` or `MAINTENANCE_HELD`) runs nothing.
 ///
 /// # Errors
 /// The start's refusal, or `work`'s own error.
-pub async fn with_maintenance<T, E, F>(session: &cl_api::Session, on: bool, work: F) -> Result<T, E>
+pub async fn with_maintenance<T, E, F>(
+    session: &cl_api::Session,
+    hold: Hold,
+    work: F,
+) -> Result<T, E>
 where
     E: From<cl_api::ApiError>,
     F: std::future::Future<Output = Result<T, E>>,
 {
+    let on = crate::lan_link::host_running() || session.client().lan_host_engine();
     if !on
         || !session
             .client()
@@ -267,7 +302,7 @@ where
     {
         return work.await;
     }
-    session.start_maintenance().await?;
+    session.start_maintenance(hold == Hold::Routine).await?;
     // QA-9: the workstations' heartbeat says "maintenance" while it lasts.
     crate::lan_link::set_host_maintenance(true);
     let r = work.await;
@@ -861,6 +896,136 @@ mod tests {
         };
         assert_eq!(changes_of(&reset), everything());
         assert_eq!(changes_of(&ChangePage::default()).len(), 0);
+    }
+
+    /// PR-8 S6, S7: sharing did not start in this app, but the engine runs
+    /// with LAN on, so the hold is still taken; a routine hold asks to keep
+    /// the other sessions, a restore's does not; the hold always ends.
+    #[tokio::test]
+    async fn a_lan_engine_takes_the_hold_even_without_sharing() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/desktop/info"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "mode": "desktop", "initialized": true, "lan": true,
+                "capabilities": [cl_api::Capabilities::MAINTENANCE]
+            })))
+            .mount(&server)
+            .await;
+        let hold = serde_json::json!({
+            "active": true, "holderSession": "c", "holderUser": "u", "startedAt": "x"
+        });
+        Mock::given(method("POST"))
+            .and(path("/api/v1/desktop/maintenance"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(hold))
+            .mount(&server)
+            .await;
+        Mock::given(method("DELETE"))
+            .and(path("/api/v1/desktop/maintenance"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "active": false, "holderSession": null, "holderUser": null, "startedAt": null
+            })))
+            .mount(&server)
+            .await;
+        let s = cl_api::testing::stub_session(server.address().port());
+        s.client().desktop_info().await.expect("desktop info");
+        assert!(!crate::lan_link::host_running(), "no sharing in this test");
+        let work = async { Ok::<u8, cl_api::ApiError>(7) };
+        assert_eq!(with_maintenance(&s, Hold::Routine, work).await.ok(), Some(7));
+        let fails = async { Err::<u8, _>(cl_api::ApiError::Internal) };
+        assert!(with_maintenance(&s, Hold::Restore, fails).await.is_err());
+        let seen: Vec<String> = server
+            .received_requests()
+            .await
+            .expect("recorded")
+            .iter()
+            .filter(|r| r.url.path() == "/api/v1/desktop/maintenance")
+            .map(|r| format!("{} {}", r.method, String::from_utf8_lossy(&r.body)))
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                r#"POST {"keepSessions":true}"#.to_string(),
+                "DELETE ".to_string(),
+                "POST {}".to_string(),
+                "DELETE ".to_string(),
+            ]
+        );
+    }
+
+    /// PR-8 B2: every engine route that needs the hold in LAN mode is in
+    /// [`MAINTENANCE_CALLS`], and every call this app makes to one runs
+    /// inside [`with_maintenance`] (a call outside it is refused on a
+    /// sharing host with `MAINTENANCE_REQUIRED`, every time).
+    #[test]
+    fn every_maintenance_route_is_called_under_a_hold() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let routes = root.join("../../engine/packages/api/src/routes");
+        if let Ok(dir) = std::fs::read_dir(&routes) {
+            let mut found = std::collections::BTreeSet::new();
+            for f in dir.flatten() {
+                let name = f.file_name().to_string_lossy().into_owned();
+                let Some(prefix) = name.strip_suffix(".routes.ts") else {
+                    continue;
+                };
+                let text = std::fs::read_to_string(f.path()).unwrap_or_default();
+                for line in text.lines().filter(|l| l.contains("requireMaintenanceInLan()")) {
+                    // `xRouter.post('/path', requireMaintenanceInLan(), ...`
+                    let Some((head, rest)) = line.split_once("('") else {
+                        continue;
+                    };
+                    let Some(verb) = head.rsplit('.').next() else {
+                        continue;
+                    };
+                    let Some((p, _)) = rest.split_once('\'') else {
+                        continue;
+                    };
+                    found.insert(format!("{} /{prefix}{p}", verb.to_uppercase()));
+                }
+            }
+            let listed: std::collections::BTreeSet<String> =
+                MAINTENANCE_CALLS.iter().map(|(r, _)| (*r).to_string()).collect();
+            assert_eq!(found, listed, "the engine's maintenance routes changed");
+        } else {
+            eprintln!("SKIPPED (route list): no engine sources at {}", routes.display());
+        }
+        // Every call in the app's sources sits inside `with_maintenance(`.
+        let mut files = Vec::new();
+        let mut dirs = vec![root.join("src")];
+        while let Some(d) = dirs.pop() {
+            for e in std::fs::read_dir(&d).expect("src").flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    dirs.push(p);
+                } else if p.extension().is_some_and(|x| x == "rs") && !p.ends_with("lan_status.rs")
+                {
+                    files.push(p);
+                }
+            }
+        }
+        let mut calls = 0;
+        for f in &files {
+            let text = std::fs::read_to_string(f).expect("read");
+            let lines: Vec<&str> = text.lines().collect();
+            for (i, line) in lines.iter().enumerate() {
+                for (route, needle) in MAINTENANCE_CALLS {
+                    if needle.is_empty() || !line.contains(needle) {
+                        continue;
+                    }
+                    calls += 1;
+                    let from = i.saturating_sub(12);
+                    assert!(
+                        lines[from..=i].iter().any(|l| l.contains("with_maintenance(")),
+                        "{}:{}: {route} called outside with_maintenance",
+                        f.display(),
+                        i + 1
+                    );
+                }
+            }
+        }
+        assert!(calls >= 7, "the call sites were found ({calls})");
     }
 
     #[test]

@@ -543,9 +543,10 @@ impl ImportScreen {
             move |s| async move {
                 let auth = password.map(ClosedPeriodAuthorization::with_password);
                 // P33: on a LAN host, under maintenance (U-293; the engine
-                // refuses it otherwise with MAINTENANCE_REQUIRED).
-                let lan = crate::lan_link::host_running();
-                crate::lan_status::with_maintenance(&s, lan, async {
+                // refuses it otherwise with MAINTENANCE_REQUIRED). Routine:
+                // the workstations stay signed in (PR-8 S6).
+                let hold = crate::lan_status::Hold::Routine;
+                crate::lan_status::with_maintenance(&s, hold, async {
                     match what {
                         Running::Commit => {
                             let req = CommitRequest {

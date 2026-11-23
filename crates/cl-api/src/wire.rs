@@ -709,6 +709,9 @@ impl Capabilities {
     pub const STALE_REQUIRED: &'static str = "stale-required-v1";
     /// U-293 (P33): single-user maintenance (`/desktop/maintenance`).
     pub const MAINTENANCE: &'static str = "maintenance-v1";
+    /// PR-8 S6: a hold started with `keepSessions` leaves the other
+    /// sessions signed in (they only get 503 `MAINTENANCE` while it lasts).
+    pub const MAINTENANCE_SESSIONS: &'static str = "maintenance-sessions-v1";
     /// U-294 (P33): the change feed (`GET /changes`). Without it the app
     /// polls the ledger-version stamp (Q-P33i).
     pub const CHANGES: &'static str = "changes-v1";
