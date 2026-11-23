@@ -457,6 +457,15 @@ jobs:
           echo "CL_SMOKE_PG_BIN=$(brew --prefix postgresql@16)/bin" >> "$GITHUB_ENV"
       - name: Build engine executable and smoke test
         run: cargo xtask engine --smoke
+      - name: Point the real-engine tests at the built engine (P34)
+        shell: bash
+        run: |
+          # The tests also search target/engine above their own program, which
+          # a separate cargo build-dir hides; CL_ENGINE_EXE always works.
+          target_dir="$(cargo metadata --format-version 1 --no-deps | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).target_directory))')"
+          exe="$(find "$target_dir/engine" -maxdepth 2 -type f \( -name clientledger-engine -o -name clientledger-engine.exe \) | head -n 1)"
+          test -n "$exe"
+          echo "CL_ENGINE_EXE=$exe" >> "$GITHUB_ENV"
       - name: Executable runs without Node on PATH
         run: cargo test -p xtask -- built_executable_runs_without_node_on_path
       - uses: actions/cache@v6
