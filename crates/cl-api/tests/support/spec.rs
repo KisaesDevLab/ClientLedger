@@ -53,7 +53,7 @@ use sha2::{Digest, Sha256};
 /// batch create, list, read, commit and undo routes are; since pin d9b2e037
 /// (engine PR #78, U-267, U-271) the tie-out, verify, spot-check and batch
 /// transactions routes are.
-pub const OUTSIDE_SPEC: [(&str, &str); 14] = [
+pub const OUTSIDE_SPEC: [(&str, &str); 19] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),
     ("POST", "/api/v1/tenants/{id}/delete"),
@@ -70,6 +70,13 @@ pub const OUTSIDE_SPEC: [(&str, &str); 14] = [
     ("GET", "/api/v1/desktop/maintenance"),
     ("POST", "/api/v1/desktop/maintenance"),
     ("DELETE", "/api/v1/desktop/maintenance"),
+    // P34 (U-296, U-12): typed ahead of the engine PRs; remove these five
+    // at the A3 pin bump, when the pinned spec has them.
+    ("POST", "/api/v1/tenant-archives/test-restore"),
+    ("POST", "/api/v1/integrity/checks"),
+    ("POST", "/api/v1/integrity/fixes"),
+    ("GET", "/api/v1/integrity/summary"),
+    ("GET", "/api/v1/integrity/runs/{id}"),
 ];
 
 /// Lowercase hex of a SHA-256.

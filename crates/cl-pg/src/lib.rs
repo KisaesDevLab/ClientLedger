@@ -16,6 +16,13 @@
 //! (CLAUDE.md layering rules).
 #![forbid(unsafe_code)]
 
+// The superuser-free SQL hook is for tests only: a release build with it fails
+// here (xtask `layering` also refuses any app edge that enables it).
+#[cfg(all(feature = "test-support", not(debug_assertions)))]
+compile_error!(
+    "the `test-support` feature is for tests only and must not be enabled in a release build"
+);
+
 mod app_role;
 pub use app_role::{APP_DATABASE, APP_ROLE};
 mod binaries;
@@ -29,6 +36,8 @@ mod pidfile;
 pub mod ports;
 mod proc;
 mod secret;
+#[cfg(feature = "test-support")]
+mod test_support;
 
 pub use binaries::PgBinaries;
 pub use cluster::{Cluster, is_initialized};
@@ -41,6 +50,8 @@ pub use keychain::{
 pub use lifecycle::{ConnectionInfo, Running};
 pub use paths::{CloudService, DataDirIssue, check_data_dir};
 pub use secret::Secret;
+#[cfg(feature = "test-support")]
+pub use test_support::exec_sql_for_tests;
 
 /// Convenience alias used across the crate.
 pub type Result<T> = std::result::Result<T, PgError>;

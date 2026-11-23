@@ -20,3 +20,8 @@ tar = "0.4.46"
 thiserror = "2.0.21"
 tracing = "0.1.44"
 zeroize = { version = "1.9.1", default-features = false, features = ["alloc"] }
+
+[features]
+# Test-only SQL against the engine's database (P34 live tests). Never enabled
+# in a build users run.
+test-support = []

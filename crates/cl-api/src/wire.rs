@@ -715,6 +715,14 @@ impl Capabilities {
     /// U-294 (P33): the change feed (`GET /changes`). Without it the app
     /// polls the ledger-version stamp (Q-P33i).
     pub const CHANGES: &'static str = "changes-v1";
+    /// U-296 (P34): `POST /tenant-archives/test-restore` (a backup imported
+    /// in one transaction, verified and always rolled back; the job result
+    /// carries `testRestore`).
+    pub const TENANT_ARCHIVE_TEST_RESTORE: &'static str = "tenant-archive-test-restore-v1";
+    /// U-12 (P34): Verify Data (`/integrity/checks`, `/fixes`, `/summary`,
+    /// `/runs/{id}`); the desktop profile's daily balance auto-repair is
+    /// off.
+    pub const INTEGRITY: &'static str = "integrity-v1";
 
     /// True when the engine advertises `name`.
     #[must_use]
