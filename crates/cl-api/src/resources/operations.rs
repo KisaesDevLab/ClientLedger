@@ -716,6 +716,40 @@ pub(crate) const MAINTENANCE_END: Operation = op(
 /// The change feed of the open company (U-294).
 pub(crate) const CHANGES: Operation = read("/api/v1/changes");
 
+// ---- P34 backups and Verify Data (U-296, U-12; outside the pinned spec until A3) ----
+
+/// Test restore (U-296): imports a backup inside one transaction, verifies
+/// it and always rolls back (202 `{jobId}`; poll the archive job).
+pub(crate) const TENANT_ARCHIVE_TEST_RESTORE: Operation = workspace_write(
+    Method::Post,
+    "/api/v1/tenant-archives/test-restore",
+    TimeoutClass::Archive,
+);
+/// Run the integrity checks of one level (U-12): synchronous, up to the
+/// engine's 120 s budget. It stores a run but changes no books, so it is a
+/// query: never re-sent once it reached the engine.
+pub(crate) const INTEGRITY_CHECKS: Operation = op(
+    Method::Post,
+    "/api/v1/integrity/checks",
+    RetryClass::Query,
+    RouteKind::Session,
+    TimeoutClass::Archive,
+    true,
+);
+/// Fix findings of a run (U-12; a maintenance route in LAN mode).
+pub(crate) const INTEGRITY_FIXES: Operation = op(
+    Method::Post,
+    "/api/v1/integrity/fixes",
+    RetryClass::PreHandlerOnly,
+    RouteKind::Session,
+    TimeoutClass::Archive,
+    true,
+);
+/// The newest run of each level (any member).
+pub(crate) const INTEGRITY_SUMMARY: Operation = read("/api/v1/integrity/summary");
+/// One stored run.
+pub(crate) const INTEGRITY_RUN: Operation = read("/api/v1/integrity/runs/{id}");
+
 // ---- P11 contacts and centers -----------------------------------------------
 
 /// Merge two contacts (moves their transactions, deactivates the source).
@@ -2155,9 +2189,11 @@ pub(crate) const SENSITIVE_DOORS: Operation = read("/api/v1/sensitive-doors");
 
 #[cfg(test)]
 /// POSTs that save nothing and call an AI model (A10 QA-1): `Query`.
-const QUERY_POSTS: [(&str, &str); 2] = [
+const QUERY_POSTS: [(&str, &str); 3] = [
     ("POST", "/api/v1/reports/ask"),
     ("POST", "/api/v1/report-builder/draft"),
+    // P34: a check stores a run but changes no books (U-12).
+    ("POST", "/api/v1/integrity/checks"),
 ];
 
 #[cfg(test)]
@@ -2178,7 +2214,7 @@ const NEVER_RETRIED: [(&str, &str); 10] = [
 ];
 
 /// Every covered operation, in `operations.txt` order.
-pub const OPERATIONS: [Operation; 479] = [
+pub const OPERATIONS: [Operation; 484] = [
     HEALTH,
     DESKTOP_INFO,
     OPENAPI,
@@ -2272,6 +2308,11 @@ pub const OPERATIONS: [Operation; 479] = [
     MAINTENANCE_START,
     MAINTENANCE_END,
     CHANGES,
+    TENANT_ARCHIVE_TEST_RESTORE,
+    INTEGRITY_CHECKS,
+    INTEGRITY_FIXES,
+    INTEGRITY_SUMMARY,
+    INTEGRITY_RUN,
     CONTACTS_MERGE,
     CONTACT_TRANSACTIONS,
     REPORT_CUSTOMER_BALANCE,

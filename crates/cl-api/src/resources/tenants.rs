@@ -34,7 +34,7 @@ use crate::errors::{ApiError, LocalValidation};
 use crate::idempotency::IdempotencyKey;
 use crate::resources::operations::{
     TENANT_ARCHIVE_DOWNLOAD, TENANT_ARCHIVE_EXPORT, TENANT_ARCHIVE_IMPORT, TENANT_ARCHIVE_JOB,
-    TENANT_DELETE, TENANT_RENAME, TENANTS_CREATE, TENANTS_LIST,
+    TENANT_ARCHIVE_TEST_RESTORE, TENANT_DELETE, TENANT_RENAME, TENANTS_CREATE, TENANTS_LIST,
 };
 use crate::resources::versioning::saved_unreadable;
 use crate::session::{Session, decode, json_body};
@@ -381,6 +381,24 @@ impl ArchiveJobStatus {
             .and_then(|v| serde_json::from_value(v).ok())
     }
 
+    /// The finished test restore (a succeeded `test-restore` job, U-296):
+    /// `Ok(None)` while the job has no result or for another kind of job.
+    ///
+    /// # Errors
+    /// `Decode` when the result carries `testRestore` but it cannot be read
+    /// (an amount that is not an exact string, no `passed`): never taken
+    /// for a pass or a fail.
+    pub fn test_restore_result(&self) -> Result<Option<TestRestoreResult>, ApiError> {
+        let Some(v) = self.result.as_ref().and_then(|r| r.get("testRestore")) else {
+            return Ok(None);
+        };
+        serde_json::from_value(v.clone())
+            .map(Some)
+            .map_err(|_| ApiError::Decode {
+                what: "test restore result",
+            })
+    }
+
     /// The failure code, or `FAILED` when none was given.
     #[must_use]
     pub fn error_code(&self) -> String {
@@ -533,6 +551,133 @@ pub struct ImportResult {
     /// without it).
     #[serde(default)]
     pub verification_totals: Option<crate::resources::archive_totals::TotalsComparison>,
+}
+
+/// Input of [`Tenants::test_restore`] (U-296): a backup on this computer
+/// and its passphrase.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TestRestoreRequest {
+    /// Absolute path to a `.clbackup` on this computer.
+    pub path: PathBuf,
+    /// The passphrase the file was written with.
+    pub passphrase: Secret,
+}
+
+impl Serialize for TestRestoreRequest {
+    fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let mut st = s.serialize_struct("TestRestoreRequest", 2)?;
+        st.serialize_field("path", &self.path.to_string_lossy())?;
+        st.serialize_field("passphrase", self.passphrase.expose())?;
+        st.end()
+    }
+}
+
+/// One side of a test restore's trial balance: the engine's exact totals
+/// and its row count (by company, account, status and basis).
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrialBalanceSide {
+    /// Sum of every debit.
+    pub debit_exact: cl_core::Money,
+    /// Sum of every credit.
+    pub credit_exact: cl_core::Money,
+    /// Rows.
+    pub rows: u64,
+}
+
+impl std::fmt::Debug for TrialBalanceSide {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrialBalanceSide")
+            .field("rows", &self.rows)
+            .finish_non_exhaustive()
+    }
+}
+
+/// The engine's difference between the two sides (actual minus expected).
+#[derive(Clone, PartialEq, Eq, Deserialize)]
+pub struct TrialBalanceDifference {
+    /// Debits.
+    pub debit: cl_core::Money,
+    /// Credits.
+    pub credit: cl_core::Money,
+}
+
+impl std::fmt::Debug for TrialBalanceDifference {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TrialBalanceDifference(..)")
+    }
+}
+
+/// The trial balance in the file against the one the restore produced,
+/// compared by the engine string for string.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrialBalanceComparison {
+    /// Every row matched.
+    pub rows_equal: bool,
+    /// The totals matched.
+    pub totals_equal: bool,
+    /// What the file says.
+    pub expected: TrialBalanceSide,
+    /// What the restore produced.
+    pub actual: TrialBalanceSide,
+    /// The engine's difference.
+    pub difference_exact: TrialBalanceDifference,
+}
+
+/// Posted entries whose debits and credits differ, in the file and after
+/// the restore.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
+pub struct UnbalancedCounts {
+    /// In the file.
+    pub expected: u64,
+    /// After the restore.
+    pub actual: u64,
+}
+
+/// One verification step that failed (`{check, table?}`; names only).
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+pub struct TestRestoreFailure {
+    /// The check (`count`, `content`, `trialBalance`, `totals`, ...).
+    pub check: String,
+    /// The table it was about, if any.
+    #[serde(default)]
+    pub table: Option<String>,
+}
+
+/// The result of a test restore (U-296): the engine restored the file in
+/// one transaction, verified it and rolled everything back. A verification
+/// mismatch is `passed: false` here; an unreadable file or a wrong
+/// passphrase fails the job instead.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestRestoreResult {
+    /// Every check passed (the engine's verdict; never recomputed).
+    pub passed: bool,
+    /// The archive.
+    pub archive_id: String,
+    /// The company it was made from.
+    #[serde(default)]
+    pub source_tenant_id: Option<TenantId>,
+    /// When it was made.
+    #[serde(default)]
+    pub archive_created_at: Option<Timestamp>,
+    /// The trial balance comparison; `None` when the restore stopped before
+    /// it (see `failures`).
+    #[serde(default)]
+    pub trial_balance: Option<TrialBalanceComparison>,
+    /// Unbalanced posted entries, file against restore.
+    #[serde(default)]
+    pub unbalanced: Option<UnbalancedCounts>,
+    /// The verification totals comparison (U-283).
+    #[serde(default)]
+    pub verification_totals: Option<crate::resources::archive_totals::TotalsComparison>,
+    /// What failed.
+    #[serde(default)]
+    pub failures: Vec<TestRestoreFailure>,
+    /// Non-fatal notes.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 /// Input of [`Tenants::delete`] (E5b safe delete, Q-185).
@@ -825,6 +970,39 @@ impl Tenants<'_> {
             .timeout(crate::client::TimeoutClass::Archive);
         let reply = self.0.send(&TENANT_ARCHIVE_IMPORT, call, None).await?;
         decode(&reply, "import job").map_err(saved_unreadable)
+    }
+
+    /// `POST /api/v1/tenant-archives/test-restore` (U-296): restore a backup
+    /// in one transaction, verify it, record the verdict and roll back (202
+    /// `{jobId}`; poll with [`Tenants::archive_job`] and read
+    /// [`ArchiveJobStatus::test_restore_result`]). No company is created and
+    /// the live books are untouched, so it needs no maintenance hold.
+    ///
+    /// # Errors
+    /// `Local(Unsupported)` without `tenant-archive-test-restore-v1`,
+    /// `Local(InvalidValue)` for a relative path or an empty passphrase
+    /// (nothing sent); `Forbidden`; any [`ApiError`].
+    pub async fn test_restore(&self, request: &TestRestoreRequest) -> Result<ImportJob, ApiError> {
+        if !self
+            .0
+            .client()
+            .capabilities()
+            .has(crate::wire::Capabilities::TENANT_ARCHIVE_TEST_RESTORE)
+        {
+            return Err(ApiError::Local(LocalValidation::Unsupported));
+        }
+        require_absolute_file(&request.path)?;
+        if request.passphrase.is_empty() {
+            return Err(ApiError::Local(LocalValidation::InvalidValue));
+        }
+        let call = Call::at(Method::Post, TENANT_ARCHIVE_TEST_RESTORE.route())
+            .json_body(json_body(request)?)
+            .timeout(crate::client::TimeoutClass::Archive);
+        let reply = self
+            .0
+            .send(&TENANT_ARCHIVE_TEST_RESTORE, call, None)
+            .await?;
+        decode(&reply, "test restore job").map_err(saved_unreadable)
     }
 
     /// `POST /api/v1/tenants/{id}/delete`: the safe delete (Q-185). The
@@ -1407,5 +1585,91 @@ mod tests {
         assert!(ArchiveFileName::parse("a-1.zip").is_ok());
         assert!(ArchiveFileName::parse("..").is_err());
         assert!(ArchiveFileName::parse("a/b.zip").is_err());
+    }
+
+    const TEST_RESTORE: &str = r#"{"jobId":"job_t","kind":"test-restore","status":"succeeded","progress":100,"step":"done",
+        "result":{"testRestore":{"passed":false,"archiveId":"a-1","sourceTenantId":"1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+        "archiveCreatedAt":"2026-11-22T10:00:00.000Z",
+        "trialBalance":{"rowsEqual":false,"totalsEqual":false,
+          "expected":{"debitExact":"1000.0000","creditExact":"1000.0000","rows":4},
+          "actual":{"debitExact":"1000.0100","creditExact":"1000.0000","rows":4},
+          "differenceExact":{"debit":"0.0100","credit":"0.0000"}},
+        "unbalanced":{"expected":0,"actual":1},
+        "verificationTotals":{"definition":"vt1","expected":null,"actual":null,"matches":null,"differences":[],"backfills":[]},
+        "failures":[{"check":"trialBalance"},{"check":"content","table":"journal_lines"}],"warnings":[]}}}"#;
+
+    #[tokio::test]
+    async fn test_restore_sends_the_path_and_reads_the_verdict() {
+        let server = MockServer::start().await;
+        let path_abs = std::env::temp_dir().join("t.clbackup");
+        let req = TestRestoreRequest {
+            path: path_abs.clone(),
+            passphrase: Secret::new("pass-canary-123"),
+        };
+        // Without the capability nothing is sent.
+        let e = company_session(&server)
+            .tenants()
+            .test_restore(&req)
+            .await
+            .expect_err("unsupported");
+        assert!(matches!(e, ApiError::Local(LocalValidation::Unsupported)));
+        assert!(server.received_requests().await.expect("r").is_empty());
+
+        Mock::given(method("POST"))
+            .and(path("/api/v1/tenant-archives/test-restore"))
+            .respond_with(json(202, r#"{"jobId":"job_t"}"#))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/tenant-archives/jobs/job_t"))
+            .respond_with(json(200, TEST_RESTORE))
+            .mount(&server)
+            .await;
+        let s = crate::resources::testkit::session_with_caps(
+            &server,
+            &[crate::wire::Capabilities::TENANT_ARCHIVE_TEST_RESTORE],
+        )
+        .await;
+        let relative = TestRestoreRequest {
+            path: PathBuf::from("t.clbackup"),
+            passphrase: Secret::new("pass-canary-123"),
+        };
+        assert!(s.tenants().test_restore(&relative).await.is_err());
+        let job = s.tenants().test_restore(&req).await.expect("job");
+        let status = s.tenants().archive_job(&job.job_id).await.expect("status");
+        let r = status
+            .test_restore_result()
+            .expect("readable")
+            .expect("present");
+        assert!(!r.passed);
+        let tb = r.trial_balance.as_ref().expect("tb");
+        assert!(!tb.rows_equal && !tb.totals_equal);
+        assert_eq!(tb.difference_exact.debit.to_wire(), "0.0100");
+        assert_eq!(r.unbalanced.map(|u| u.actual), Some(1));
+        assert_eq!(r.failures[1].table.as_deref(), Some("journal_lines"));
+        assert!(!format!("{r:?}").contains("1000.0100"));
+        let posts = requests(&server, "POST").await;
+        assert_eq!(posts.len(), 1);
+        let body: Value = serde_json::from_slice(&posts[0].body).expect("json");
+        assert_eq!(body["path"], path_abs.to_string_lossy().as_ref());
+        assert_eq!(body.as_object().map(serde_json::Map::len), Some(2));
+
+        // Another job's result is not a test restore; a broken one is an error.
+        let other: ArchiveJobStatus = serde_json::from_str(
+            r#"{"status":"succeeded","result":{"archiveId":"a-1","fileName":"a-1.zip","sha256":"ab"}}"#,
+        )
+        .expect("export");
+        assert_eq!(other.test_restore_result().expect("ok"), None);
+        let broken: ArchiveJobStatus =
+            serde_json::from_str(&TEST_RESTORE.replace(r#""passed":false,"#, "")).expect("status");
+        assert!(matches!(
+            broken.test_restore_result(),
+            Err(ApiError::Decode { .. })
+        ));
+        let number: ArchiveJobStatus = serde_json::from_str(
+            &TEST_RESTORE.replace(r#""debitExact":"1000.0100""#, r#""debitExact":1000.01"#),
+        )
+        .expect("status");
+        assert!(number.test_restore_result().is_err());
     }
 }

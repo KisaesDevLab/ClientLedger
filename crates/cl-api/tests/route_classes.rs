@@ -106,6 +106,16 @@ fn every_mutating_operation_is_classified() {
     );
 }
 
+/// P34 (U-296, U-12) routes not in the pinned spec yet, with their planned
+/// `x-lan` class (plan §3).
+const PLANNED_P34: [(&str, &str, &str); 5] = [
+    ("POST", "/api/v1/tenant-archives/test-restore", "host"),
+    ("POST", "/api/v1/integrity/checks", "workstation"),
+    ("POST", "/api/v1/integrity/fixes", "host"),
+    ("GET", "/api/v1/integrity/summary", "workstation"),
+    ("GET", "/api/v1/integrity/runs/{id}", "workstation"),
+];
+
 fn computed(spec: &Value) -> (String, String, Vec<String>) {
     let mut stale = Vec::new();
     let mut host = Vec::new();
@@ -121,6 +131,16 @@ fn computed(spec: &Value) -> (String, String, Vec<String>) {
                 // U-288: every route below a tenant id is host-only (some,
                 // like the delete job, are desktop-only and not in the spec).
                 host.push(format!("{method} {route}"));
+            } else if let Some((.., lan)) = PLANNED_P34
+                .iter()
+                .find(|(m, r, _)| *m == method && *r == route)
+            {
+                // P34 routes typed ahead of the engine PRs (plan §3): the
+                // classes the engine will give them. Removed at the A3 pin
+                // bump, when the spec has them.
+                if *lan == "host" {
+                    host.push(format!("{method} {route}"));
+                }
             } else if route.starts_with("/api/v1/desktop/") {
                 let read_ok = method == "GET"
                     && (route == "/api/v1/desktop/info"
