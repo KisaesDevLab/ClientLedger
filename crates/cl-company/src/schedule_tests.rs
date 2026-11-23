@@ -29,7 +29,7 @@ impl LocalZone for Central {
             .naive_utc()
     }
 
-    fn from_local(&self, local: NaiveDateTime) -> Resolved {
+    fn instants(&self, local: NaiveDateTime) -> Resolved {
         let wall = local.and_utc().timestamp_millis();
         let mut out: Vec<Timestamp> = [-6i64, -5]
             .iter()
@@ -126,7 +126,7 @@ fn daily_weekly_and_monthly_slots() {
 fn a_dst_gap_moves_to_the_next_valid_minute_and_an_overlap_takes_the_first() {
     let z = Central;
     // 2026-03-08 02:30 does not exist in Central time: 03:00 CDT.
-    assert_eq!(z.from_local(local(2026, 3, 8, 2, 30)), Resolved::Gap);
+    assert_eq!(z.instants(local(2026, 3, 8, 2, 30)), Resolved::Gap);
     assert_eq!(
         resolve(&z, local(2026, 3, 8, 2, 30)),
         Some(utc("2026-03-08T08:00:00.000Z"))
@@ -138,7 +138,7 @@ fn a_dst_gap_moves_to_the_next_valid_minute_and_an_overlap_takes_the_first() {
     );
     // 2026-11-01 01:30 happens twice: the earlier (CDT) instant.
     assert!(matches!(
-        z.from_local(local(2026, 11, 1, 1, 30)),
+        z.instants(local(2026, 11, 1, 1, 30)),
         Resolved::Two(..)
     ));
     let s = sched(Frequency::Daily, 1, 30);
@@ -263,7 +263,7 @@ fn the_runner_skips_workstations_the_sample_and_waits_out_holds() {
     let job = p.run.expect("runs");
     assert_eq!(job.tenant_id, id(2), "never the practice company");
     assert_eq!(job.trigger, BackupTrigger::Scheduled);
-    assert!(p.record.is_empty());
+    assert_eq!(p.record, Vec::new());
     // Tombstones never run either.
     let mut gone = list.clone();
     gone.companies[1].deleted_at = Some(now);

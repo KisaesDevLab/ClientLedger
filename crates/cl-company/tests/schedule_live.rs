@@ -121,7 +121,7 @@ impl LocalZone for Utc {
         t.as_utc().naive_utc()
     }
 
-    fn from_local(&self, local: NaiveDateTime) -> Resolved {
+    fn instants(&self, local: NaiveDateTime) -> Resolved {
         Timestamp::from_unix_millis(local.and_utc().timestamp_millis())
             .map_or(Resolved::Gap, Resolved::One)
     }
@@ -262,7 +262,12 @@ async fn scenario(client: &Client, password: &Secret, scratch: &Path) {
     let names = files_in(&folder);
     assert_eq!(names.len(), 2, "{names:?}");
     assert!(names.contains(&"Old-2.clbackup".to_string()), "{names:?}");
-    assert!(names.iter().all(|n| !n.ends_with(".part")), "{names:?}");
+    assert!(
+        names
+            .iter()
+            .all(|n| Path::new(n).extension().is_none_or(|x| x != "part")),
+        "{names:?}"
+    );
     // The same slot never runs twice.
     tick(&mut runner, clock.as_ref(), &Utc, host.as_ref()).await;
     assert_eq!(

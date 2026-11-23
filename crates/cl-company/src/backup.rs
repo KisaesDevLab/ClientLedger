@@ -397,6 +397,7 @@ pub fn part_path(dest: &Path) -> PathBuf {
 /// Removes this company's `.part` files left in `dir` by a run that
 /// stopped half way (crash, power loss). Only names this app makes for
 /// `company` are touched: `<stem>-YYYYMMDD-HHMMSS[-kind].clbackup.part`.
+#[must_use = "the count of files removed"]
 pub fn sweep_parts(dir: &Path, company: &str) -> usize {
     let stem = name_stem(company);
     let Ok(entries) = std::fs::read_dir(dir) else {

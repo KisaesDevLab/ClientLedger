@@ -21,6 +21,7 @@ pub mod backup;
 pub mod delete;
 pub mod error;
 pub mod export_all;
+pub mod health;
 pub mod iif;
 pub mod intake;
 pub mod lifecycle;
@@ -33,6 +34,7 @@ pub mod setup;
 pub mod statistics;
 pub mod templates;
 pub mod transfer;
+pub mod verify;
 pub mod year_end;
 mod zipfile;
 

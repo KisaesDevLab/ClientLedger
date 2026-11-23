@@ -52,6 +52,7 @@ pub mod templates;
 pub mod text;
 pub mod undo;
 pub mod units;
+pub mod verify_data;
 
 pub use commands::{COMMANDS, Command, CommandId, Menu};
 pub use keymap::{EnterMode, Key, Keymap, KeymapError, Mods, Scope, Shortcut};

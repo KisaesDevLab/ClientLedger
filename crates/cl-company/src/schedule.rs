@@ -88,7 +88,7 @@ pub trait LocalZone: Send + Sync {
     /// The local wall-clock time of an instant.
     fn to_local(&self, t: Timestamp) -> NaiveDateTime;
     /// The instants a local wall-clock time names.
-    fn from_local(&self, local: NaiveDateTime) -> Resolved;
+    fn instants(&self, local: NaiveDateTime) -> Resolved;
 }
 
 /// The computer's time zone.
@@ -104,7 +104,7 @@ impl LocalZone for SystemZone {
         t.as_utc().with_timezone(&chrono::Local).naive_local()
     }
 
-    fn from_local(&self, local: NaiveDateTime) -> Resolved {
+    fn instants(&self, local: NaiveDateTime) -> Resolved {
         let utc = |d: chrono::DateTime<chrono::Local>| ts(d.with_timezone(&chrono::Utc));
         match chrono::Local.from_local_datetime(&local) {
             chrono::LocalResult::None => Resolved::Gap,
@@ -124,7 +124,7 @@ pub fn resolve(zone: &dyn LocalZone, local: NaiveDateTime) -> Option<Timestamp> 
     let mut at = local;
     // A gap is at most a few hours; give up after a day.
     for _ in 0..(24 * 60) {
-        match zone.from_local(at) {
+        match zone.instants(at) {
             Resolved::One(t) | Resolved::Two(t, _) => return Some(t),
             Resolved::Gap => at += chrono::Duration::minutes(1),
         }
@@ -588,7 +588,7 @@ pub async fn tick(
     let now = clock.now();
     let env = host.env();
     let plan = runner.plan(now, env, &list, zone);
-    record(&store, host, plan.record);
+    record(&store, host, &plan.record);
     let Some(job) = plan.run else {
         return;
     };
@@ -600,7 +600,7 @@ pub async fn tick(
         _ => None,
     };
     if let Some(run) = runner.finished(&job, &result, clock.now()) {
-        record(&store, host, vec![(job.tenant_id, run)]);
+        record(&store, host, &[(job.tenant_id, run)]);
     }
     if let Some(sha) = done_sha
         && job.schedule.test_each
@@ -609,12 +609,12 @@ pub async fn tick(
     }
 }
 
-fn record(store: &RecentStore, host: &dyn RunnerHost, runs: Vec<(TenantId, ScheduleRun)>) {
+fn record(store: &RecentStore, host: &dyn RunnerHost, runs: &[(TenantId, ScheduleRun)]) {
     if runs.is_empty() {
         return;
     }
     let saved = store.update(|l| {
-        for (t, r) in &runs {
+        for (t, r) in runs {
             l.record_schedule_run(*t, r.clone());
         }
     });
@@ -622,7 +622,7 @@ fn record(store: &RecentStore, host: &dyn RunnerHost, runs: Vec<(TenantId, Sched
         tracing::warn!("scheduled backup: the history could not be saved");
         return;
     }
-    for (t, r) in &runs {
+    for (t, r) in runs {
         host.recorded(*t, r);
     }
 }
