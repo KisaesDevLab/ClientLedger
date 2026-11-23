@@ -179,6 +179,7 @@ pub async fn restore(
     progress: &ProgressSink,
     stats: &Statistics,
 ) -> Result<RestoreOutcome, CompanyError> {
+    let _gate = crate::backup::GATE.lock().await;
     let list = store.load()?;
     let path = std::path::absolute(&req.path).map_err(CompanyError::io("resolve archive"))?;
     let info = {

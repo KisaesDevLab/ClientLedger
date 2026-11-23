@@ -11,7 +11,7 @@ use cl_core::Secret;
 use cl_core::ids::TenantId;
 use cl_settings::{BackupKind, BackupRecord, RecentStore, SecretStore};
 
-use crate::backup::{BackupRequest, ProgressSink, backup};
+use crate::backup::{BackupOptions, BackupRequest, GATE, ProgressSink, backup_ungated};
 use crate::error::CompanyError;
 
 /// What to delete.
@@ -66,6 +66,7 @@ pub async fn delete_company(
     req: &DeleteRequest,
     progress: &ProgressSink,
 ) -> Result<DeleteOutcome, CompanyError> {
+    let _gate = GATE.lock().await;
     if !session
         .client()
         .capabilities()
@@ -86,7 +87,7 @@ pub async fn delete_company(
     {
         session.close_company().await?;
     }
-    let taken = backup(
+    let taken = backup_ungated(
         session,
         store,
         secrets,
@@ -97,6 +98,7 @@ pub async fn delete_company(
             apply_retention: false,
             protected: None,
         },
+        &BackupOptions::default(),
         progress,
     )
     .await?;

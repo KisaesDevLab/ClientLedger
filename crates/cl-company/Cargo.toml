@@ -23,7 +23,7 @@ thiserror = "2.0.21"
 # zeroized buffers; both already in the tree (cl-pg). MIT OR Apache-2.0.
 getrandom = "0.4.3"
 zeroize = { version = "1.9.1", default-features = false, features = ["alloc"] }
-tokio = { version = "1.53.3", features = ["rt", "time"] }
+tokio = { version = "1.53.3", features = ["rt", "sync", "time"] }
 tracing = "0.1.44"
 # Stored (uncompressed) entries only: the engine archive is already
 # encrypted, and Export All Data zips CSV text.

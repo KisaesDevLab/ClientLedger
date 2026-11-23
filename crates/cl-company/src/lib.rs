@@ -28,6 +28,7 @@ pub mod report_story;
 pub mod restore;
 pub mod retention;
 pub mod sample;
+pub mod schedule;
 pub mod setup;
 pub mod statistics;
 pub mod templates;
