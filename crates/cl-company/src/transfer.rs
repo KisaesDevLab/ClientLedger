@@ -447,6 +447,7 @@ pub async fn make_transfer(
     req: &TransferRequest,
     progress: &ProgressSink,
 ) -> Result<TransferOutcome, TransferError> {
+    let _gate = crate::backup::GATE.lock().await;
     // 1. Fail closed before anything is sent.
     if !session
         .client()
@@ -471,7 +472,7 @@ pub async fn make_transfer(
 
     // 2. Backup first.
     tracing::info!("transfer: backup first");
-    let backup = crate::backup::backup(
+    let backup = crate::backup::backup_ungated(
         session,
         store,
         secrets,
@@ -482,6 +483,7 @@ pub async fn make_transfer(
             apply_retention: true,
             protected: None,
         },
+        &crate::backup::BackupOptions::default(),
         progress,
     )
     .await

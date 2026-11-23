@@ -127,6 +127,20 @@ pub struct BackupRecord {
     pub created_at: Timestamp,
     /// Why.
     pub kind: BackupKind,
+    /// What made it (P34; absent in older history).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::backup_schedule::lenient_opt"
+    )]
+    pub trigger: Option<crate::BackupTrigger>,
+    /// The last test restore of this file (P34).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::backup_schedule::lenient_opt"
+    )]
+    pub tested: Option<crate::BackupTest>,
 }
 
 /// One company as the Open Company window knows it.
@@ -176,6 +190,25 @@ pub struct CompanyRecord {
     /// first, at most [`TRANSFER_HISTORY`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub transfers: Vec<TransferRecord>,
+    /// Scheduled backups (P34, Q-42).
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "crate::backup_schedule::lenient_opt"
+    )]
+    pub schedule: Option<crate::BackupSchedule>,
+    /// The schedule's runs, newest last (at most
+    /// [`crate::backup_schedule::SCHEDULE_RUNS`]).
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        deserialize_with = "crate::backup_schedule::lenient_vec"
+    )]
+    pub schedule_runs: Vec<crate::ScheduleRun>,
+    /// The local date (`YYYY-MM-DD`) the owner was last asked to back up
+    /// at open (Q-217: once a day).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backup_prompted: Option<String>,
 }
 
 /// How many transfer files a company remembers.
@@ -261,6 +294,9 @@ impl CompanyRecord {
             delete_receipt: None,
             restored: None,
             transfers: Vec::new(),
+            schedule: None,
+            schedule_runs: Vec::new(),
+            backup_prompted: None,
         }
     }
 
@@ -378,6 +414,35 @@ impl RecentCompanies {
                 c.backups.drain(..drop);
             }
         }
+    }
+
+    /// Adds a scheduled run to a company's history (capped).
+    pub fn record_schedule_run(&mut self, id: TenantId, run: crate::ScheduleRun) {
+        if let Some(c) = self.get_mut(id) {
+            c.schedule_runs.push(run);
+            let cap = crate::backup_schedule::SCHEDULE_RUNS;
+            if c.schedule_runs.len() > cap {
+                let drop = c.schedule_runs.len() - cap;
+                c.schedule_runs.drain(..drop);
+            }
+        }
+    }
+
+    /// Stores a test restore's result on the backup with this SHA-256.
+    /// False when no such backup is in the history.
+    pub fn record_test(&mut self, sha256: &str, test: crate::BackupTest) -> bool {
+        for c in &mut self.companies {
+            if let Some(b) = c
+                .backups
+                .iter_mut()
+                .rev()
+                .find(|b| b.sha256.eq_ignore_ascii_case(sha256))
+            {
+                b.tested = Some(test);
+                return true;
+            }
+        }
+        false
     }
 
     /// Adds a transfer file to a company's "Sent before" history.
@@ -563,6 +628,8 @@ mod tests {
                 archive_id: "a-1".into(),
                 created_at: ts(2_000),
                 kind: BackupKind::Backup,
+                trigger: None,
+                tested: None,
             },
         );
         assert_eq!(list.get(id(2)).expect("c").last_backup, Some(ts(2_000)));
@@ -622,6 +689,81 @@ mod tests {
         assert_eq!(v["kind"], "portable");
     }
 
+    /// P34: a schedule, run or trigger this build cannot read becomes
+    /// "none"; the rest of the file (every company's history) survives.
+    #[test]
+    fn unreadable_schedule_fields_never_empty_the_list() {
+        let text = serde_json::json!({
+            "version": 1,
+            "companies": [{
+                "tenant_id": "1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01",
+                "name": "Ozark",
+                "accent": [62, 124, 177],
+                "backups": [{
+                    "path": "a.clbackup", "sha256": "0".repeat(64), "archive_id": "a",
+                    "created_at": "2026-01-01T08:00:00.000Z", "kind": "backup",
+                    "trigger": "from_the_future", "tested": {"at": 5}
+                }],
+                "schedule": {"enabled": true, "frequency": {"every": "hourly"}, "at": "25:00"},
+                "schedule_runs": [
+                    {"slot": "2026-01-01T08:00:00.000Z", "at": "2026-01-01T08:00:01.000Z",
+                     "outcome": "done", "sha256": "ab"},
+                    {"slot": "x", "outcome": "exploded"}
+                ]
+            }]
+        })
+        .to_string();
+        let list = RecentCompanies::parse(&text);
+        let c = list.get(id(1)).expect("company kept");
+        assert_eq!(c.backups.len(), 1);
+        assert_eq!(c.backups[0].trigger, None);
+        assert_eq!(c.backups[0].tested, None);
+        assert_eq!(c.schedule, None);
+        assert_eq!(c.schedule_runs.len(), 1, "the readable run stays");
+        // And a full round trip keeps what was written.
+        let mut list = list;
+        list.get_mut(id(1)).expect("c").schedule = Some(crate::BackupSchedule {
+            enabled: true,
+            folder: PathBuf::from("E:/Backups"),
+            frequency: crate::Frequency::Weekly { weekday: 4 },
+            ..crate::BackupSchedule::default()
+        });
+        assert!(list.record_test(
+            &"0".repeat(64),
+            crate::BackupTest {
+                at: ts(9),
+                passed: true,
+                reason: None,
+                tb: None
+            }
+        ));
+        let back = RecentCompanies::parse(&list.to_text());
+        let c = back.get(id(1)).expect("c");
+        assert_eq!(c.schedule.as_ref().map(|s| s.keep_last), Some(10));
+        assert!(c.backups[0].tested.as_ref().is_some_and(|t| t.passed));
+    }
+
+    #[test]
+    fn schedule_runs_are_capped() {
+        let mut list = RecentCompanies::default();
+        list.upsert(id(1), "x");
+        for i in 0..60 {
+            list.record_schedule_run(
+                id(1),
+                crate::ScheduleRun {
+                    slot: ts(i),
+                    at: ts(i),
+                    outcome: crate::RunOutcome::Skipped {
+                        reason: "LOCKED".into(),
+                    },
+                },
+            );
+        }
+        let c = list.get(id(1)).expect("c");
+        assert_eq!(c.schedule_runs.len(), crate::backup_schedule::SCHEDULE_RUNS);
+        assert_eq!(c.schedule_runs[0].slot, ts(10));
+    }
+
     #[test]
     fn before_import_kind_is_snake_case_q_p30h() {
         let v = serde_json::to_value(BackupKind::BeforeImport).expect("json");
@@ -647,6 +789,8 @@ mod tests {
                     archive_id: i.to_string(),
                     created_at: ts(i64::try_from(i).expect("i")),
                     kind: BackupKind::Backup,
+                    trigger: None,
+                    tested: None,
                 },
             );
         }

@@ -146,6 +146,20 @@ const TOTALS: &str = r#"{"definition":"vt1","basis":"accrual","asOf":"2026-11-19
   "counts":{"accounts":42,"clients":7,"vendors":5,"items":3,"transactions":1284,
   "postedTransactions":1270,"attachments":63,"attachmentBytes":1048576,"auditEntries":4200}}"#;
 
+/// A finished engine export with a readable envelope.
+fn archive_bytes() -> Vec<u8> {
+    use std::io::Write as _;
+    let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+    let opts =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    zip.start_file("envelope.json", opts).expect("entry");
+    zip.write_all(br#"{"format":"mybooks-tenant-archive","formatVersion":2,"archiveId":"arch-b"}"#)
+        .expect("write");
+    zip.start_file("manifest.json.enc", opts).expect("entry");
+    zip.write_all(b"backup-bytes").expect("write");
+    zip.finish().expect("finish").into_inner()
+}
+
 /// Two export jobs: the backup (`job_b`) and the transfer (`job_t`),
 /// told apart by the request body. `transfer_result` is the transfer
 /// job's final status JSON.
@@ -153,7 +167,9 @@ async fn mount_jobs(server: &MockServer, dir: &Path, transfer_status: Value) -> 
     let engine_dir = dir.join("engine-archives");
     std::fs::create_dir_all(&engine_dir).expect("dir");
     let backup_file = std::path::absolute(engine_dir.join("b.zip")).expect("abs");
-    std::fs::write(&backup_file, b"backup-bytes").expect("write");
+    // A readable archive: P34 reads every written backup back.
+    let backup_bytes = archive_bytes();
+    std::fs::write(&backup_file, &backup_bytes).expect("write");
     let transfer_file = std::path::absolute(engine_dir.join("t.zip")).expect("abs");
     std::fs::write(&transfer_file, b"transfer-bytes").expect("write");
     Mock::given(method("POST"))
@@ -180,7 +196,7 @@ async fn mount_jobs(server: &MockServer, dir: &Path, transfer_status: Value) -> 
         .respond_with(json_reply(
             200,
             json!({"status":"succeeded","result":{"archiveId":"arch-b","fileName":"b.zip",
-                   "path":backup_file.to_string_lossy(),"sha256":sha256(b"backup-bytes")}}),
+                   "path":backup_file.to_string_lossy(),"sha256":sha256(&backup_bytes)}}),
         ))
         .mount(server)
         .await;

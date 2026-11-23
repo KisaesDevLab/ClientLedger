@@ -172,11 +172,13 @@ mod sensitive;
 // P32: Send to My Accountant and the IIF export.
 mod send_to_accountant;
 // P33: the office network.
+pub(crate) mod backups;
 pub(crate) mod lan;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 63] = [
+const TABLES: [&[(&str, &str)]; 64] = [
     lan::ENGLISH,
+    backups::ENGLISH,
     send_to_accountant::ENGLISH,
     audit::ENGLISH,
     auth::ENGLISH,
@@ -630,6 +632,8 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("backup.done", "Backed up to {path}"),
     ("backup.export_done", "Exported to {path}"),
     ("backup.toast", "Backup finished."),
+    ("backup.on_close.done", "The company was backed up as it closed."),
+    ("backup.on_close.failed", "The backup when closing did not finish. The company closed anyway; back it up from File › Back Up Company."),
     ("delete.tab", "Delete Company"),
     ("delete.title", "Delete company"),
     ("delete.intro", "This removes {name} from this computer after taking one last backup."),

@@ -1730,7 +1730,7 @@ fn close_company_switches_back_even_when_its_group_is_dropped() {
         "a company is open"
     );
     let g = q.group().expect("group");
-    let mut p = super::send_close(&g, session.client(), session.clone()).expect("sent");
+    let mut p = super::send_close(&g, session.client(), session.clone(), None).expect("sent");
     drop(g);
     let end = std::time::Instant::now() + Duration::from_secs(10);
     let r = loop {

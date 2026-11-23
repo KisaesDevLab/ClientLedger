@@ -193,6 +193,8 @@ pub(crate) struct HomeData {
     /// The latest bank file's ending balance per bank and card account
     /// (U-77, P26; the Account balances card's Bank file column).
     pub bank_files: Slot<Vec<cl_api::AccountBalance>>,
+    /// Verify Data's last runs (U-12, P34); read with `integrity-v1`.
+    pub health: Slot<cl_api::IntegritySummary>,
 }
 
 impl HomeData {
@@ -261,6 +263,8 @@ pub(crate) struct Local {
     /// Printed checks wait for "Did all checks print correctly?" (Q-P19n;
     /// read on open, on Refresh and on each data-bus notice, not per frame).
     pub checks_unconfirmed: bool,
+    /// The company's last scheduled backup failed (Q-217, P34).
+    pub last_schedule_failed: bool,
 }
 
 /// The clock Home shows a time in.
@@ -308,6 +312,8 @@ pub struct HomeScreen {
     lane_columns: usize,
     /// The fixed bars' sizes last frame (Q-265).
     layout: FrameReport,
+    /// Q-217 (P34): the once-a-day "Back up your books?" prompt shows.
+    pub(crate) backup_prompt: bool,
 }
 
 impl HomeScreen {
@@ -335,9 +341,31 @@ impl HomeScreen {
             checklist_open: None,
             lane_columns: 4,
             layout: FrameReport::default(),
+            backup_prompt: false,
         };
+        s.backup_prompt = prompt_at_open(&s.link, s.tenant.as_ref(), &s.local);
         s.reload();
         s
+    }
+
+    /// The owner answered the backup prompt: not again today.
+    fn dismiss_prompt(&mut self) {
+        self.backup_prompt = false;
+        let Some((id, _)) = self.tenant.clone() else {
+            return;
+        };
+        let today = self
+            .local
+            .now
+            .as_utc()
+            .with_timezone(&chrono::Local)
+            .format("%Y-%m-%d")
+            .to_string();
+        let _ = self.link.store().update(|l| {
+            if let Some(c) = l.get_mut(id) {
+                c.backup_prompted = Some(today);
+            }
+        });
     }
 
     /// Reads everything again (open, Refresh, a change elsewhere).
@@ -475,6 +503,15 @@ impl HomeScreen {
                 |s| async move { s.feed().account_balances().await },
             ));
         }
+        if self.link.is_demo() || self.link.capabilities().has(Capabilities::INTEGRITY) {
+            self.data.health.start(run(
+                &self.link,
+                group,
+                None,
+                |s| s.integrity.summary(),
+                |s| async move { s.integrity().summary().await },
+            ));
+        }
         let tenant = self.tenant.as_ref().map(|(t, _)| *t);
         self.data.documents.start(run(
             &self.link,
@@ -582,6 +619,7 @@ impl HomeScreen {
         self.data.documents.poll();
         self.data.sales_tax.poll();
         self.data.reorder.poll();
+        self.data.health.poll();
         self.data.bank_files.poll();
         if self.data.outbox.poll()
             && let Some(n) = self.data.outbox.value
@@ -622,10 +660,13 @@ impl HomeScreen {
 
     /// Whether a backup is due (Q-217: none in the last 7 days).
     pub(crate) fn backup_due(&self) -> bool {
-        cl_model::home::backup_due(
-            self.local.last_backup,
-            self.local.now,
-            cl_model::home::BACKUP_DAYS_DEFAULT,
+        cl_model::home::backup_line_due(
+            cl_model::home::backup_due(
+                self.local.last_backup,
+                self.local.now,
+                cl_model::home::BACKUP_DAYS_DEFAULT,
+            ),
+            self.local.last_schedule_failed,
         )
     }
 
@@ -840,7 +881,12 @@ impl HomeScreen {
             })
         });
         if let Some(id) = clicked {
-            self.open(id);
+            if self.backup_prompt && attention::PROMPT_IDS.contains(&id) {
+                self.dismiss_prompt();
+            }
+            if id != attention::PROMPT_LATER {
+                self.open(id);
+            }
         }
         if let Some(m) = drill {
             self.drill(m);
@@ -910,6 +956,42 @@ async fn contact_count(s: &cl_api::Session, kind: ContactType) -> Result<u64, Ap
 
 /// The window, the last backup and the clock from this computer's record
 /// of the company (the demo's own figures when it has none).
+/// Q-217 (P34): ask once a day at open when a backup is due and no
+/// schedule is on (never in the demo).
+fn prompt_at_open(link: &CompanyLink, tenant: Option<&(TenantId, String)>, local: &Local) -> bool {
+    if link.is_demo() || link.is_workstation() {
+        return false;
+    }
+    let Some((id, _)) = tenant else {
+        return false;
+    };
+    let Some(rec) = link.store().load().ok().and_then(|l| l.get(*id).cloned()) else {
+        return false;
+    };
+    let age = cl_model::home::backup_due(
+        local.last_backup,
+        local.now,
+        cl_model::home::BACKUP_DAYS_DEFAULT,
+    );
+    let has_schedule = rec
+        .schedule
+        .as_ref()
+        .is_some_and(cl_settings::BackupSchedule::is_active);
+    let today = local
+        .now
+        .as_utc()
+        .with_timezone(&chrono::Local)
+        .format("%Y-%m-%d")
+        .to_string();
+    !rec.is_sample
+        && cl_model::home::backup_prompt_due(
+            age,
+            has_schedule,
+            rec.backup_prompted.as_deref(),
+            &today,
+        )
+}
+
 fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local {
     let record = tenant.and_then(|(id, _)| {
         link.store()
@@ -930,6 +1012,15 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
     let checklist_dismissed = record
         .as_ref()
         .is_some_and(|r| r.prefs.setup_checklist_dismissed);
+    // Q-217 (P34): the last scheduled run failed.
+    let last_schedule_failed = record.as_ref().is_some_and(|r| {
+        r.schedule.as_ref().is_some_and(|s| s.enabled)
+            && r.schedule_runs
+                .iter()
+                .rev()
+                .find(|x| x.outcome.consumes_slot())
+                .is_some_and(|x| matches!(x.outcome, cl_settings::RunOutcome::Failed { .. }))
+    });
     let last = record.and_then(|r| r.last_backup);
     let checks_unconfirmed =
         tenant.is_some_and(|(id, _)| crate::screens::print_forms::waiting_answer(link, *id));
@@ -942,6 +1033,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
             calendar,
             checklist_dismissed,
             checks_unconfirmed,
+            last_schedule_failed,
         };
     }
     let now = chrono::Utc::now();
@@ -954,6 +1046,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
         calendar,
         checklist_dismissed,
         checks_unconfirmed,
+        last_schedule_failed,
     }
 }
 

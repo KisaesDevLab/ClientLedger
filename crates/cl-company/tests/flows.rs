@@ -209,8 +209,8 @@ async fn backup_moves_the_archive_verifies_it_and_records_history() {
     let engine_dir = dir.path().join("engine-archives");
     std::fs::create_dir_all(&engine_dir).expect("dir");
     let archive = abs(&engine_dir, "arch-1.zip");
-    std::fs::write(&archive, b"ciphered").expect("write");
-    mount_export(&server, &archive, &sha256(b"ciphered")).await;
+    let ciphered = write_engine_archive(&archive);
+    mount_export(&server, &archive, &sha256(&ciphered)).await;
 
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen2 = Arc::clone(&seen);
@@ -232,9 +232,9 @@ async fn backup_moves_the_archive_verifies_it_and_records_history() {
     .expect("backup");
     assert!(out.record.path.exists(), "{:?}", out.record.path);
     assert!(!archive.exists(), "moved, not copied");
-    assert_eq!(out.record.sha256, sha256(b"ciphered"));
+    assert_eq!(out.record.sha256, sha256(&ciphered));
     assert_eq!(out.record.archive_id, "arch-1");
-    assert_eq!(out.bytes, 8);
+    assert_eq!(out.bytes, ciphered.len() as u64);
     assert_eq!(out.pruned.len(), 0);
     let body = &posts(&server, "/api/v1/tenants/").await[0];
     assert_eq!(body["passphrase"], "backup-passphrase-canary");
@@ -306,7 +306,7 @@ async fn backup_refuses_without_a_passphrase_and_a_bad_copy_is_removed() {
 
     let (_, secrets) = stores(dir.path());
     let archive = abs(dir.path(), "arch-1.zip");
-    std::fs::write(&archive, b"ciphered").expect("write");
+    write_engine_archive(&archive);
     mount_export(&server, &archive, &"0".repeat(64)).await;
     let e = backup(&s, &store, &secrets, &req, &cl_company::backup::silent())
         .await
@@ -359,6 +359,22 @@ async fn mount_tenants_list(server: &MockServer) {
         .await;
 }
 
+/// A finished engine export: a readable envelope (P34 reads every
+/// written backup back before it counts). Returns the file bytes.
+fn write_engine_archive(p: &Path) -> Vec<u8> {
+    let env = r#"{"format":"mybooks-tenant-archive","formatVersion":2,"archiveId":"arch-1","createdAt":"2026-11-04T08:12:00.000Z"}"#;
+    let file = std::fs::File::create(p).expect("create");
+    let mut zip = zip::ZipWriter::new(file);
+    let opts =
+        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+    zip.start_file("envelope.json", opts).expect("entry");
+    zip.write_all(env.as_bytes()).expect("write");
+    zip.start_file("manifest.json.enc", opts).expect("entry");
+    zip.write_all(b"ciphered").expect("write");
+    zip.finish().expect("finish");
+    std::fs::read(p).expect("read")
+}
+
 fn write_archive(dir: &Path, archive_id: &str) -> PathBuf {
     let p = abs(dir, "restore-me.clbackup");
     let env = format!(
@@ -397,6 +413,8 @@ async fn restore_imports_as_a_new_tenant_swaps_names_and_keeps_the_old_one() {
                     archive_id: "arch-9".into(),
                     created_at: cl_settings::recent::now(),
                     kind: BackupKind::Backup,
+                    trigger: None,
+                    tested: None,
                 },
             );
         })
@@ -524,6 +542,8 @@ async fn a_second_restore_of_the_same_backup_names_each_company_once() {
                     archive_id: "arch-9".into(),
                     created_at: cl_settings::recent::now(),
                     kind: BackupKind::Backup,
+                    trigger: None,
+                    tested: None,
                 },
             );
             l.upsert(t(T3), "Ozark Ridge Landscaping LLC").restored =
@@ -752,6 +772,8 @@ async fn restore_refuses_a_changed_file_before_anything_is_sent() {
                     archive_id: "arch-9".into(),
                     created_at: cl_settings::recent::now(),
                     kind: BackupKind::Backup,
+                    trigger: None,
+                    tested: None,
                 },
             );
         })
@@ -819,8 +841,8 @@ async fn delete_needs_the_capability_the_exact_name_and_a_fresh_backup() {
     assert_eq!(posts(&server, "/api/v1/tenants/").await.len(), 0);
 
     let archive = abs(dir.path(), "arch-1.zip");
-    std::fs::write(&archive, b"ciphered").expect("write");
-    mount_export(&server, &archive, &sha256(b"ciphered")).await;
+    let ciphered = write_engine_archive(&archive);
+    mount_export(&server, &archive, &sha256(&ciphered)).await;
     Mock::given(method("POST"))
         .and(path(format!("/api/v1/tenants/{T1}/delete")))
         .respond_with(json(200, json!({"tenantId":T1,"archiveId":"arch-1"})))
@@ -834,7 +856,7 @@ async fn delete_needs_the_capability_the_exact_name_and_a_fresh_backup() {
     let del = posts(&server, &format!("/api/v1/tenants/{T1}/delete")).await;
     assert_eq!(del.len(), 1);
     assert_eq!(del[0]["confirmName"], "Ozark Ridge Landscaping LLC");
-    assert_eq!(del[0]["archive"]["sha256"], sha256(b"ciphered"));
+    assert_eq!(del[0]["archive"]["sha256"], sha256(&ciphered));
     let kept = store.load().expect("load");
     let tomb = kept.get(t(T1)).expect("a tombstone keeps the record");
     assert!(tomb.is_tombstone());
@@ -1473,6 +1495,8 @@ async fn restore_with_a_stale_previous_company_keeps_both_names() {
                     archive_id: "arch-9".into(),
                     created_at: cl_settings::recent::now(),
                     kind: BackupKind::Backup,
+                    trigger: None,
+                    tested: None,
                 },
             );
         })

@@ -613,6 +613,15 @@ impl CompanyLink {
             .unwrap_or_else(PoisonError::into_inner) = t;
     }
 
+    /// The company open now, if any.
+    #[must_use]
+    pub fn open_tenant(&self) -> Option<TenantId> {
+        *self
+            .open_tenant
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
     /// The open company's tag rules (Q-180 required groups, Q-276 every
     /// line and the default tag), read from its local preferences each
     /// time, so a change in Preferences or the Tags window shows at the

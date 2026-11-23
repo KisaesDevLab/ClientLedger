@@ -216,6 +216,8 @@ pub const HOST_ONLY: &[&str] = &[
     "file.restore",
     "file.backup",
     "file.full_backup",
+    // P34: schedules write to this computer's folders and run here.
+    "file.backup_settings",
     "file.new_company",
     "file.delete_company",
     "file.import_qbd",
@@ -280,7 +282,21 @@ pub const MAINTENANCE_CALLS: &[(&str, &str)] = &[
     // No caller in the app: the payroll check-register and checks posts.
     ("POST /payroll-import/sessions/:id/check-register/post", ""),
     ("POST /payroll-import/sessions/:id/checks/post", ""),
+    // P34 (U-12): Verify Data's fix, always after a verified backup. The
+    // second needle guards a direct call added later.
+    (
+        "POST /integrity/fixes",
+        "cl_company::health::fix_after_backup(",
+    ),
+    ("POST /integrity/fixes", ".integrity().fix("),
 ];
+
+/// Rows of [`MAINTENANCE_CALLS`] whose engine route arrives with a later
+/// engine pin (P34: U-12 lands with the A3 pin bump). The route-list check
+/// counts them only once the engine's route files have them; remove each
+/// entry when the pin carries it.
+#[cfg(test)]
+const PENDING_ENGINE_ROUTES: &[&str] = &["POST /integrity/fixes"];
 
 /// Runs `work` under maintenance when this computer is the LAN host (its
 /// engine runs with LAN on, PR-8 S7: also when sharing itself could not
@@ -314,11 +330,14 @@ where
     session.start_maintenance(hold == Hold::Routine).await?;
     // QA-9: the workstations' heartbeat says "maintenance" while it lasts.
     crate::lan_link::set_host_maintenance(true);
+    // P34: scheduled backups wait while a hold is on.
+    crate::backup_runner::set_hold(true);
     let r = work.await;
     if let Err(e) = session.end_maintenance().await {
         tracing::warn!(error = %e, "maintenance could not be ended; it ends when this sign-in does");
     }
     crate::lan_link::set_host_maintenance(false);
+    crate::backup_runner::set_hold(false);
     r
 }
 
@@ -1109,6 +1128,7 @@ mod tests {
             let listed: std::collections::BTreeSet<String> = MAINTENANCE_CALLS
                 .iter()
                 .map(|(r, _)| (*r).to_string())
+                .filter(|r| !PENDING_ENGINE_ROUTES.contains(&r.as_str()) || found.contains(r))
                 .collect();
             assert_eq!(found, listed, "the engine's maintenance routes changed");
         } else {

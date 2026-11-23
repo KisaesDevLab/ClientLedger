@@ -1,0 +1,33 @@
+# Scheduled Backups and History (P34 B4, Q-42) against `clientledger
+# --demo`: turn a weekly schedule on, save (the next backup is named),
+# then History: two backups (scheduled and manual), the failed scheduled
+# run in plain words, and a test restore that passes with the trial
+# balance. All data is synthetic; the demo writes no files.
+name: backup_settings
+description: Weekly schedule saved; history with a failed run and a passing test restore.
+steps:
+  - resize: {width: 1440, height: 940}
+  - set_zoom: {percent: 100}
+  - command: file.backup_settings
+  - assert_exists: {role: tab, label: Scheduled Backups and History}
+  - assert_state: {key: screen.screen, equals: backup_settings}
+  - assert_state: {key: screen.tab, equals: schedule}
+  - click: {role: check_box, label: Back up this company on a schedule}
+  - click: {role: radio_button, label: Every week}
+  - assert_state: {key: screen.frequency, equals: 1}
+  - click: {role: button, label: Save Schedule}
+  - assert_state: {key: screen.enabled, equals: true}
+  - assert_state: {key: screen.since_set, equals: true}
+  - assert_exists: {label_contains: "Next backup:"}
+  - assert_no_clipping: {}
+  - screenshot: schedule
+  - click: {role: button, label: History}
+  - assert_state: {key: screen.tab, equals: history}
+  - assert_state: {key: screen.backups, equals: 2}
+  - assert_exists: {label_contains: "the folder couldn't be reached"}
+  - screenshot: history
+  - click: {role: button, label_contains: "Test restore", index: 0}
+  - assert_state: {key: screen.tested, equals: 1}
+  - assert_exists: {label_contains: "Restores cleanly"}
+  - screenshot: tested
+  - command: file.close_window
