@@ -34,6 +34,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("verify.fix.toast", "Fixed. A backup was made first."),
     ("verify.stale", "The books changed since this check. Check again, then fix."),
     ("verify.fix_failed", "Nothing was fixed: {why}"),
+    ("verify.gate_busy", "a backup or a test restore is running. Try again when it finishes"),
     ("verify.duplicates", "Possible duplicate entries are listed in the Duplicate Finder."),
     ("verify.duplicates.open", "Open Duplicate Finder"),
     ("verify.code.unbalanced_transaction", "This entry's debits and credits don't match."),

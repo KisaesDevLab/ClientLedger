@@ -327,8 +327,17 @@ async fn a_changed_or_wrong_file_is_a_failed_test_not_an_error() {
     assert!(!out.test.passed);
     assert_eq!(
         out.test.reason.as_deref(),
-        Some("ARCHIVE_PASSPHRASE_INVALID")
+        Some(reason::PASSPHRASE),
+        "review M5: its own reason, not a damaged file"
     );
+    // QA-14: the recorded file cut short no longer reads as a backup; it
+    // is this app's file, so it changed, not "not a backup".
+    std::fs::write(&p, b"PK").expect("truncate");
+    let out = test_restore(&s, &store, &secrets, &p, &cl_company::backup::silent())
+        .await
+        .expect("a result");
+    assert_eq!(out.test.reason.as_deref(), Some(reason::TAMPERED));
+    assert!(out.recorded);
 }
 
 /// Q-P34bi: no disk space (or a busy engine) says nothing about the file:
@@ -445,6 +454,7 @@ async fn a_fix_backs_up_first_then_fixes_with_the_runs_version_then_checks_again
     let ids: Vec<_> = run.fixable().map(|f| f.id.clone()).collect();
     let backups = dir.path().join("Backups");
     let out = fix_after_backup(
+        cl_company::backup::GATE.lock().await,
         &s,
         &store,
         &secrets,
@@ -496,6 +506,7 @@ async fn no_backup_means_no_fix() {
     let ids: Vec<_> = run.fixable().map(|f| f.id.clone()).collect();
     let backups = dir.path().join("Backups");
     let e = fix_after_backup(
+        cl_company::backup::GATE.lock().await,
         &s,
         &store,
         &secrets,

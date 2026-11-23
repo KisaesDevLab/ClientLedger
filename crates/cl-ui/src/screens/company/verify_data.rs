@@ -176,7 +176,13 @@ impl VerifyDataScreen {
             .filter(|f| ids.contains(&f.id.as_str().to_string()))
             .map(|f| f.id.clone())
             .collect();
-        // Q-P34d: routine hold → verified backup → fix → re-check → end.
+        // Review S1: the archive gate first, so the LAN hold below never
+        // waits behind a test restore or another backup.
+        let Some(gate) = cl_company::backup::try_gate() else {
+            self.fix_end = Some(FixEnd::Failed(t("verify.gate_busy")));
+            return;
+        };
+        // Q-P34d: gate → routine hold → verified backup → fix → re-check.
         self.fix = spawn_lifecycle(&self.link, group, move || async move {
             let req = cl_company::health::FixRequest {
                 tenant_id,
@@ -188,6 +194,7 @@ impl VerifyDataScreen {
                 &session,
                 crate::lan_status::Hold::Routine,
                 cl_company::health::fix_after_backup(
+                    gate,
                     &session,
                     &store,
                     secrets.as_ref(),

@@ -8,8 +8,9 @@
 //! - [`fix_after_backup`]: a verified before-fix backup first (trigger
 //!   `before_fix`), then the fix guarded by the run's ledger version and
 //!   naming that backup, then the same level again. No backup, no fix
-//!   (Q-170). The caller runs it under a routine maintenance hold in LAN
-//!   mode (Q-P34d).
+//!   (Q-170). The caller takes [`crate::backup::GATE`] first (refusing
+//!   when it is busy), then runs this under a routine maintenance hold in
+//!   LAN mode (Q-P34d), so the hold never waits behind a test restore.
 //!
 //! Every amount and verdict is the engine's; logs carry codes and counts.
 
@@ -18,7 +19,7 @@ use cl_core::Timestamp;
 use cl_core::ids::TenantId;
 use cl_settings::{BackupKind, BackupRecord, BackupTrigger, RecentStore, SecretStore};
 
-use crate::backup::{BackupOptions, BackupRequest, GATE, ProgressSink};
+use crate::backup::{BackupOptions, BackupRequest, GateGuard, ProgressSink};
 use crate::error::CompanyError;
 
 /// Days between weekly quick checks (Q-171).
@@ -82,13 +83,15 @@ pub struct FixRequest<'a> {
     pub finding_ids: &'a [IntegrityId],
 }
 
-/// Fixes the chosen findings of a run, after a verified backup.
+/// Fixes the chosen findings of a run, after a verified backup. `gate` is
+/// the caller's held [`crate::backup::GATE`] (see [`crate::backup::try_gate`]).
 ///
 /// # Errors
 /// Any backup error (nothing fixed); `Api` from the fix, where
 /// `cl_api::is_integrity_stale` means the books changed since the check
 /// (check again); `Api(Local(InvalidValue))` for no findings.
 pub async fn fix_after_backup(
+    gate: GateGuard,
     session: &Session,
     store: &RecentStore,
     secrets: &dyn SecretStore,
@@ -106,8 +109,9 @@ pub async fn fix_after_backup(
             cl_api::LocalValidation::InvalidValue,
         )));
     }
-    let _gate = GATE.lock().await;
-    // 1. The backup (no retention: it is the way back from this fix).
+    let _gate = gate;
+    // 1. The backup. No retention runs here; a later regular backup into
+    //    the same folder counts it toward that folder's rule (Q-P34bj).
     let backup = crate::backup::backup_ungated(
         session,
         store,

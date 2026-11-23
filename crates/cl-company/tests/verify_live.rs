@@ -178,6 +178,7 @@ async fn scenario(sup: &Supervisor, client: &Client, password: &Secret, scratch:
             .collect();
         assert_eq!(ids.len(), 1, "the drift is found: {:?}", run.checks);
         let out = fix_after_backup(
+            cl_company::backup::GATE.lock().await,
             &s,
             &store,
             &secrets,

@@ -28,6 +28,11 @@ pub mod reason {
     pub const TRANSFER_FILE: &str = "TRANSFER_FILE";
     /// Written by a newer `ClientLedger`.
     pub const TOO_NEW: &str = "ARCHIVE_TOO_NEW";
+    /// The current backup passphrase does not open it (the passphrase
+    /// changed since it was made). Not a damaged file; automatic tests stop
+    /// after it so they never feed the engine's passphrase limiter (review
+    /// M5).
+    pub const PASSPHRASE: &str = "PASSPHRASE_MISMATCH";
 
     /// The restored books did not match the file (trial balance, counts,
     /// content or totals).
@@ -146,6 +151,13 @@ pub(crate) async fn test_restore_ungated(
             let Some(why) = local_refusal(&e) else {
                 return Err(e);
             };
+            // A file this app wrote that no longer reads as a backup was cut
+            // short or changed on disk (QA-14), not some other file.
+            let why = if why == reason::NOT_A_BACKUP && in_history(&list, &path) {
+                reason::TAMPERED
+            } else {
+                why
+            };
             tracing::info!(reason = why, "test restore: refused before sending");
             let mut out = refused(&path, cl_settings::recent::now(), why);
             // A changed file still has its history entry (same archive id):
@@ -188,7 +200,11 @@ pub(crate) async fn test_restore_ungated(
         // Wrong passphrase, damaged, too new, did not verify: the
         // engine's code is the reason (never a path).
         tracing::info!(code = %code, "test restore: the engine refused the file");
-        out.test.reason = Some(code);
+        out.test.reason = Some(if code == "ARCHIVE_PASSPHRASE_INVALID" {
+            reason::PASSPHRASE.to_string()
+        } else {
+            code
+        });
     } else {
         let result = status
             .test_restore_result()?
@@ -228,6 +244,17 @@ pub(crate) async fn test_restore_ungated(
     Ok(out)
 }
 
+fn same_file(recorded: &Path, path: &Path) -> bool {
+    recorded == path || std::path::absolute(recorded).is_ok_and(|p| p == path)
+}
+
+/// True when some company's history has the file at `path`.
+fn in_history(list: &cl_settings::RecentCompanies, path: &Path) -> bool {
+    list.companies
+        .iter()
+        .any(|c| c.backups.iter().any(|b| same_file(&b.path, path)))
+}
+
 /// Records a test result on the history entry for `path` (by path: a
 /// changed file no longer has the recorded hash).
 fn record_by_path(
@@ -237,10 +264,11 @@ fn record_by_path(
 ) -> Result<bool, CompanyError> {
     Ok(store.update(|l| {
         for c in &mut l.companies {
-            if let Some(b) =
-                c.backups.iter_mut().rev().find(|b| {
-                    b.path == path || std::path::absolute(&b.path).is_ok_and(|p| p == path)
-                })
+            if let Some(b) = c
+                .backups
+                .iter_mut()
+                .rev()
+                .find(|b| same_file(&b.path, path))
             {
                 b.tested = Some(test.clone());
                 return true;

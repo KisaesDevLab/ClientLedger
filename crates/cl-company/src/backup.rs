@@ -382,6 +382,18 @@ pub fn gate_busy() -> bool {
     GATE.try_lock().is_err()
 }
 
+/// A held [`GATE`].
+pub type GateGuard = tokio::sync::MutexGuard<'static, ()>;
+
+/// Takes [`GATE`] without waiting: `None` while a backup, restore or test
+/// restore runs. Callers that also take a LAN maintenance hold take the
+/// gate **first**, so a hold never waits behind a long archive job
+/// (review S1).
+#[must_use]
+pub fn try_gate() -> Option<GateGuard> {
+    GATE.try_lock().ok()
+}
+
 /// How often the final rename is tried (a cloud-sync client may hold the
 /// new file for a moment).
 const RENAME_TRIES: u32 = 3;
@@ -394,9 +406,15 @@ pub fn part_path(dest: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// Removes this company's `.part` files left in `dir` by a run that
-/// stopped half way (crash, power loss). Only names this app makes for
-/// `company` are touched: `<stem>-YYYYMMDD-HHMMSS[-kind].clbackup.part`.
+/// A `.part` older than this is left over from a run that stopped, whoever
+/// made it (no backup takes a day).
+const STALE_PART: std::time::Duration = std::time::Duration::from_hours(24);
+
+/// Removes `.part` files left in `dir` by a run that stopped half way
+/// (crash, power loss): this company's
+/// (`<stem>-YYYYMMDD-HHMMSS[-kind].clbackup.part`), and any
+/// `*.clbackup.part` not touched for a day (a company renamed since, review
+/// M3).
 #[must_use = "the count of files removed"]
 pub fn sweep_parts(dir: &Path, company: &str) -> usize {
     let stem = name_stem(company);
@@ -406,7 +424,15 @@ pub fn sweep_parts(dir: &Path, company: &str) -> usize {
     let mut removed = 0;
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        if is_our_part(&name, &stem) && std::fs::remove_file(e.path()).is_ok() {
+        let stale = || {
+            name.ends_with(".clbackup.part")
+                && e.metadata()
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|age| age >= STALE_PART)
+        };
+        if (is_our_part(&name, &stem) || stale()) && std::fs::remove_file(e.path()).is_ok() {
             removed += 1;
         }
     }
@@ -731,12 +757,20 @@ pub(crate) async fn backup_ungated(
 #[must_use]
 pub fn schedule_keep(rec: &cl_settings::CompanyRecord, dir: &Path) -> Option<(usize, u32)> {
     let s = rec.schedule.as_ref()?;
-    let same = s.folder == dir
-        || matches!(
-            (std::path::absolute(&s.folder), std::path::absolute(dir)),
-            (Ok(a), Ok(b)) if a == b
-        );
-    same.then_some((s.keep_last, s.keep_months))
+    same_dir(&s.folder, dir).then_some((s.keep_last, s.keep_months))
+}
+
+/// The folder as one spelling: absolute, then resolved on disk when it
+/// exists (case, `..`, links), else as written.
+fn dir_key(p: &Path) -> PathBuf {
+    let abs = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    std::fs::canonicalize(&abs).unwrap_or(abs)
+}
+
+/// True when two spellings name one folder (review M2).
+#[must_use]
+pub fn same_dir(a: &Path, b: &Path) -> bool {
+    a == b || dir_key(a) == dir_key(b)
 }
 
 /// The retention a backup asked for: regular backups by
@@ -829,10 +863,26 @@ fn prune_kind(
         p.file_name()
             .is_some_and(|n| protected.contains(n.to_string_lossy().as_ref()))
     };
+    let dir = dir_key(dir);
+    let in_dir = |b: &BackupRecord| b.path.parent().is_some_and(|p| dir_key(p) == dir);
+    // The newest copy a test restore passed is never pruned (review S2): a
+    // new untested copy must not take the only proven one with it.
+    let proven = rec
+        .backups
+        .iter()
+        .filter(|b| b.kind == kind && b.tested.as_ref().is_some_and(|t| t.passed))
+        .filter(|b| in_dir(b))
+        .max_by_key(|b| b.created_at)
+        .map(|b| b.path.clone());
     let candidates: Vec<(PathBuf, Timestamp)> = rec
         .backups
         .iter()
-        .filter(|b| b.kind == kind && b.path.parent() == Some(dir) && !is_protected(&b.path))
+        .filter(|b| {
+            b.kind == kind
+                && in_dir(b)
+                && !is_protected(&b.path)
+                && proven.as_ref() != Some(&b.path)
+        })
         .map(|b| (b.path.clone(), b.created_at))
         .collect();
     let delete = prune_plan(&candidates, now, keep_last, keep_months);
@@ -1311,5 +1361,77 @@ mod tests {
         assert_eq!(v["accent"], "#6E8B3D");
         let back: HostMetadata = serde_json::from_value(v).expect("back");
         assert_eq!(back, h);
+    }
+
+    /// Review S2: retention never deletes the newest copy a test restore
+    /// passed, even when newer untested copies fill the keep count. Review
+    /// M2: a folder spelled another way (`dir/./`) is still the same folder.
+    #[test]
+    fn retention_keeps_the_newest_proven_copy_and_matches_folder_spellings() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let now = Timestamp::parse_wire("2026-11-17T08:12:00.000Z").expect("ts");
+        let mut rec = cl_settings::CompanyRecord::new(
+            cl_core::ids::TenantId::parse("1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
+            "Ozark",
+            cl_settings::ACCENT_PALETTE[0],
+        );
+        for day in 1..=5u32 {
+            let at = Timestamp::parse_wire(&format!("2026-11-{day:02}T08:00:00.000Z")).expect("ts");
+            let path = dir
+                .path()
+                .join(backup_file_name("Ozark", at, BackupKind::Backup));
+            std::fs::write(&path, b"x").expect("write");
+            rec.backups.push(BackupRecord {
+                path,
+                sha256: "0".repeat(64),
+                archive_id: at.to_wire(),
+                created_at: at,
+                kind: BackupKind::Backup,
+                trigger: None,
+                tested: (day == 1).then_some(cl_settings::BackupTest {
+                    at,
+                    passed: true,
+                    reason: None,
+                    tb: None,
+                }),
+            });
+        }
+        let spelled = dir.path().join(".");
+        let pruned = prune_kind(
+            &mut rec,
+            &spelled,
+            now,
+            BackupKind::Backup,
+            2,
+            0,
+            &BTreeSet::new(),
+        );
+        assert_eq!(pruned.len(), 2, "days 2 and 3 go: {pruned:?}");
+        assert!(
+            rec.backups.iter().any(|b| b.tested.is_some()),
+            "the proven copy stays"
+        );
+        assert_eq!(rec.backups.len(), 3);
+    }
+
+    /// Review M3: a `.part` from before a rename is swept once it is a day
+    /// old; a fresh one of another company is left alone.
+    #[test]
+    fn stale_parts_of_any_name_are_swept() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let old = dir.path().join("Old-Name-20261101-080000.clbackup.part");
+        let fresh = dir.path().join("Other-20261101-080000.clbackup.part");
+        std::fs::write(&old, b"x").expect("w");
+        std::fs::write(&fresh, b"x").expect("w");
+        let f = std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .expect("open");
+        f.set_modified(std::time::SystemTime::now() - 2 * STALE_PART)
+            .expect("set time");
+        drop(f);
+        assert_eq!(sweep_parts(dir.path(), "New Name"), 1);
+        assert!(!old.exists());
+        assert!(fresh.exists());
     }
 }
