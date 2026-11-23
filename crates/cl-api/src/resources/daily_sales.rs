@@ -20,7 +20,7 @@ use std::fmt;
 
 use cl_core::ids::{
     AccountId, DailyEntryId, DailyLineId, DailyTemplateId, SalesTaxItemId, TagId, TaxCodeId,
-    TransactionId,
+    TransactionId, UserId,
 };
 use cl_core::{CalendarDate, Money};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -468,6 +468,10 @@ pub struct DailyEntry {
     /// The stamp it was read at (`updatedAt`), sent with its next save or
     /// delete (U-291; LAN mode requires it, U-292).
     pub stamp: Option<RecordStamp>,
+    /// Who saved it first (`createdBy`; `None` when the engine did not
+    /// say). The outcome probe after a lost reply only takes a draft this
+    /// user made (PR-8 S5).
+    pub created_by: Option<UserId>,
 }
 
 /// Hides the notes and amounts.
@@ -510,6 +514,8 @@ struct EntryWire {
     template: Option<DailyTemplate>,
     #[serde(default, deserialize_with = "stamp_de")]
     updated_at: Option<RecordStamp>,
+    #[serde(default)]
+    created_by: Option<UserId>,
 }
 
 impl From<EntryWire> for DailyEntry {
@@ -531,6 +537,7 @@ impl From<EntryWire> for DailyEntry {
             },
             layout: w.template,
             stamp: w.updated_at,
+            created_by: w.created_by,
         }
     }
 }

@@ -93,6 +93,10 @@ pub fn refusal(e: &ApiError) -> Option<&'static str> {
             cl_api::LocalValidation::ClosingDateWriteUnavailable
             | cl_api::LocalValidation::ClosingPasswordUnavailable,
         ) => "closing.admin.needs_update",
+        ApiError::Conflict {
+            reason: cl_api::ConflictReason::Stale,
+            ..
+        } => "closing.admin.changed_elsewhere",
         _ => return None,
     })
 }
@@ -176,10 +180,22 @@ impl ClosingDateScreen {
                     tracing::info!("closing-date password changed");
                     self.reload();
                 }
-                Err(e) => match refusal(&e) {
-                    Some(k) => self.message = Some((k, false)),
-                    None => self.error = Some(e),
-                },
+                Err(e) => {
+                    if matches!(
+                        e,
+                        ApiError::Conflict {
+                            reason: cl_api::ConflictReason::Stale,
+                            ..
+                        }
+                    ) {
+                        // Show the date as it is now.
+                        self.reload();
+                    }
+                    match refusal(&e) {
+                        Some(k) => self.message = Some((k, false)),
+                        None => self.error = Some(e),
+                    }
+                }
             }
         }
     }
@@ -215,6 +231,9 @@ impl ClosingDateScreen {
             closing_date: if clearing { None } else { self.date.value },
             closing_password: password,
         };
+        // PR-8 S3: refused if another computer changed the date since this
+        // screen read it (the owner sees the new one first).
+        let shown = self.status.as_ref().and_then(|s| s.closing_date);
         let demo_change = change.clone();
         self.message = None;
         self.write = Some(engine::write(
@@ -224,7 +243,7 @@ impl ClosingDateScreen {
             move |d| crate::company::demo::closing::set_date(d, &demo_change).map(Wrote::Date),
             move |s| async move {
                 let key = IdempotencyKey::new();
-                let out = s.set_closing_date(&change, key).await?;
+                let out = s.set_closing_date_from(shown, &change, key).await?;
                 Ok(Wrote::Date(out.lock_date))
             },
         ));
@@ -470,8 +489,20 @@ mod tests {
             Some("closing.admin.wrong_password")
         );
         assert_eq!(refusal(&ApiError::NoCompanyOpen), None);
+        // PR-8 S3: changed on another computer since the screen read it.
+        assert_eq!(
+            refusal(&ApiError::Conflict {
+                reason: cl_api::ConflictReason::Stale,
+                current_version: None,
+                code: None,
+                message: cl_api::UserText::default(),
+                details: cl_api::ConflictDetails::default(),
+            }),
+            Some("closing.admin.changed_elsewhere")
+        );
         for k in [
             "closing.admin.intro",
+            "closing.admin.changed_elsewhere",
             "closing.admin.saved",
             "closing.admin.only_admin",
             "closing.admin.date_needed",

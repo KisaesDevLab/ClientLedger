@@ -563,15 +563,20 @@ impl AccountingEdits {
         if same == before {
             return None;
         }
+        // PR-8 S3: only what the owner changed goes. The engine merges the
+        // fields sent, so a setting left alone here never overwrites a
+        // change made on another computer since the pane opened.
         let rate = if self.tax_percent.trim().is_empty() {
             Some(TaxRate::ZERO)
         } else {
             percent_to_rate(&self.tax_percent).ok()
         };
         Some(CompanySettingsUpdate {
-            fiscal_year_start_month: Some(self.fiscal_year_start_month),
-            accounting_method: Some(self.method),
-            default_sales_tax_rate: rate,
+            fiscal_year_start_month: (self.fiscal_year_start_month
+                != before.fiscal_year_start_month)
+                .then_some(self.fiscal_year_start_month),
+            accounting_method: (self.method != before.method).then_some(self.method),
+            default_sales_tax_rate: rate.filter(|_| self.tax_percent != before.tax_percent),
             ..CompanySettingsUpdate::default()
         })
     }
@@ -848,7 +853,25 @@ mod tests {
         changed.tax_percent = String::new();
         let u = changed.update_for(Some(&s)).expect("update");
         assert_eq!(u.default_sales_tax_rate, Some(TaxRate::ZERO));
-        assert_eq!(u.accounting_method, Some(AccountingMethod::Cash));
+        // PR-8 S3: only the rate goes; the basis and the fiscal year another
+        // computer may have changed since the pane opened are left alone.
+        assert_eq!(u.accounting_method, None);
+        assert_eq!(u.fiscal_year_start_month, None);
+        assert_eq!(
+            serde_json::to_value(&u).expect("json"),
+            serde_json::json!({ "defaultSalesTaxRate": "0.0000" })
+        );
+        let mut basis = e.clone();
+        basis.method = AccountingMethod::Accrual;
+        let u = basis.update_for(Some(&s)).expect("update");
+        assert_eq!(
+            (
+                u.accounting_method,
+                u.fiscal_year_start_month,
+                u.default_sales_tax_rate
+            ),
+            (Some(AccountingMethod::Accrual), None, None)
+        );
         assert_eq!(
             AccountingEdits::from_settings(None),
             AccountingEdits::default()
