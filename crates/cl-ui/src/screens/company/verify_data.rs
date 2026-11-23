@@ -543,6 +543,8 @@ mod tests {
         assert_eq!(st["warnings"], 0, "checked again");
         assert_eq!(st["errors"], 1, "report-only stays");
         let ctx = eframe::egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
         let mut out = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
             eframe::egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
         });

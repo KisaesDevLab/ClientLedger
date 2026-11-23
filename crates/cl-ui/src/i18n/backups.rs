@@ -46,6 +46,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("verify.code.other", "A check found something to look at."),
     ("home.attention.health_check", "Verify Data found {n} things to look at"),
     ("home.attention.health_check.open", "Open Verify Data"),
+    ("home.attention.health_check.name", "Verify Data"),
 
     // Scheduled backups and history (B1, B2, B4).
     ("backups.title", "Scheduled Backups and History"),
