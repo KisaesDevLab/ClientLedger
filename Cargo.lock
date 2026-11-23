@@ -1016,6 +1016,7 @@ dependencies = [
  "postgres",
  "postgres-protocol",
  "sha2",
+ "sysinfo",
  "tar",
  "thiserror 2.0.21",
  "tracing",

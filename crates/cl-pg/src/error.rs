@@ -100,9 +100,30 @@ pub enum PgError {
     /// A backup file is not usable.
     #[error("backup problem: {0}")]
     Backup(String),
+
+    /// Restoring the backup would write more than may be written here: the
+    /// free space minus 1 GiB, or 256 GiB (P03 #4, Q-P34m). Nothing was
+    /// changed.
+    #[error("not enough free disk space to restore this backup (limit {limit} bytes)")]
+    RestoreTooLarge {
+        /// The byte limit that was reached.
+        limit: u64,
+    },
 }
 
 impl PgError {
+    /// The backup was refused because this install did not write it
+    /// (Q-P03h): the owner may confirm and restore it anyway.
+    #[must_use]
+    pub fn is_unregistered(&self) -> bool {
+        matches!(self, PgError::Backup(m) if m.contains(UNREGISTERED))
+    }
+
+    pub(crate) fn unregistered() -> Self {
+        PgError::Backup(format!(
+            "this backup file was {UNREGISTERED}, so it cannot be restored without confirmation"
+        ))
+    }
     pub(crate) fn io(context: impl Into<String>, source: std::io::Error) -> Self {
         PgError::Io {
             context: context.into(),
@@ -110,3 +131,6 @@ impl PgError {
         }
     }
 }
+
+/// The words of the unregistered-backup refusal (`PgError::is_unregistered`).
+const UNREGISTERED: &str = "not made by this copy of ClientLedger";

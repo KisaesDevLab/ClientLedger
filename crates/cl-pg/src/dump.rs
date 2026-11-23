@@ -174,13 +174,23 @@ impl Cluster {
     /// stopped, a file cannot be read, or the written archive does not verify.
     pub fn dump(&self, dest: &Path) -> Result<DumpInfo> {
         let dest = std::path::absolute(dest).map_err(io_err("resolve backup path"))?;
-        if dest.starts_with(&self.data_dir) {
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(io_err("create backup folder"))?;
+        }
+        // P03 #17: compare real paths, so a link, `..` or another spelling of
+        // the data folder cannot put the backup inside it.
+        let real_parent = dest
+            .parent()
+            .map(fs::canonicalize)
+            .transpose()
+            .map_err(io_err("resolve backup folder"))?;
+        let real_data = fs::canonicalize(&self.data_dir).unwrap_or_else(|_| self.data_dir.clone());
+        if dest.starts_with(&self.data_dir)
+            || real_parent.is_some_and(|p| p.starts_with(&real_data))
+        {
             return Err(backup_err(
                 "the backup file cannot be inside the data folder",
             ));
-        }
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).map_err(io_err("create backup folder"))?;
         }
         let was_running = self.running_port().is_some();
         self.stop()?;
@@ -358,15 +368,14 @@ impl Cluster {
         allow_unregistered: bool,
     ) -> Result<RestoreInfo> {
         if !allow_unregistered && !self.is_registered(&sha256_file(src)?) {
-            return Err(backup_err(
-                "this backup file was not made by this copy of ClientLedger, so it cannot be restored without confirmation",
-            ));
+            return Err(PgError::unregistered());
         }
         let staging = sibling(&self.data_dir, ".restoring");
         let _ = fs::remove_dir_all(&staging);
         fs::create_dir_all(&staging).map_err(io_err("create restore folder"))?;
+        let limit = restore_limit(free_space(&staging));
         let staged = self
-            .unpack_and_check(src, &staging)
+            .unpack_and_check(src, &staging, limit)
             .and_then(|files| sanitize_staged(&staging.join(PREFIX)).map(|()| files));
         let files = match staged {
             Ok(f) => f,
@@ -434,10 +443,13 @@ impl Cluster {
             .is_ok_and(|t| t.lines().any(|l| l.trim().eq_ignore_ascii_case(sha256)))
     }
 
-    fn unpack_and_check(&self, src: &Path, staging: &Path) -> Result<u64> {
+    fn unpack_and_check(&self, src: &Path, staging: &Path, limit: u64) -> Result<u64> {
         let file = fs::File::open(src).map_err(io_err("open backup file"))?;
         let mut archive = tar::Archive::new(GzDecoder::new(file));
         let (mut files, mut bytes) = (0u64, 0u64);
+        // Every byte unpacked, manifest included, against the limit (P03 #4):
+        // a crafted or damaged archive can never fill the disk.
+        let mut written = 0u64;
         for entry in archive
             .entries()
             .map_err(|e| backup_err(format!("not a readable backup: {e}")))?
@@ -464,6 +476,10 @@ impl Cluster {
                     "unexpected entry {} (not part of a PostgreSQL database)",
                     path.display()
                 )));
+            }
+            written = written.saturating_add(entry.size());
+            if written > limit {
+                return Err(PgError::RestoreTooLarge { limit });
             }
             if kind.is_file() && first == PREFIX {
                 files += 1;
@@ -675,6 +691,37 @@ fn rename_when_released(from: &Path, to: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Most a restore may unpack when the free space is unknown, and at most
+/// in any case (Q-P34m).
+pub const RESTORE_HARD_CAP: u64 = 256 * 1024 * 1024 * 1024;
+
+/// Space kept free on the disk after a restore.
+const RESTORE_HEADROOM: u64 = 1024 * 1024 * 1024;
+
+/// The byte limit of one restore: `min(free - 1 GiB, 256 GiB)`, or the hard
+/// cap alone when the free space is unknown.
+#[must_use]
+pub fn restore_limit(free: Option<u64>) -> u64 {
+    free.map_or(RESTORE_HARD_CAP, |f| {
+        f.saturating_sub(RESTORE_HEADROOM).min(RESTORE_HARD_CAP)
+    })
+}
+
+/// Free space of the disk holding `path` (the longest matching mount point),
+/// if the operating system says.
+fn free_space(path: &Path) -> Option<u64> {
+    // Not canonicalize: on Windows that gives a verbatim `\\?\C:\` path, which
+    // no mount point (`C:\`) prefixes.
+    let real = std::path::absolute(path).ok()?;
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    disks
+        .list()
+        .iter()
+        .filter(|d| real.starts_with(d.mount_point()))
+        .max_by_key(|d| d.mount_point().as_os_str().len())
+        .map(sysinfo::Disk::available_space)
+}
+
 /// `<data_dir><suffix>` next to the data directory.
 fn sibling(data_dir: &Path, suffix: &str) -> PathBuf {
     let mut name = data_dir
@@ -874,6 +921,74 @@ max_wal_size = '1GB; drop' # injected
             assert!(!clean.contains(gone), "{gone} survived:\n{clean}");
         }
         assert!(clean.trim_end().ends_with(INCLUDE_LINE));
+    }
+
+    #[test]
+    fn the_restore_limit_keeps_a_gigabyte_free_and_caps_at_256_gib() {
+        const GIB: u64 = 1024 * 1024 * 1024;
+        assert_eq!(restore_limit(None), RESTORE_HARD_CAP);
+        assert_eq!(restore_limit(Some(10 * GIB)), 9 * GIB);
+        assert_eq!(restore_limit(Some(GIB / 2)), 0, "less than the headroom");
+        assert_eq!(restore_limit(Some(1000 * GIB)), RESTORE_HARD_CAP);
+        assert!(free_space(&std::env::temp_dir()).is_some_and(|f| f > 0));
+    }
+
+    /// A crafted archive whose entries add up past the limit is refused while
+    /// it is unpacked, before it can fill the disk (P03 #4).
+    #[test]
+    fn unpacking_stops_at_the_limit() {
+        let dir = std::env::temp_dir().join(format!("cl-pg-cap-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("staging")).unwrap();
+        let src = dir.join("big.tar.gz");
+        {
+            let f = fs::File::create(&src).unwrap();
+            let mut b = tar::Builder::new(GzEncoder::new(f, Compression::fast()));
+            let mut add = |name: &str, data: &[u8]| {
+                let mut h = tar::Header::new_gnu();
+                h.set_size(data.len() as u64);
+                h.set_mode(0o600);
+                h.set_cksum();
+                b.append_data(&mut h, name, data).unwrap();
+            };
+            add("data/PG_VERSION", b"16\n");
+            add("data/base/1/1259", &[0u8; 3000]);
+            add("data/base/1/1260", &[0u8; 3000]);
+            b.into_inner().unwrap().finish().unwrap();
+        }
+        let cluster = Cluster {
+            data_dir: dir.join("pgdata"),
+            bins: crate::PgBinaries::unchecked(dir.join("no-bins")),
+            password: Secret::new("x"),
+        };
+        let err = cluster
+            .unpack_and_check(&src, &dir.join("staging"), 4000)
+            .unwrap_err();
+        assert!(
+            matches!(err, PgError::RestoreTooLarge { limit: 4000 }),
+            "{err:?}"
+        );
+        assert!(
+            !dir.join("staging/data/base/1/1260").exists(),
+            "the entry past the limit was not written"
+        );
+        // Within the limit it gets as far as the (missing) manifest.
+        let _ = fs::remove_dir_all(dir.join("staging"));
+        fs::create_dir_all(dir.join("staging")).unwrap();
+        let err = cluster
+            .unpack_and_check(&src, &dir.join("staging"), 1 << 20)
+            .unwrap_err();
+        assert!(
+            matches!(&err, PgError::Backup(m) if m.contains("manifest")),
+            "{err:?}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_unregistered_refusal_is_recognised() {
+        assert!(PgError::unregistered().is_unregistered());
+        assert!(!backup_err("damaged").is_unregistered());
     }
 
     #[test]

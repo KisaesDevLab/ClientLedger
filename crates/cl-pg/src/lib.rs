@@ -41,7 +41,7 @@ mod test_support;
 
 pub use binaries::PgBinaries;
 pub use cluster::{Cluster, is_initialized};
-pub use dump::{DumpInfo, RestoreInfo};
+pub use dump::{DumpInfo, RESTORE_HARD_CAP, RestoreInfo, restore_limit};
 pub use error::PgError;
 pub use keychain::{
     EncryptedFileStore, KeyringStore, MemoryStore, PasswordStore, StoreChoice, StoreNotice,

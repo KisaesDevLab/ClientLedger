@@ -33,6 +33,12 @@ fn exe(name: &str) -> String {
 }
 
 impl PgBinaries {
+    /// A value pointing at a root folder without checking it (unit tests).
+    #[cfg(test)]
+    pub(crate) fn unchecked(root: impl Into<PathBuf>) -> Self {
+        PgBinaries { root: root.into() }
+    }
+
     /// Use the install at `root`.
     ///
     /// # Errors
