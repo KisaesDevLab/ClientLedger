@@ -755,6 +755,27 @@ fn host_restore(host: &Host, b: &Desk, scratch: &Path) {
 
     // A workstation can't restore: host-only, refused before the engine.
     let sb = b.sign_in(&host.password);
+
+    // PR-8 S6: a routine hold (payroll, an import) refuses the workstation
+    // while it lasts but keeps it signed in; its next read works.
+    if hs
+        .client()
+        .capabilities()
+        .has(cl_api::Capabilities::MAINTENANCE_SESSIONS)
+    {
+        rt.block_on(hs.start_maintenance(true))
+            .expect("a routine hold");
+        let during = b.run(sb.ledger_version());
+        assert!(
+            matches!(during, Err(ApiError::Lan(LanRefusal::Maintenance))),
+            "a workstation during a routine hold: {during:?}"
+        );
+        rt.block_on(hs.end_maintenance()).expect("the hold ends");
+        b.run(sb.ledger_version())
+            .expect("still signed in after a routine hold");
+    } else {
+        eprintln!("PENDING: maintenance-sessions-v1 (engine before PR-8 S6)");
+    }
     let refused = b.run(sb.tenants().import_archive(&cl_api::ImportRequest {
         path: made.record.path.clone(),
         passphrase: Secret::new("lan-live-backup-passphrase-synthetic"),
