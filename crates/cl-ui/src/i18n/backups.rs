@@ -113,7 +113,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("backups.run.failed", "Scheduled backup failed: {why}"),
     ("backups.run.skipped", "Scheduled backup skipped: {why}"),
     ("backups.reason.FOLDER_UNREACHABLE", "the folder couldn't be reached"),
-    ("backups.reason.NO_PASSPHRASE", "no backup passphrase is set"),
+    ("backups.reason.NO_PASSPHRASE", "no backup passphrase is set. Set one in File › Back Up Company"),
     ("backups.reason.TENANT_BUSY", "another backup or restore was running"),
     ("backups.reason.LOCKED", "ClientLedger was locked"),
     ("backups.reason.SIGNED_OUT", "nobody was signed in"),

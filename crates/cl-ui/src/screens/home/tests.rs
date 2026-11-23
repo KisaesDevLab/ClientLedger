@@ -1457,3 +1457,45 @@ fn invoices_more_than_60_days_past_due_come_from_the_aging() {
         "{lines:#?}"
     );
 }
+
+/// Review S3: Home flags the newest tested scheduled backup that failed
+/// its test restore; a manual backup's test or a later pass clears it.
+#[test]
+fn a_failed_scheduled_test_restore_is_flagged() {
+    use cl_settings::{BackupKind, BackupRecord, BackupTest, BackupTrigger};
+    let mut r = cl_settings::CompanyRecord::new(
+        TenantId::parse("1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
+        "Ozark",
+        cl_settings::ACCENT_PALETTE[0],
+    );
+    let rec = |ms: i64, trigger, passed: Option<bool>| BackupRecord {
+        path: format!("b{ms}.clbackup").into(),
+        sha256: "0".repeat(64),
+        archive_id: ms.to_string(),
+        created_at: Timestamp::from_unix_millis(ms).expect("ts"),
+        kind: BackupKind::Backup,
+        trigger: Some(trigger),
+        tested: passed.map(|passed| BackupTest {
+            at: Timestamp::from_unix_millis(ms).expect("ts"),
+            passed,
+            reason: None,
+            tb: None,
+        }),
+    };
+    assert!(!super::last_scheduled_test_failed(&r));
+    r.backups
+        .push(rec(1, BackupTrigger::Scheduled, Some(false)));
+    assert!(super::last_scheduled_test_failed(&r));
+    r.backups.push(rec(2, BackupTrigger::Manual, Some(true)));
+    assert!(
+        super::last_scheduled_test_failed(&r),
+        "a manual pass doesn't clear it"
+    );
+    r.backups.push(rec(3, BackupTrigger::Missed, None));
+    assert!(
+        super::last_scheduled_test_failed(&r),
+        "untested doesn't clear it"
+    );
+    r.backups.push(rec(4, BackupTrigger::Scheduled, Some(true)));
+    assert!(!super::last_scheduled_test_failed(&r));
+}

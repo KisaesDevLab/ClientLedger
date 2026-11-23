@@ -193,23 +193,7 @@ impl RunnerHost for Host {
         job: &'a Job,
         now: Timestamp,
     ) -> Pin<Box<dyn Future<Output = JobResult> + Send + 'a>> {
-        Box::pin(async move {
-            let Some(link) = self.link.upgrade() else {
-                return JobResult::GateBusy;
-            };
-            if link.session().is_none() {
-                // Signed out since the plan: the next tick records the skip.
-                return JobResult::GateBusy;
-            }
-            let Some(pending) = self.send(job, now) else {
-                // Review M4: signed in but the request queue is gone; a
-                // failure uses the slot instead of retrying every tick.
-                return JobResult::Failed {
-                    code: "ENGINE_UNAVAILABLE".into(),
-                };
-            };
-            wait(pending).await
-        })
+        Box::pin(async move { send_result(self.send(job, now)).await })
     }
 }
 
@@ -242,11 +226,20 @@ impl Host {
             .ok()
     }
 
-    fn send(&self, job: &Job, now: Timestamp) -> Option<cl_api::Pending<JobResult>> {
+    /// `None`: no session or link (signed out since the plan); `Some(Err)`:
+    /// the queue refused it.
+    fn send(
+        &self,
+        job: &Job,
+        now: Timestamp,
+    ) -> Option<Result<cl_api::Pending<JobResult>, cl_api::QueueError>> {
         let link = self.link.upgrade()?;
         let session = link.session()?;
         let client = link.client()?.clone();
-        let group = link.group()?.ok()?;
+        let group = match link.group()? {
+            Ok(g) => g,
+            Err(e) => return Some(Err(e)),
+        };
         let store = self.store.clone();
         let secrets = Arc::clone(&self.secrets);
         let job = job.clone();
@@ -266,9 +259,28 @@ impl Host {
                 )
                 .await)
             })
-            .ok()
+            .map_or_else(|e| Some(Err(e)), |p| Some(Ok(p)))
     }
 }
+
+/// What a send became (review M4). Signed out since the plan, or a full
+/// queue: the next tick tries again (a sign-out is recorded as a skip
+/// then). A closed queue (the app is stopping or the engine link is gone)
+/// fails the slot instead of retrying it every tick for ever.
+async fn send_result(
+    sent: Option<Result<cl_api::Pending<JobResult>, cl_api::QueueError>>,
+) -> JobResult {
+    match sent {
+        None | Some(Err(cl_api::QueueError::QueueFull)) => JobResult::GateBusy,
+        Some(Err(_)) => JobResult::Failed {
+            code: ENGINE_UNAVAILABLE.into(),
+        },
+        Some(Ok(pending)) => wait(pending).await,
+    }
+}
+
+/// The run's code when the request queue is closed.
+const ENGINE_UNAVAILABLE: &str = "ENGINE_UNAVAILABLE";
 
 async fn wait(mut pending: cl_api::Pending<JobResult>) -> JobResult {
     loop {
@@ -430,6 +442,26 @@ pub fn on_close_backup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review M4: a full queue or a sign-out retries; a closed queue uses
+    /// the slot.
+    #[test]
+    fn a_refused_send_retries_unless_the_queue_is_closed() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("rt");
+        assert_eq!(rt.block_on(send_result(None)), JobResult::GateBusy);
+        assert_eq!(
+            rt.block_on(send_result(Some(Err(cl_api::QueueError::QueueFull)))),
+            JobResult::GateBusy
+        );
+        assert_eq!(
+            rt.block_on(send_result(Some(Err(cl_api::QueueError::QueueClosed)))),
+            JobResult::Failed {
+                code: ENGINE_UNAVAILABLE.into()
+            }
+        );
+    }
 
     #[test]
     fn the_sign_in_time_is_kept_until_sign_out() {

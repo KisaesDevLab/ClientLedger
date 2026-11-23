@@ -995,6 +995,21 @@ fn prompt_at_open(link: &CompanyLink, tenant: Option<&(TenantId, String)>, local
         )
 }
 
+/// Review S3: the newest scheduled backup that was tested failed it.
+pub(crate) fn last_scheduled_test_failed(r: &cl_settings::CompanyRecord) -> bool {
+    r.backups
+        .iter()
+        .filter(|b| {
+            matches!(
+                b.trigger,
+                Some(cl_settings::BackupTrigger::Scheduled | cl_settings::BackupTrigger::Missed)
+            )
+        })
+        .filter_map(|b| b.tested.as_ref().map(|t| (b.created_at, t.passed)))
+        .max_by_key(|(at, _)| *at)
+        .is_some_and(|(_, passed)| !passed)
+}
+
 fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local {
     let record = tenant.and_then(|(id, _)| {
         link.store()
@@ -1024,22 +1039,7 @@ fn read_local(link: &CompanyLink, tenant: Option<&(TenantId, String)>) -> Local 
                 .find(|x| x.outcome.consumes_slot())
                 .is_some_and(|x| matches!(x.outcome, cl_settings::RunOutcome::Failed { .. }))
     });
-    // Review S3: the newest scheduled backup that was tested failed it.
-    let last_test_failed = record.as_ref().is_some_and(|r| {
-        r.backups
-            .iter()
-            .filter(|b| {
-                matches!(
-                    b.trigger,
-                    Some(
-                        cl_settings::BackupTrigger::Scheduled | cl_settings::BackupTrigger::Missed
-                    )
-                )
-            })
-            .filter_map(|b| b.tested.as_ref().map(|t| (b.created_at, t.passed)))
-            .max_by_key(|(at, _)| *at)
-            .is_some_and(|(_, passed)| !passed)
-    });
+    let last_test_failed = record.as_ref().is_some_and(last_scheduled_test_failed);
     let last = record.and_then(|r| r.last_backup);
     let checks_unconfirmed =
         tenant.is_some_and(|(id, _)| crate::screens::print_forms::waiting_answer(link, *id));

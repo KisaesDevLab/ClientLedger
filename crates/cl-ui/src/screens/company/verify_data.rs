@@ -112,8 +112,6 @@ pub struct VerifyDataScreen {
     fix: Option<Task<Result<FixOutcome, CompanyError>>>,
     fix_end: Option<FixEnd>,
     error: Option<ApiError>,
-    /// Start a quick check on the first frame (QA-17).
-    quick_on_open: bool,
 }
 
 impl VerifyDataScreen {
@@ -132,7 +130,6 @@ impl VerifyDataScreen {
             fix: None,
             fix_end: None,
             error: None,
-            quick_on_open: QUICK_ON_OPEN.swap(false, std::sync::atomic::Ordering::SeqCst),
         }
     }
 
@@ -400,7 +397,9 @@ impl Screen for VerifyDataScreen {
 
     #[allow(clippy::too_many_lines, reason = "one screen, top to bottom")]
     fn ui(&mut self, ui: &mut Ui) {
-        if std::mem::take(&mut self.quick_on_open) {
+        // QA-17: taken on a frame, so a window already open (or restored
+        // at launch) answers "Check My Books" too.
+        if QUICK_ON_OPEN.swap(false, std::sync::atomic::Ordering::SeqCst) {
             self.start_check(IntegrityLevel::Quick);
         }
         self.poll();

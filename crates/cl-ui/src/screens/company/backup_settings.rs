@@ -498,13 +498,7 @@ impl BackupSettingsScreen {
         if let Some(e) = &self.test_error {
             form::inline_error(ui, tokens, e);
         }
-        // QA-15: only failures since the last run that worked.
-        let since_done = rec
-            .schedule_runs
-            .iter()
-            .rposition(|r| matches!(r.outcome, RunOutcome::Done { .. }))
-            .map_or(0, |i| i + 1);
-        for r in rec.schedule_runs[since_done..].iter().rev().take(10) {
+        for r in since_last_done(&rec.schedule_runs).iter().rev().take(10) {
             let line = match &r.outcome {
                 RunOutcome::Failed { code } => {
                     t_with("backups.run.failed", &[("why", &reason_text(code))])
@@ -591,6 +585,16 @@ impl BackupSettingsScreen {
             None => {}
         }
     }
+}
+
+/// QA-15: the runs after the last one that worked (older failures are
+/// past).
+fn since_last_done(runs: &[cl_settings::ScheduleRun]) -> &[cl_settings::ScheduleRun] {
+    let from = runs
+        .iter()
+        .rposition(|r| matches!(r.outcome, RunOutcome::Done { .. }))
+        .map_or(0, |i| i + 1);
+    &runs[from..]
 }
 
 /// UTC as the demo's zone (screenshots are the same everywhere).
@@ -850,5 +854,55 @@ mod tests {
         )
         .expect("set");
         assert!(!passphrase_missing(true, false, &set));
+    }
+
+    /// QA-15: a failure before a good run is no longer listed.
+    #[test]
+    fn only_failures_since_the_last_good_run_show() {
+        let at = |ms| Timestamp::from_unix_millis(ms).expect("ts");
+        let run = |ms, outcome| cl_settings::ScheduleRun {
+            slot: at(ms),
+            at: at(ms),
+            outcome,
+        };
+        let failed = || RunOutcome::Failed {
+            code: "NO_PASSPHRASE".into(),
+        };
+        let runs = vec![
+            run(1, failed()),
+            run(2, RunOutcome::Done { sha256: "a".into() }),
+            run(3, failed()),
+        ];
+        assert_eq!(since_last_done(&runs).len(), 1);
+        assert_eq!(since_last_done(&runs[..2]).len(), 0);
+        assert_eq!(since_last_done(&runs[..1]).len(), 1);
+    }
+
+    /// QA-17: "Check My Books" makes the next frame of a Verify Data window
+    /// (even one already open) start a quick check.
+    #[test]
+    fn check_my_books_starts_a_quick_check_on_the_next_frame() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let link = Arc::new(CompanyLink::demo(dir.path()));
+        let id = TenantId::parse("d0000000-0000-4000-8000-000000000001").expect("id");
+        let mut s = crate::screens::company::verify_data::VerifyDataScreen::new(
+            link,
+            Some((id, "Ozark".into())),
+        );
+        let ctx = eframe::egui::Context::default();
+        crate::theme::apply(&ctx, crate::theme::ThemeChoice::Light);
+        crate::fonts::install(&ctx);
+        let frame = |s: &mut crate::screens::company::verify_data::VerifyDataScreen| {
+            let mut out = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+                eframe::egui::CentralPanel::default().show(ui, |ui| s.ui(ui));
+            });
+            out.textures_delta.clear();
+        };
+        frame(&mut s);
+        assert_eq!(s.state()["ran"], false);
+        crate::screens::company::verify_data::request_quick_check_on_open();
+        frame(&mut s);
+        assert_eq!(s.state()["ran"], true);
+        assert_eq!(s.state()["level"], "quick");
     }
 }
