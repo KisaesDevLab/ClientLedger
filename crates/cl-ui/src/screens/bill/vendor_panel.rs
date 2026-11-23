@@ -318,6 +318,9 @@ pub struct VendorPanel {
     flush: bool,
     /// A save waiting for the check.
     waiting_save: Option<SaveIntent>,
+    /// The check for the waiting save ran after the press (PR-8 S1): the
+    /// save it resumes is not checked once more.
+    checked_for_save: bool,
     /// The duplicate question is open for this save.
     prompt: Option<SaveIntent>,
     /// The save to send now (the check found nothing, or Save anyway).
@@ -641,6 +644,20 @@ impl VendorPanel {
         self.prompt = None;
         self.resume = None;
         self.waiting_save = None;
+        // PR-8 S1: on the office network another computer may have saved
+        // this vendor's ref since the check ran (the change feed names no
+        // vendor): look again at the press. Not for the save the fresh
+        // check resumes.
+        let checked = std::mem::take(&mut self.checked_for_save);
+        if !checked
+            && crate::lan_status::state_of(input.link).is_some()
+            && let Dup::Done { key, .. } = &self.dup
+        {
+            self.dup = Dup::Waiting {
+                key: key.clone(),
+                since: now,
+            };
+        }
         if matches!(self.dup, Dup::Waiting { .. } | Dup::Running { .. }) {
             // Don't wait for the typing pause: check now (a ready answer
             // lands at once).
@@ -659,6 +676,7 @@ impl VendorPanel {
             }
             Dup::Waiting { .. } | Dup::Running { .. } => {
                 self.waiting_save = Some(intent);
+                self.checked_for_save = true;
                 false
             }
         }
@@ -679,6 +697,7 @@ impl VendorPanel {
     /// Esc: the question closes as Go back. True when it was open.
     pub fn go_back(&mut self) -> bool {
         self.waiting_save = None;
+        self.checked_for_save = false;
         self.prompt.take().is_some()
     }
 
@@ -1236,6 +1255,7 @@ impl VendorPanel {
             self.resume = Some(intent);
             PanelEvent::None
         } else {
+            self.checked_for_save = false;
             PanelEvent::GoBack
         }
     }

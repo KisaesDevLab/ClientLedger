@@ -440,6 +440,8 @@ pub struct PreferencesScreen {
     /// The Cancel and Save pair's width last frame (they sit right-aligned
     /// in screen and Tab order).
     footer_w: f32,
+    /// Change notices: settings changed on another computer (PR-8 S2).
+    bus: crate::data_bus::Subscription,
 }
 
 impl PreferencesScreen {
@@ -452,6 +454,7 @@ impl PreferencesScreen {
         category: Category,
     ) -> PreferencesScreen {
         let group = link.group().and_then(Result::ok);
+        let bus = link.bus().subscribe();
         let secrets_saved = ai::SecretsSaved::read(link.secrets().as_ref());
         let list = link.store().load().unwrap_or_default();
         let (company_prefs, flags) = tenant
@@ -505,6 +508,7 @@ impl PreferencesScreen {
             intake: intake_folders::IntakePanel::default(),
             layout: crate::layout::FrameReport::default(),
             footer_w: 220.0,
+            bus,
         };
         screen.start_load();
         screen.load_intake();
@@ -639,6 +643,21 @@ impl PreferencesScreen {
         match pending {
             Ok(p) => self.load_task = Some(Task::Pending(p)),
             Err(_) => self.loaded.done = true,
+        }
+    }
+
+    /// The company's settings changed on another computer (PR-8 S2): read
+    /// them again, only with nothing unsaved and nothing running here (an
+    /// unsaved pane keeps what it loaded, so its save sends only what the
+    /// owner changed, S3).
+    fn follow_bus(&mut self) {
+        let changes = self.link.bus().take(&mut self.bus);
+        if changes.company
+            && self.edits == self.committed
+            && self.load_task.is_none()
+            && self.save_task.is_none()
+        {
+            self.start_load();
         }
     }
 
@@ -1806,6 +1825,7 @@ impl Screen for PreferencesScreen {
             self.select(c);
         }
         self.poll();
+        self.follow_bus();
         // The title and Search stay at the top, Cancel and Save at the
         // bottom; the list and the panel scroll between them (Q-265).
         let mut frame =
@@ -2170,6 +2190,35 @@ mod tests {
         }
         let s = PreferencesScreen::new(link, tenant, UserPrefs::default(), Category::Ai);
         (dir, s)
+    }
+
+    /// PR-8 S2: another computer changed the settings (the feed's
+    /// `companies` notice): a pane with nothing unsaved shows them; one
+    /// with unsaved edits keeps what it loaded (its save sends only what the
+    /// owner changed).
+    #[test]
+    fn settings_changed_elsewhere_reload_only_a_clean_pane() {
+        let (_d, mut s) = demo_screen(true);
+        assert!(s.edits().accounting.sales_tax.ssuta);
+        if let Some(mut d) = s.link.demo_state() {
+            d.sales_tax.ssuta = false;
+        }
+        s.follow_bus();
+        assert!(s.edits().accounting.sales_tax.ssuta, "no notice, no read");
+        s.link.bus().publish(crate::data_bus::Change::Company);
+        s.follow_bus();
+        assert!(!s.edits().accounting.sales_tax.ssuta, "read again");
+        s.edits_mut().accounting.sales_tax.basis = cl_api::SalesTaxBasis::Cash;
+        if let Some(mut d) = s.link.demo_state() {
+            d.sales_tax.ssuta = true;
+        }
+        s.link.bus().publish(crate::data_bus::Change::Company);
+        s.follow_bus();
+        assert!(!s.edits().accounting.sales_tax.ssuta, "unsaved: kept");
+        assert_eq!(
+            s.edits().accounting.sales_tax.basis,
+            cl_api::SalesTaxBasis::Cash
+        );
     }
 
     /// P23: Preferences › Sales tax shows the demo's settings (SSUTA on,
