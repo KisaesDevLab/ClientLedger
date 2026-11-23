@@ -1144,54 +1144,55 @@ impl LosesReply {
             sent: Mutex::new(Vec::new()),
         }
     }
-    fn now(&self) -> Now {
-        Now(Arc::clone(&self.books))
+    fn with<T>(&self, f: impl FnOnce(&mut dyn DailyBooks) -> T) -> T {
+        let mut b = self.books.lock().expect("books");
+        f(&mut *b)
     }
 }
 
 #[allow(clippy::unused_async_trait_impl, reason = "answered at once, like Now")]
 impl DailyApi for LosesReply {
     async fn templates(&self) -> Result<Vec<DailyTemplate>, ApiError> {
-        self.now().templates().await
+        self.with(|b| b.templates())
     }
     async fn template(&self, id: DailyTemplateId) -> Result<DailyTemplate, ApiError> {
-        self.now().template(id).await
+        self.with(|b| b.template(id))
     }
     async fn create_template(
         &self,
         name: &str,
         preset: Option<Preset>,
     ) -> Result<DailyTemplate, ApiError> {
-        self.now().create_template(name, preset).await
+        self.with(|b| b.create_template(name, preset))
     }
     async fn rename(
         &self,
         id: DailyTemplateId,
-        stamp: Option<cl_api::RecordStamp>,
+        _stamp: Option<cl_api::RecordStamp>,
         name: &str,
     ) -> Result<DailyTemplate, ApiError> {
-        self.now().rename(id, stamp, name).await
+        self.with(|b| b.rename(id, name))
     }
     async fn replace_lines(
         &self,
         id: DailyTemplateId,
-        stamp: Option<cl_api::RecordStamp>,
+        _stamp: Option<cl_api::RecordStamp>,
         lines: &[DailyLineInput],
     ) -> Result<DailyTemplate, ApiError> {
-        self.now().replace_lines(id, stamp, lines).await
+        self.with(|b| b.replace_lines(id, lines))
     }
     async fn delete_template(
         &self,
         id: DailyTemplateId,
-        stamp: Option<cl_api::RecordStamp>,
+        _stamp: Option<cl_api::RecordStamp>,
     ) -> Result<(), ApiError> {
-        self.now().delete_template(id, stamp).await
+        self.with(|b| b.delete_template(id))
     }
     async fn list(&self, q: &DailyEntryQuery) -> Result<Vec<DailyEntrySummary>, ApiError> {
-        self.now().list(q).await
+        self.with(|b| b.list(q))
     }
     async fn entry(&self, id: DailyEntryId) -> Result<DailyEntry, ApiError> {
-        self.now().entry(id).await
+        self.with(|b| b.entry(id))
     }
     async fn create_draft(
         &self,
@@ -1207,13 +1208,13 @@ impl DailyApi for LosesReply {
             .find(|(k, _)| *k == key)
             .map(|(_, id)| *id);
         if let Some(id) = seen {
-            return self.now().entry(id).await;
+            return self.with(|b| b.entry(id));
         }
         let lose = !std::mem::replace(&mut *self.lost.lock().expect("lost"), true);
         if lose && !self.commits {
             return Err(lost_reply(&key, self.keyed));
         }
-        let e = self.now().create_draft(d, key.clone()).await?;
+        let e = self.with(|b| b.create_draft(d))?;
         self.keys.lock().expect("keys").push((key.clone(), e.id));
         if lose {
             return Err(lost_reply(&key, self.keyed));
@@ -1223,32 +1224,32 @@ impl DailyApi for LosesReply {
     async fn update_draft(
         &self,
         id: DailyEntryId,
-        stamp: Option<cl_api::RecordStamp>,
+        _stamp: Option<cl_api::RecordStamp>,
         d: &DailyEntryDraft,
-        key: cl_api::IdempotencyKey,
+        _key: cl_api::IdempotencyKey,
     ) -> Result<DailyEntry, ApiError> {
-        self.now().update_draft(id, stamp, d, key).await
+        self.with(|b| b.update_draft(id, d))
     }
     async fn preview(
         &self,
         template: DailyTemplateId,
         values: &[DailyValue],
     ) -> Result<DailyPreview, ApiError> {
-        self.now().preview(template, values).await
+        self.with(|b| b.preview(template, values))
     }
     async fn post(
         &self,
         id: DailyEntryId,
         password: Option<Secret>,
     ) -> Result<DailyEntry, ApiError> {
-        self.now().post(id, password).await
+        self.with(|b| b.post(id, password.as_ref()))
     }
     async fn void(
         &self,
         id: DailyEntryId,
         password: Option<Secret>,
     ) -> Result<DailyEntry, ApiError> {
-        self.now().void(id, password).await
+        self.with(|b| b.void(id, password.as_ref()))
     }
 }
 
