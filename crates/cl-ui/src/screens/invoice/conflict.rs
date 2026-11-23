@@ -198,7 +198,7 @@ impl InvoiceScreen {
             self.grid.edit(|v, _| v.lines = mine.1);
         }
         self.editing = Some(Editing::of(theirs));
-        self.key = None;
+        self.key.clear();
         self.stale = false;
         self.sync_inputs();
     }

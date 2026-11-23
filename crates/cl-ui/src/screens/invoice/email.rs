@@ -79,7 +79,7 @@ pub(crate) struct EmailFlow {
     /// The key of this send (or Outbox put), kept while the same message
     /// is tried again after an unknown outcome (B5; `invoice-email-v1`
     /// replays it, so the client never gets it twice).
-    key: Option<(String, IdempotencyKey)>,
+    key: crate::forms::held_key::HeldKey<String>,
 }
 
 /// The owner's message for a send that failed.
@@ -219,10 +219,8 @@ impl EmailFlow {
                 }
                 Err(e) => {
                     let refusal = invoice_refusal(&e);
-                    if !crate::screens::register::keeps_key(&e)
-                        && refusal != Some(InvoiceRefusal::Retry)
-                    {
-                        self.key = None;
+                    if refusal != Some(InvoiceRefusal::Retry) {
+                        self.key.failed(&e);
                     }
                     self.failed = true;
                     self.problem = Some(match e {
@@ -270,14 +268,7 @@ impl EmailFlow {
             "{what}|{:?}|{:?}|{:?}|{}|{}",
             msg.to, msg.cc, msg.bcc, msg.subject, msg.body
         );
-        match &self.key {
-            Some((i, k)) if *i == identity => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((identity, k.clone()));
-                k
-            }
-        }
+        self.key.key_for(&identity)
     }
 }
 
@@ -617,7 +608,7 @@ impl InvoiceScreen {
         f.mark_sent = false;
         f.failed = false;
         f.problem = None;
-        f.key = None;
+        f.key.clear();
         f.target = Some(e.id);
         f.then = then;
         f.open = true;

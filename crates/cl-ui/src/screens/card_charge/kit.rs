@@ -535,7 +535,7 @@ pub(crate) struct SaveFlow {
     pub warnings: Vec<cl_api::NegativeStock>,
     pub void_task: Option<Task<Vec<cl_api::NegativeStock>>>,
     pub intent: Option<SaveIntent>,
-    key: Option<(SaveIdentity, IdempotencyKey)>,
+    key: crate::forms::held_key::HeldKey<SaveIdentity>,
     /// The saved record open in the form (`None`: a new one).
     pub editing: Option<Editing>,
     /// The open record changed somewhere else since it was read (409
@@ -595,15 +595,8 @@ impl SaveFlow {
         self.notice = None;
     }
 
-    fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
-        match &self.key {
-            Some((d, k)) if d == id => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((id.clone(), k.clone()));
-                k
-            }
-        }
+    pub(crate) fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
+        self.key.key_for(id)
     }
 
     /// The open record is shown, not changed here: the save is refused
@@ -734,7 +727,7 @@ impl SaveFlow {
     pub(crate) fn saved(&mut self, r: SavedRecord) -> SaveIntent {
         self.lost.saved();
         self.closing_prompt.saved();
-        self.key = None;
+        self.key.clear();
         self.count += 1;
         self.last = Some(r);
         self.last_action = Some("save");
@@ -756,7 +749,7 @@ impl SaveFlow {
     /// the form opens the record (`RecordForm::open_saved`).
     pub(crate) fn found(&mut self) {
         self.closing_prompt.saved();
-        self.key = None;
+        self.key.clear();
         self.count += 1;
         self.last_action = Some("save");
         self.error = None;
@@ -797,7 +790,7 @@ impl SaveFlow {
     pub(crate) fn opened(&mut self, e: Editing) {
         self.editing = Some(e);
         self.stale = false;
-        self.key = None;
+        self.key.clear();
         self.error = None;
         self.notice = None;
         self.void_open = false;
@@ -813,9 +806,7 @@ impl SaveFlow {
         e: ApiError,
         closing: Option<CalendarDate>,
     ) {
-        if !crate::screens::register::keeps_key(&e) {
-            self.key = None;
-        }
+        self.key.failed(&e);
         // An unknown save: the banner speaks (Check again), not the error.
         if self.intent.is_some() && self.lost.lost(&e) {
             self.intent = None;

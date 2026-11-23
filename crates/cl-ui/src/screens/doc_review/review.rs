@@ -813,7 +813,7 @@ pub(crate) struct DraftSession {
     /// The batch reader skips this draft while the form holds it (S4).
     claim: Option<Arc<()>>,
     work: Work,
-    key: Option<(Identity, IdempotencyKey)>,
+    key: crate::forms::held_key::HeldKey<Identity>,
     /// The last register search was for this body (a resend with the
     /// password does not search again), and what the owner acknowledged.
     matched: Option<(PostBody, Vec<TransactionId>)>,
@@ -914,7 +914,7 @@ impl DraftSession {
             read_result: None,
             claim: None,
             work: Work::Idle,
-            key: None,
+            key: crate::forms::held_key::HeldKey::default(),
             matched: None,
             dialog: None,
             attach: None,
@@ -1461,14 +1461,7 @@ impl DraftSession {
     }
 
     fn key_for(&mut self, id: Identity) -> IdempotencyKey {
-        match &self.key {
-            Some((same, k)) if *same == id => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((id, k.clone()));
-                k
-            }
-        }
+        self.key.key_for(&id)
     }
 
     /// Sends the convert (or the identical request again).
@@ -1750,7 +1743,7 @@ impl DraftSession {
 
     /// 201: the inbox's entry is handled, learning starts, the form hears.
     fn converted(&mut self, accept: &Accept, c: ConvertedDraft) {
-        self.key = None;
+        self.key.clear();
         self.resends = (0, 0);
         self.posted = Some(c.transaction);
         self.handled = c
@@ -1819,7 +1812,7 @@ impl DraftSession {
                 self.work = Work::Choosing { accept };
             }
             ApiError::DocumentDraft(DraftRefusal::Closed { transaction }) => {
-                self.key = None;
+                self.key.clear();
                 self.closed_by(transaction);
                 self.events.push(DraftEvent::Cancelled);
             }
@@ -1831,7 +1824,7 @@ impl DraftSession {
                 self.events.push(DraftEvent::Cancelled);
             }
             ApiError::Forbidden { .. } => {
-                self.key = None;
+                self.key.clear();
                 self.note = Some("doc_form.forbidden");
                 self.events.push(DraftEvent::Cancelled);
             }
@@ -1839,9 +1832,7 @@ impl DraftSession {
                 // The form's own handling: the closing-date password flow
                 // (the key stays: the same body goes with the password),
                 // a validation path to focus, anything else.
-                if !crate::screens::register::keeps_key(&error) {
-                    self.key = None;
-                }
+                self.key.failed(&error);
                 self.events.push(DraftEvent::Failed {
                     error,
                     intent: accept.intent,
@@ -1899,20 +1890,20 @@ impl DraftSession {
                 }
             }
             (DraftStatus::Converted, _) => {
-                self.key = None;
+                self.key.clear();
                 self.closed_by(d.converted_transaction_id);
                 self.draft = Some(d);
                 self.events.push(DraftEvent::Cancelled);
             }
             (DraftStatus::Discarded, _) => {
-                self.key = None;
+                self.key.clear();
                 self.closed_by(None);
                 self.draft = Some(d);
                 self.events.push(DraftEvent::Cancelled);
             }
             (_, Why::KeyReused) => {
                 // Live: the key went with another request; a new one.
-                self.key = None;
+                self.key.clear();
                 self.draft = Some(d);
                 self.send_convert(*accept, ack);
             }
@@ -2182,7 +2173,7 @@ impl DraftSession {
 
     fn attached(&mut self, draft: DocumentDraft, transaction: TransactionId) {
         self.attach_key = None;
-        self.key = None;
+        self.key.clear();
         self.posted = Some(transaction);
         self.handled = draft
             .attachment_id
@@ -2483,7 +2474,7 @@ impl DraftSession {
                     self.refetch(accept, ack, Why::KeepMine);
                 } else {
                     // Reload: the form fills again from the new draft.
-                    self.key = None;
+                    self.key.clear();
                     self.matched = None;
                     self.clicked.clear();
                     self.compare.clear();

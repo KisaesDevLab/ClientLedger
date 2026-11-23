@@ -108,14 +108,7 @@ impl BulkEntryScreen {
     /// again (a retry after an unknown outcome replays safely), a fresh one
     /// otherwise.
     pub(crate) fn key_for(&mut self, hash: u64) -> IdempotencyKey {
-        match &self.key {
-            Some((h, k)) if *h == hash => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((hash, k.clone()));
-                k
-            }
-        }
+        self.key.key_for(&hash)
     }
 
     /// Sends the whole batch in one call. Rows dated on or before the
@@ -259,7 +252,7 @@ impl BulkEntryScreen {
             .saturating_add(u32::try_from(rows).unwrap_or(u32::MAX));
         self.summary = Some(Summary::of(batch, saved.created_contacts));
         self.summary_open = intent != SaveIntent::SaveAndNew;
-        self.key = None;
+        self.key.clear();
         self.refused = None;
         self.error = None;
         self.notice = None;
@@ -290,12 +283,10 @@ impl BulkEntryScreen {
         }
         // The key stays on "busy" and on every unknown outcome, so the
         // retry of the same rows replays a save that did go through.
-        if !crate::screens::register::keeps_key(&e) {
-            self.key = None;
-        }
+        self.key.failed(&e);
         // Unknown: only the same rows may go again (follow-up 4).
         if self.lost.lost(&e) {
-            self.resend_only = self.key.as_ref().map(|(h, _)| *h);
+            self.resend_only = self.key.identity().copied();
             self.lost_gate.mark_unconfirmed();
         }
         match e {

@@ -59,7 +59,7 @@ pub(crate) struct RefundState {
     /// the key on `POST /transactions` (U-18 is not built), so the key is
     /// no guard against a second posting: after an unknown outcome the
     /// form blocks sending until the recheck or the owner answers (B2).
-    pub key: Option<(VendorRefundDraft, bool, IdempotencyKey)>,
+    pub key: crate::forms::held_key::HeldKey<(VendorRefundDraft, bool)>,
     /// The save whose outcome is unknown is this refund (not the deposit):
     /// when Check again finds it in the books, the refund card is done.
     pub lost: bool,
@@ -300,14 +300,7 @@ impl DepositScreen {
         draft: &VendorRefundDraft,
         password: bool,
     ) -> IdempotencyKey {
-        match &self.refund.key {
-            Some((d, p, k)) if d == draft && *p == password => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.refund.key = Some((draft.clone(), password, k.clone()));
-                k
-            }
-        }
+        self.refund.key.key_for(&(draft.clone(), password))
     }
 
     fn refund_saved(&mut self, _s: &Saved) {
@@ -333,9 +326,7 @@ impl DepositScreen {
     }
 
     pub(crate) fn refund_failed(&mut self, e: ApiError) {
-        if !crate::screens::register::keeps_key(&e) {
-            self.refund.key = None;
-        }
+        self.refund.key.failed(&e);
         if self.save.lost.lost(&e) {
             self.header.mark_unconfirmed();
             self.refund.lost = true;

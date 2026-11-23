@@ -643,7 +643,7 @@ impl super::engine::JournalEngine for LostReply {
             return Err(ApiError::OutcomeUnknown {
                 request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000002")
                     .expect("id"),
-                idempotency_key: Some(IdempotencyKey::new()),
+                idempotency_key: Some(cl_api::IdempotencyKey::new()),
                 keyed: false,
             });
         }
@@ -1033,4 +1033,45 @@ fn p33_an_entry_deleted_elsewhere_is_never_recreated() {
     assert!(!s.start_save(SaveIntent::Save, None));
     assert!(s.conflict.is_none());
     assert_eq!(journal_count(&link), before - 1);
+}
+
+/// PR-8 B1: a keyed unknown outcome on a new entry, the memo fixed, Save:
+/// the same key goes (never a second entry).
+#[test]
+fn a_lost_reply_then_a_fixed_memo_saves_under_the_same_key() {
+    use crate::forms::held_key::keyed_unknown;
+    let (mut s, _link, _dir) = screen();
+    let entry = |memo: &str| {
+        cl_api::NewJournalEntry::new(
+            s.today,
+            Some(memo.into()),
+            cl_api::Basis::Both,
+            vec![
+                cl_api::JeLine {
+                    account: account_id(6100),
+                    side: cl_api::Side::Debit(m("412.50")),
+                    description: None,
+                    tag: None,
+                    contact: None,
+                },
+                cl_api::JeLine {
+                    account: account_id(1010),
+                    side: cl_api::Side::Credit(m("412.50")),
+                    description: None,
+                    tag: None,
+                    contact: None,
+                },
+            ],
+        )
+        .expect("entry")
+    };
+    let id = |e| SaveIdentity {
+        entry: e,
+        edit: None,
+        password: false,
+    };
+    let (a, b) = (id(entry("Insurance")), id(entry("Insurance, Q4")));
+    let k = s.key_for(&a);
+    s.save_failed(keyed_unknown(&k));
+    assert_eq!(s.key_for(&b), k);
 }

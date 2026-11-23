@@ -200,7 +200,7 @@ fn a_stale_expected_owed_previews_again_with_a_message() {
     s.send(Pending::Pay(plan.clone()), None);
     assert!(s.paid.is_some());
     s.paid = None;
-    s.key = None;
+    s.key.clear();
     s.send(
         Pending::Pay(PayPostPlan {
             attempt: plan.attempt + 99,

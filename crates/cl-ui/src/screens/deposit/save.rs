@@ -380,15 +380,8 @@ impl DepositScreen {
         v
     }
 
-    fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
-        match &self.save.key {
-            Some((d, k)) if d == id => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.save.key = Some((id.clone(), k.clone()));
-                k
-            }
-        }
+    pub(crate) fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
+        self.save.key.key_for(id)
     }
 
     /// Polls the save, the record being read, the list, Void.
@@ -464,7 +457,7 @@ impl DepositScreen {
         }
         if let LostEvent::Saved(found) = ev {
             crate::forms::publish_saved(&self.link, &self.bus, &self.save.published);
-            self.save.key = None;
+            self.save.key.clear();
             self.save.count += 1;
             self.save.last_action = Some("save");
             let lists = Arc::clone(&self.lists);
@@ -493,7 +486,7 @@ impl DepositScreen {
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
         self.save.count += 1;
         self.save.last_action = Some("save");
-        self.save.key = None;
+        self.save.key.clear();
         self.save.problems.clear();
         self.save.error = None;
         self.save.clearing_warning = s.clearing_negative;
@@ -592,9 +585,7 @@ impl DepositScreen {
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
         self.print_after_save = false;
         self.after_save_nav = None;
-        if !crate::screens::register::keeps_key(&e) {
-            self.save.key = None;
-        }
+        self.save.key.failed(&e);
         let failure = SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),
@@ -611,14 +602,14 @@ impl DepositScreen {
         }
         if cl_api::payment_refusal(&e) == Some(cl_api::PaymentRefusal::Bounced) {
             self.save.notice = Some("deposit.refusal.bounced");
-            self.save.key = None;
+            self.save.key.clear();
             return;
         }
         if is_already_deposited(&e) {
             // Nothing posted: the list is read again and the stale picks
             // are dropped when it arrives.
             self.save.notice = Some("deposit.already_deposited");
-            self.save.key = None;
+            self.save.key.clear();
             self.refresh_pending();
             return;
         }

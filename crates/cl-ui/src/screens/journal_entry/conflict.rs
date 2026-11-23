@@ -185,7 +185,7 @@ impl JournalScreen {
             e.old_date = theirs.record.txn_date;
         }
         self.opened = Some((their_form, their_lines));
-        self.key = None;
+        self.key.clear();
         self.stale = false;
     }
 

@@ -227,7 +227,7 @@ pub struct PayBillsScreen {
     pub(crate) balance: Option<Money>,
     balance_task: Option<Task<Option<Money>>>,
     pay_task: Option<Task<Vec<CreatedPayment>>>,
-    key: Option<(PayIdentity, IdempotencyKey)>,
+    key: crate::forms::held_key::HeldKey<PayIdentity>,
     /// The pay on its way: its bills (they come off the selection once
     /// paid) and what they owed.
     sent: Option<(Vec<TransactionId>, SentPay)>,
@@ -339,7 +339,7 @@ impl PayBillsScreen {
             balance: None,
             balance_task: None,
             pay_task: None,
-            key: None,
+            key: crate::forms::held_key::HeldKey::default(),
             sent: None,
             pending: None,
             proposed_number: None,
@@ -656,7 +656,7 @@ impl PayBillsScreen {
         crate::forms::publish_saved(&self.link, &self.bus, &self.published);
         self.closing_prompt.saved();
         self.form.clear();
-        self.key = None;
+        self.key.clear();
         self.sent = None;
         self.resend = None;
         self.unknown = false;
@@ -859,14 +859,7 @@ impl PayBillsScreen {
     /// The key for this pay: the stored one when the same pay goes again
     /// after an unknown outcome, a fresh one otherwise.
     fn key_for(&mut self, id: &PayIdentity) -> IdempotencyKey {
-        match &self.key {
-            Some((d, k)) if d == id => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((id.clone(), k.clone()));
-                k
-            }
-        }
+        self.key.key_for(id)
     }
 
     fn paid(&mut self, payments: &[CreatedPayment]) {
@@ -881,7 +874,7 @@ impl PayBillsScreen {
         let receipt_notice = self.notice.filter(|n| Some(*n) != before);
         crate::forms::publish_saved(&self.link, &self.bus, &self.published);
         self.closing_prompt.saved();
-        self.key = None;
+        self.key.clear();
         self.unknown = false;
         self.keyed_unknown = false;
         self.resend = None;
@@ -914,9 +907,7 @@ impl PayBillsScreen {
     }
 
     pub(crate) fn pay_failed(&mut self, e: ApiError) {
-        if !crate::screens::register::keeps_key(&e) {
-            self.key = None;
-        }
+        self.key.failed(&e);
         // S7: the engine replays this key (`idempotency-pay-bills-v1`): the
         // identical pay goes again under the same key and its answer is the
         // first one's (nothing posts twice). No guessing from the list.
@@ -926,7 +917,7 @@ impl PayBillsScreen {
             ..
         } = &e
         {
-            let same = self.key.as_ref().is_some_and(|(_, k)| k == lost);
+            let same = self.key.key() == Some(lost);
             if same
                 && !self.resent
                 && let Some((req, password, _)) = self.resend.clone()
@@ -987,8 +978,8 @@ impl PayBillsScreen {
     pub(crate) fn recheck(&mut self) {
         self.unknown = false;
         if std::mem::take(&mut self.keyed_unknown)
-            && let (Some((req, password, as_sent)), Some((_, key))) =
-                (self.resend.clone(), self.key.clone())
+            && let (Some((req, password, as_sent)), Some(key)) =
+                (self.resend.clone(), self.key.key().cloned())
         {
             // S7: a keyed engine answers the same pay again; no guess. What
             // it owed is as it was sent, not as the form shows it now.
@@ -1354,7 +1345,7 @@ impl Screen for PayBillsScreen {
                 self.form.vendor = None;
                 self.pending = None;
                 self.sent = None;
-                self.key = None;
+                self.key.clear();
                 self.unknown = false;
                 self.notice = None;
                 self.first_number.clear();

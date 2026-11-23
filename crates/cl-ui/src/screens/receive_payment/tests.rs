@@ -1063,3 +1063,20 @@ fn p33_an_attached_file_moves_the_payment_stamp_and_the_next_save_goes_on_it() {
     assert_eq!(s.saved_count, before + 1, "{:?} {:?}", s.notice, s.error);
     assert_eq!(stored(&link, id).memo.as_deref(), Some("after the file"));
 }
+
+/// PR-8 B1: a keyed unknown outcome on a new payment, then a definitive
+/// refusal of the changed one: the key is still held (never a second
+/// payment under a fresh key).
+#[test]
+fn a_lost_reply_keeps_the_key_through_a_refusal() {
+    use crate::forms::held_key::keyed_unknown;
+    let (_d, link) = link();
+    let mut s = mockup(&link);
+    let k = s.save_key.key_for(&());
+    s.save_failed(keyed_unknown(&k), After::Stay);
+    s.save_failed(
+        cl_api::ApiError::RateLimited { retry_after: None },
+        After::Stay,
+    );
+    assert_eq!(s.save_key.key_for(&()), k);
+}

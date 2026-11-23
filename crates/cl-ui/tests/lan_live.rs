@@ -1062,6 +1062,54 @@ fn live_scenario(host: &mut Host, scratch: &Path) {
     assert_eq!(after.record.memo.as_deref(), Some(held_memo.as_str()));
     assert_eq!(debits(&after.record), m("25.00"));
 
+    // --- PR-8 B1: a lost reply on a new entry, the memo fixed, Save -------
+    // The create commits through the proxy but its reply is lost (the form
+    // holds what cl-api reports then: a keyed unknown outcome). The owner
+    // fixes the memo and saves again: the form's held key is pinned, so
+    // the engine refuses the changed entry (422 IDEMPOTENCY_KEY_REUSED,
+    // "your earlier save went through") and the books hold one entry.
+    let lost_memo = unique("lost reply");
+    let mut held = cl_ui::forms::held_key::HeldKey::<String>::default();
+    let k = held.key_for(&lost_memo);
+    a.run(sa.transactions().create_journal_entry(
+        &je2(on(), &lost_memo, supplies, cash, "12.50"),
+        &PostingOptions::default(),
+        k.clone(),
+    ))
+    .expect("the first save commits");
+    held.failed(&ApiError::OutcomeUnknown {
+        request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-0000000000b1")
+            .expect("id"),
+        idempotency_key: Some(k.clone()),
+        keyed: true,
+    });
+    let fixed = format!("{lost_memo} fixed");
+    let again = held.key_for(&fixed);
+    assert_eq!(again, k, "the edited form goes under the held key");
+    let e = a
+        .run(sa.transactions().create_journal_entry(
+            &je2(on(), &fixed, supplies, cash, "12.50"),
+            &PostingOptions::default(),
+            again,
+        ))
+        .expect_err("the changed entry is refused");
+    assert!(
+        matches!(e, ApiError::IdempotencyKeyReused { .. }),
+        "422 IDEMPOTENCY_KEY_REUSED: {e:?}"
+    );
+    held.failed(&e);
+    assert!(held.pinned(), "still refused until the form starts over");
+    let found = a
+        .run(sa.transactions().list(
+            &cl_api::TransactionFilter {
+                search: Some(lost_memo.clone()),
+                ..cl_api::TransactionFilter::default()
+            },
+            cl_api::PageRequest::first_max(),
+        ))
+        .expect("list");
+    assert_eq!(found.data.len(), 1, "one entry in the books");
+
     // --- Remove ends the computer's sign-ins (review S7) ------------------
     let hs = host.sign_in_here();
     removal_ends_sign_ins(host, &hs, scratch);

@@ -159,13 +159,6 @@ pub struct Target {
     card: bool,
 }
 
-/// A body frozen at its first Send, with its key.
-#[derive(Clone)]
-struct Frozen {
-    request: BankImportRequest,
-    key: IdempotencyKey,
-}
-
 /// What went wrong talking to the engine (shown in the step).
 #[derive(Clone, Debug, PartialEq)]
 enum EngineTrouble {
@@ -234,7 +227,7 @@ pub struct ImportBankFileScreen {
     /// their share of the step, the whole step scrolls as one.
     pub(crate) check_top_height: f32,
     // Step 4.
-    frozen: Option<Frozen>,
+    frozen: crate::forms::held_key::HeldKey<BankImportRequest>,
     send_task: Option<Task<BankImportOutcome>>,
     send_trouble: Option<EngineTrouble>,
     result: Option<BankImportOutcome>,
@@ -314,7 +307,7 @@ impl ImportBankFileScreen {
             preview_trouble: None,
             only_skipped: false,
             check_top_height: 0.0,
-            frozen: None,
+            frozen: crate::forms::held_key::HeldKey::default(),
             send_task: None,
             send_trouble: None,
             result: None,
@@ -1067,17 +1060,7 @@ impl ImportBankFileScreen {
     /// The key of `req`: the one made at its first Send, or a new one when
     /// the body changed since (plan §3 step 4).
     fn key_for(&mut self, req: &BankImportRequest) -> IdempotencyKey {
-        match &self.frozen {
-            Some(f) if f.request == *req => f.key.clone(),
-            _ => {
-                let key = IdempotencyKey::new();
-                self.frozen = Some(Frozen {
-                    request: req.clone(),
-                    key: key.clone(),
-                });
-                key
-            }
-        }
+        self.frozen.key_for(req)
     }
 
     /// The local CSV profile key (Q-P25f fallback): the company, the
@@ -1147,7 +1130,7 @@ impl ImportBankFileScreen {
     fn after_send(&mut self, o: BankImportOutcome) {
         self.save_local_profile();
         self.sent += 1;
-        self.frozen = None;
+        self.frozen.clear();
         self.step = Step::Done;
         let now = std::time::Instant::now();
         self.prep_started = Some(now);
@@ -1305,7 +1288,7 @@ impl ImportBankFileScreen {
         self.undo_trouble = None;
         self.undo_cancels = false;
         self.send_trouble = None;
-        self.frozen = None;
+        self.frozen.clear();
         self.prep_started = None;
         self.prep_next = None;
         self.prep_task = None;
@@ -1551,7 +1534,12 @@ impl ImportBankFileScreen {
             self.send_task = None;
             match r {
                 Ok(o) => self.after_send(o),
-                Err(e) => self.send_trouble = Some(Self::trouble(&e)),
+                Err(e) => {
+                    // The key stays (it replays the same import); a keyed
+                    // unknown outcome pins it whatever is sent next (B1).
+                    self.frozen.pin_on(&e);
+                    self.send_trouble = Some(Self::trouble(&e));
+                }
             }
         }
         if let Some(r) = self.prep_task.as_mut().and_then(Task::try_take) {

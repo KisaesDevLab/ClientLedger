@@ -1969,7 +1969,7 @@ fn unknown() -> ApiError {
     ApiError::OutcomeUnknown {
         request_id: cl_core::ids::RequestId::parse("00000000-0000-4000-8000-000000000003")
             .expect("id"),
-        idempotency_key: Some(IdempotencyKey::new()),
+        idempotency_key: Some(cl_api::IdempotencyKey::new()),
         keyed: false,
     }
 }
@@ -2674,5 +2674,30 @@ fn p33_an_attached_file_moves_the_stamp_and_the_next_save_goes_on_it() {
     assert_eq!(
         stored(&link, id).txn.memo.as_deref(),
         Some("after the files")
+    );
+}
+
+/// PR-8 B1: a keyed unknown outcome on a new check, the memo fixed, Save:
+/// the same key goes, so the engine refuses the changed check (422) if the
+/// first went through, and never posts it twice.
+#[test]
+fn a_lost_reply_then_a_fixed_memo_saves_under_the_same_key() {
+    use crate::forms::held_key::{keyed_unknown, posting_with_memo};
+    let (_d, link) = link();
+    let mut s = screen(&link);
+    let id = |memo: &str| super::save::SaveIdentity {
+        posting: posting_with_memo(memo),
+        edit: None,
+        password: false,
+        printed: None,
+    };
+    let k = s.key_for(&id("Rent, Oct"));
+    s.save_failed(keyed_unknown(&k));
+    assert_eq!(s.key_for(&id("Rent, Nov")), k, "the held key");
+    s.save_failed(ApiError::IdempotencyKeyReused { entity: None });
+    assert_eq!(
+        s.key_for(&id("Rent, Dec")),
+        k,
+        "went through: refused again"
     );
 }

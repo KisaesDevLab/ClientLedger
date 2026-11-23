@@ -11,8 +11,7 @@ use std::sync::Arc;
 
 use cl_api::{
     ApiError, Capabilities, ClosedPeriodAuthorization, Contact, ContactFilter, ContactType,
-    IdempotencyKey, NewRecovery, OrphanLabel, PostingOptions, RecoveryRefusal, RecoveryResult,
-    RequestGroup,
+    NewRecovery, OrphanLabel, PostingOptions, RecoveryRefusal, RecoveryResult, RequestGroup,
 };
 use cl_core::ids::{ContactId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
@@ -54,7 +53,7 @@ pub struct RecoveryScreen {
     clients_job: Option<Job<Vec<Contact>>>,
     invoices_job: Option<Job<Vec<Recoverable>>>,
     save_job: Option<Job<RecoveryResult>>,
-    key: Option<(u64, IdempotencyKey)>,
+    key: crate::forms::held_key::HeldKey<u64>,
     pending: Option<RecoveryPlan>,
     pub(crate) closing_prompt: ClosingPrompt<RecoveryPlan>,
     pub(crate) done: Option<RecoveryResult>,
@@ -86,7 +85,7 @@ impl RecoveryScreen {
             clients_job: None,
             invoices_job: None,
             save_job: None,
-            key: None,
+            key: crate::forms::held_key::HeldKey::default(),
             pending: None,
             closing_prompt: ClosingPrompt::default(),
             done: None,
@@ -170,7 +169,7 @@ impl RecoveryScreen {
             match r {
                 Ok(done) => {
                     self.closing_prompt.saved();
-                    self.key = None;
+                    self.key.clear();
                     self.pending = None;
                     self.done = Some(done);
                     self.problem = None;
@@ -193,7 +192,7 @@ impl RecoveryScreen {
         {
             return;
         }
-        self.key = None;
+        self.key.failed(&e);
         match cl_api::recovery_refusal(&e) {
             Some(RecoveryRefusal::ExceedsWriteOff) => {
                 if let Some(a) = cl_api::recovery_available(&e) {
@@ -238,14 +237,7 @@ impl RecoveryScreen {
         if self.save_job.is_some() {
             return;
         }
-        let key = match &self.key {
-            Some((a, k)) if *a == plan.attempt => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((plan.attempt, k.clone()));
-                k
-            }
-        };
+        let key = self.key.key_for(&plan.attempt);
         let r = NewRecovery {
             invoice_id: plan.invoice,
             date: plan.date,

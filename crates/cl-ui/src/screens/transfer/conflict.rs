@@ -152,7 +152,7 @@ impl TransferScreen {
             e.version = theirs.version;
             e.old_date = theirs.record.txn_date;
         }
-        self.key = None;
+        self.key.clear();
         self.stale = false;
         self.sync_inputs();
     }

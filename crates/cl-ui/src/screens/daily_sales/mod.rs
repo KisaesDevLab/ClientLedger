@@ -584,7 +584,7 @@ pub(crate) struct Saved {
 pub(crate) struct SaveState {
     pub task: Option<Job>,
     pub intent: Option<cl_model::forms::SaveIntent>,
-    pub key: Option<(save::SaveIdentity, IdempotencyKey)>,
+    pub key: crate::forms::held_key::HeldKey<save::SaveIdentity>,
     pub problems: Vec<DailyProblem>,
     /// P29 WP7: what the tag rules refused, in words (Q-276).
     pub tag_refusal: Vec<String>,

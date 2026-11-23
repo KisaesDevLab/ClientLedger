@@ -315,16 +315,12 @@ impl JournalScreen {
 
     /// The key for this save: the stored one when the same save (same
     /// entry, same record version, same password-or-not) goes again after
-    /// an unknown outcome, a fresh one otherwise.
+    /// an unknown outcome, a fresh one otherwise; the held one whatever
+    /// changed after a keyed unknown outcome ([`HeldKey`], PR-8 B1).
+    ///
+    /// [`HeldKey`]: crate::forms::held_key::HeldKey
     pub(crate) fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
-        match &self.key {
-            Some((d, k)) if d == id => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.key = Some((id.clone(), k.clone()));
-                k
-            }
-        }
+        self.key.key_for(id)
     }
 
     fn closing_failed(&mut self, e: &ApiError, pending: Pending) -> bool {
@@ -346,7 +342,7 @@ impl JournalScreen {
         use crate::forms::lost_save::LostEvent;
         if let LostEvent::Saved(found) = ev {
             crate::forms::publish_saved(&self.link, &self.bus, &self.published);
-            self.key = None;
+            self.key.clear();
             self.saved_count += 1;
             self.last_action = Some("save");
             let lists = Arc::clone(&self.books.lists);
@@ -376,7 +372,7 @@ impl JournalScreen {
         self.saved_count += 1;
         self.last_action = Some("save");
         self.last_saved = Some(id);
-        self.key = None;
+        self.key.clear();
         self.problems.clear();
         let lists = Arc::clone(&self.books.lists);
         let header = self.header.current().clone();
@@ -430,9 +426,7 @@ impl JournalScreen {
     pub(crate) fn save_failed(&mut self, e: ApiError) {
         let intent = self.intent.take().unwrap_or(SaveIntent::Save);
         self.after_save_nav = None;
-        if !crate::screens::register::keeps_key(&e) {
-            self.key = None;
-        }
+        self.key.failed(&e);
         let failure = cl_model::forms::SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),

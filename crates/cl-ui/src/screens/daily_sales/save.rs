@@ -294,15 +294,8 @@ impl DailySalesScreen {
         false
     }
 
-    fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
-        match &self.save.key {
-            Some((d, k)) if d == id => k.clone(),
-            _ => {
-                let k = IdempotencyKey::new();
-                self.save.key = Some((id.clone(), k.clone()));
-                k
-            }
-        }
+    pub(crate) fn key_for(&mut self, id: &SaveIdentity) -> IdempotencyKey {
+        self.save.key.key_for(id)
     }
 
     pub(crate) fn poll_save(&mut self) {
@@ -360,7 +353,7 @@ impl DailySalesScreen {
         if let LostEvent::Saved(_) = ev {
             // The stored probe found the day posted: read it again and
             // show it as saved.
-            self.save.key = None;
+            self.save.key.clear();
             if let Some(id) = self.saved.as_ref().map(|s| s.id) {
                 self.save.lost_check = self.run(Call::Entry(id), false);
                 self.poll_lost();
@@ -445,7 +438,7 @@ impl DailySalesScreen {
         self.closing_prompt.saved();
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
         self.save.count += 1;
-        self.save.key = None;
+        self.save.key.clear();
         self.save.problems.clear();
         self.save.error = None;
         self.save.notice = None;
@@ -504,7 +497,7 @@ impl DailySalesScreen {
         self.save_template.forget();
         self.void = VoidState::default();
         self.save.problems.clear();
-        self.save.key = None;
+        self.save.key.clear();
         self.nav.at = None;
         self.nav_prompt = None;
         self.focus = Some(Field::Date);
@@ -525,9 +518,7 @@ impl DailySalesScreen {
     pub(crate) fn save_failed(&mut self, e: ApiError) {
         let intent = self.save.intent.take().unwrap_or(SaveIntent::Save);
         self.after_save_nav = None;
-        if !crate::screens::register::keeps_key(&e) {
-            self.save.key = None;
-        }
+        self.save.key.failed(&e);
         let failure = SaveFailure {
             message: cl_core::OwnerFacing::owner_message(&e),
             detail: cl_core::OwnerFacing::scrubbed_detail(&e),

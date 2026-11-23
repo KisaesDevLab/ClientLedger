@@ -231,7 +231,7 @@ pub(crate) struct SaveState {
     pub task: Option<Task<save::Saved>>,
     pub intent: Option<cl_model::forms::SaveIntent>,
     /// The idempotency key of the request being retried.
-    pub key: Option<(save::SaveIdentity, IdempotencyKey)>,
+    pub key: crate::forms::held_key::HeldKey<save::SaveIdentity>,
     pub problems: Vec<BillProblem>,
     /// P29 WP7: the lines the tag rules refused, in words (Q-276).
     pub tag_refusal: Vec<String>,
