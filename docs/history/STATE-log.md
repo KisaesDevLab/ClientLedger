@@ -2,6 +2,13 @@
 
 Older STATE.md log entries, newest first. Read only when you need the history of a past phase; `STATE.md` keeps the current board and the last few entries.
 
+- 2026-11-17 — P29 follow-up (owner answers and hand-check findings) complete on `fix/P29-owner-answers`; PR with auto-merge.
+  - Owner answers built: the built-in Bookkeeper sees sensitive accounts (Q-P29c changed; existing companies get the role update once when an Admin opens the company, Q-P29ac); merge window pre-selects nothing for customers, vendors and tags (QA-20).
+  - Hand-check findings fixed: temporary password Show/Hide; Role dropdown starts at the user's own role; no practice company during a forced password change; Go to finds Closing Date Exceptions; check numbers in Closing Date Exceptions (engine); a user's own password change, failed changes, recovery and failed sign-ins reach the company's Audit Trail (engine) and read "Password changed".
+  - Engine: #65 (U-238, `sensitive-accounts-grant-v1`), #66 (U-240); pin 5cce402d.
+  - Checks: live contract suite 386 passed, 0 failed, 20 pending notes; full local `cargo xtask ci` all gates passed (before the last pin bump and one test change; GitHub CI covers the rest); scenarios vendor-center, tags, users_roles, login, sensitive_accounts pass light and dark; hands-on on the real engine, five checks pass (screenshots `target/ui-check/P29b/`); P29 hand checks QA-14 and QA-9 pass.
+  - Not covered: the Audit Trail evening-date fix still needs an evening retest; `cargo deny` chrono advisory ignored with a reason (Q-P29ah).
+  - Agents and models: engine-implementer opus (two runs); rust-implementer opus (two runs) and sonnet (pin follow-through); ui-verifier opus (two runs); explorer sonnet; bookkeeper sonnet.
 - 2026-11-16 — P29 Users, permissions, closing date, audit trail complete on `phase/P29-users-permissions`; PR with auto-merge. Tier M.
   - Shipped: sign-in, My Sign-in, recovery key, temporary passwords, idle lock, automatic sign-in (keychain); Users and Roles (one window, two tabs); report areas; closing date (Admin only) and the exceptions report; audit trail with export; sensitive accounts; 1099 thresholds; masked tax ID; tag options (require a tag on every line, default tag); scripted QA company (`cargo xtask qa-company`, CLI feature `qa-seed`).
   - Acceptance: [x] A/P role blocked from invoices and restricted reports (UI and engine); [x] Every closed-period edit appears in the exceptions report; [x] Sensitive payroll account hidden from Bookkeeper in P&L, register, drill-down; [x] With "Require a tag on every line" on, no form or Bulk Entry can save an untagged line, and the default tag prefills new transactions.
