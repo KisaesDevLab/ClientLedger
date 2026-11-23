@@ -53,7 +53,7 @@ pub enum Change {
     /// panel checks its duplicate ref again.
     BillsAll,
     /// The company's settings or closing date changed on another computer
-    /// (the change feed's companies and 	enants; PR-8 S2): an open
+    /// (the change feed's `companies` and `tenants`; PR-8 S2): an open
     /// Preferences window with nothing unsaved reads them again.
     Company,
     /// Printed checks were recorded, answered or put off (P19): Home's

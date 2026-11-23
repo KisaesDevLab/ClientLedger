@@ -308,7 +308,10 @@ fn a_bill_saved_on_another_computer_is_found_at_save() {
     let t0 = Instant::now();
     let mut alone = VendorPanel::default();
     assert_eq!(settle(&mut alone, &input, t0), "clear");
-    assert!(crate::lan_status::LanShell::command(&e.link, "dev.lan_host_up"));
+    assert!(crate::lan_status::LanShell::command(
+        &e.link,
+        "dev.lan_host_up"
+    ));
     let mut p = VendorPanel::default();
     assert_eq!(settle(&mut p, &input, t0), "clear");
     e.bill(v, REF, day(2026, 11, 3));

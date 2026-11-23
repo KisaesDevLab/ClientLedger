@@ -874,7 +874,10 @@ mod tests {
             .expect_err("a stale press");
         assert_eq!(e, ApiError::Lan(crate::LanRefusal::NotSent));
         let reqs = server.received_requests().await.expect("r");
-        assert!(reqs.iter().all(|r| r.method.as_str() != "PUT"), "nothing sent");
+        assert!(
+            reqs.iter().all(|r| r.method.as_str() != "PUT"),
+            "nothing sent"
+        );
     }
 
     #[tokio::test]

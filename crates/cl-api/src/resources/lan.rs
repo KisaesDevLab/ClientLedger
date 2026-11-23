@@ -568,7 +568,10 @@ mod tests {
             .mount(&server)
             .await;
         let s = crate::resources::testkit::company_session(&server);
-        assert!(!s.client().lan_host_engine(), "unknown before the info read");
+        assert!(
+            !s.client().lan_host_engine(),
+            "unknown before the info read"
+        );
         s.client().desktop_info().await.expect("info");
         assert!(s.client().lan_host_engine());
         // The same engine seen through a workstation's link (saves never wait).

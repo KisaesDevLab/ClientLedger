@@ -545,8 +545,8 @@ impl ImportScreen {
                 // P33: on a LAN host, under maintenance (U-293; the engine
                 // refuses it otherwise with MAINTENANCE_REQUIRED). Routine:
                 // the workstations stay signed in (PR-8 S6).
-                let hold = crate::lan_status::Hold::Routine;
-                crate::lan_status::with_maintenance(&s, hold, async {
+                let routine = crate::lan_status::Hold::Routine;
+                crate::lan_status::with_maintenance(&s, routine, async {
                     match what {
                         Running::Commit => {
                             let req = CommitRequest {

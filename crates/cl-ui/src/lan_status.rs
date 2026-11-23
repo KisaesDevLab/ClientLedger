@@ -263,11 +263,20 @@ pub enum Hold {
 pub const MAINTENANCE_CALLS: &[(&str, &str)] = &[
     ("POST /tenant-archives/import", "cl_company::restore("),
     ("POST /imports/:id/commit", ".imports().commit("),
-    ("POST /imports/batches/:id/commit", ".import_transactions().commit("),
-    ("POST /imports/batches/:id/undo", ".import_transactions().undo("),
+    (
+        "POST /imports/batches/:id/commit",
+        ".import_transactions().commit(",
+    ),
+    (
+        "POST /imports/batches/:id/undo",
+        ".import_transactions().undo(",
+    ),
     ("POST /imports/batches/:id/undo", ".imports().undo("),
     ("POST /payroll-import/sessions/:id/post", ".payroll().post("),
-    ("POST /payroll-import/sessions/:id/reverse", ".payroll().reverse("),
+    (
+        "POST /payroll-import/sessions/:id/reverse",
+        ".payroll().reverse(",
+    ),
     // No caller in the app: the payroll check-register and checks posts.
     ("POST /payroll-import/sessions/:id/check-register/post", ""),
     ("POST /payroll-import/sessions/:id/checks/post", ""),
@@ -947,8 +956,8 @@ mod tests {
         for c in changes_of(&page) {
             bus.publish(c);
         }
-        let vendor = cl_core::ids::ContactId::parse("00000000-0000-4000-8000-000000000101")
-            .expect("id");
+        let vendor =
+            cl_core::ids::ContactId::parse("00000000-0000-4000-8000-000000000101").expect("id");
         assert!(bus.take(&mut sub).bills_touch(vendor));
         let reset = ChangePage {
             reset: true,
@@ -993,7 +1002,10 @@ mod tests {
         s.client().desktop_info().await.expect("desktop info");
         assert!(!crate::lan_link::host_running(), "no sharing in this test");
         let work = async { Ok::<u8, cl_api::ApiError>(7) };
-        assert_eq!(with_maintenance(&s, Hold::Routine, work).await.ok(), Some(7));
+        assert_eq!(
+            with_maintenance(&s, Hold::Routine, work).await.ok(),
+            Some(7)
+        );
         let fails = async { Err::<u8, _>(cl_api::ApiError::Internal) };
         assert!(with_maintenance(&s, Hold::Restore, fails).await.is_err());
         let seen: Vec<String> = server
@@ -1077,7 +1089,10 @@ mod tests {
                     continue;
                 };
                 let text = std::fs::read_to_string(f.path()).unwrap_or_default();
-                for line in text.lines().filter(|l| l.contains("requireMaintenanceInLan()")) {
+                for line in text
+                    .lines()
+                    .filter(|l| l.contains("requireMaintenanceInLan()"))
+                {
                     // `xRouter.post('/path', requireMaintenanceInLan(), ...`
                     let Some((head, rest)) = line.split_once("('") else {
                         continue;
@@ -1091,11 +1106,16 @@ mod tests {
                     found.insert(format!("{} /{prefix}{p}", verb.to_uppercase()));
                 }
             }
-            let listed: std::collections::BTreeSet<String> =
-                MAINTENANCE_CALLS.iter().map(|(r, _)| (*r).to_string()).collect();
+            let listed: std::collections::BTreeSet<String> = MAINTENANCE_CALLS
+                .iter()
+                .map(|(r, _)| (*r).to_string())
+                .collect();
             assert_eq!(found, listed, "the engine's maintenance routes changed");
         } else {
-            eprintln!("SKIPPED (route list): no engine sources at {}", routes.display());
+            eprintln!(
+                "SKIPPED (route list): no engine sources at {}",
+                routes.display()
+            );
         }
         // Every call in the app's sources sits inside `with_maintenance(`.
         let mut files = Vec::new();
@@ -1123,7 +1143,9 @@ mod tests {
                     calls += 1;
                     let from = i.saturating_sub(12);
                     assert!(
-                        lines[from..=i].iter().any(|l| l.contains("with_maintenance(")),
+                        lines[from..=i]
+                            .iter()
+                            .any(|l| l.contains("with_maintenance(")),
                         "{}:{}: {route} called outside with_maintenance",
                         f.display(),
                         i + 1
