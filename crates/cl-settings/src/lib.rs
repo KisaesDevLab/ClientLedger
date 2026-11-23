@@ -32,6 +32,7 @@
 
 pub mod ai;
 pub mod autologin;
+pub mod backup_schedule;
 pub mod bank_import;
 pub mod company_prefs;
 pub mod email_templates;
@@ -50,6 +51,10 @@ pub use ai::{
     AiLocalPrefs, AiProvider, CapCheck, OllamaUrlError, is_ollama_cloud_model, validate_ollama_url,
 };
 pub use autologin::{AUTO_SIGN_IN_FILE, AutoSignIn, AutoSignInError};
+pub use backup_schedule::{
+    BackupSchedule, BackupTest, BackupTrigger, Frequency, RunOutcome, ScheduleRun,
+    TestTrialBalance, TimeOfDay,
+};
 pub use bank_import::{CsvProfile, CsvProfiles, CsvProfilesStore};
 pub use company_prefs::{
     AiConsentNote, CompanyPrefs, FEED_TRANSFER_WINDOW_DEFAULT, FolderError, HereNote,

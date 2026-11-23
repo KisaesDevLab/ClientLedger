@@ -188,19 +188,7 @@ pub const EXPORT_DEADLINE: Duration = Duration::from_secs(3600);
 /// name, then the UTC time, then `.clbackup`.
 #[must_use]
 pub fn backup_file_name(company: &str, at: Timestamp, kind: BackupKind) -> String {
-    let stem: String = company
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-");
-    let stem = if stem.is_empty() {
-        "Company".to_string()
-    } else {
-        stem.chars().take(40).collect()
-    };
+    let stem = name_stem(company);
     let when = at.as_utc().format("%Y%m%d-%H%M%S");
     let suffix = match kind {
         BackupKind::Backup => "",
@@ -209,6 +197,23 @@ pub fn backup_file_name(company: &str, at: Timestamp, kind: BackupKind) -> Strin
         BackupKind::BeforeImport => "-before-import",
     };
     format!("{stem}-{when}{suffix}.clbackup")
+}
+
+/// The company part of a backup file name.
+fn name_stem(company: &str) -> String {
+    let stem: String = company
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if stem.is_empty() {
+        "Company".to_string()
+    } else {
+        stem.chars().take(40).collect()
+    }
 }
 
 /// Lowercase hex SHA-256 of a file (streamed; run off the async worker).
@@ -246,6 +251,13 @@ pub(crate) fn passphrase(secrets: &dyn SecretStore) -> Result<cl_core::Secret, C
         .get(cl_settings::secrets::BACKUP_PASSPHRASE)?
         .filter(|p| !p.is_empty())
         .ok_or(CompanyError::NoPassphrase)
+}
+
+/// True when a backup passphrase is set in the keychain (a schedule
+/// without one could never run, QA-12).
+#[must_use]
+pub fn has_passphrase(secrets: &dyn SecretStore) -> bool {
+    passphrase(secrets).is_ok()
 }
 
 /// Polls an archive job (export or import) to its end, reporting the
@@ -365,6 +377,189 @@ pub(crate) async fn job_failure(session: &Session, status: &ArchiveJobStatus) ->
     CompanyError::JobFailed { code }
 }
 
+/// One archive job at a time from this app (P34 §1): backup (manual, on
+/// close, scheduled, before a fix), restore, test restore and the transfer
+/// export all take it at their outermost public entry. The scheduler only
+/// ever `try_lock`s it and waits for the next tick when it is held.
+pub static GATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// True while some archive job holds [`GATE`].
+#[must_use]
+pub fn gate_busy() -> bool {
+    GATE.try_lock().is_err()
+}
+
+/// A held [`GATE`].
+pub type GateGuard = tokio::sync::MutexGuard<'static, ()>;
+
+/// Takes [`GATE`] without waiting: `None` while a backup, restore or test
+/// restore runs. Callers that also take a LAN maintenance hold take the
+/// gate **first**, so a hold never waits behind a long archive job
+/// (review S1).
+#[must_use]
+pub fn try_gate() -> Option<GateGuard> {
+    GATE.try_lock().ok()
+}
+
+/// How often the final rename is tried (a cloud-sync client may hold the
+/// new file for a moment).
+const RENAME_TRIES: u32 = 3;
+
+/// The in-progress name of a backup file: `<name>.part`.
+#[must_use]
+pub fn part_path(dest: &Path) -> PathBuf {
+    let mut s = dest.as_os_str().to_owned();
+    s.push(".part");
+    PathBuf::from(s)
+}
+
+/// A `.part` older than this is left over from a run that stopped, whoever
+/// made it (no backup takes a day).
+const STALE_PART: std::time::Duration = std::time::Duration::from_hours(24);
+
+/// Removes `.part` files left in `dir` by a run that stopped half way
+/// (crash, power loss): this company's
+/// (`<stem>-YYYYMMDD-HHMMSS[-kind].clbackup.part`), and any
+/// `*.clbackup.part` not touched for a day (a company renamed since, review
+/// M3).
+#[must_use = "the count of files removed"]
+pub fn sweep_parts(dir: &Path, company: &str) -> usize {
+    let stem = name_stem(company);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let stale = || {
+            name.ends_with(".clbackup.part")
+                && e.metadata()
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|age| age >= STALE_PART)
+        };
+        if (is_our_part(&name, &stem) || stale()) && std::fs::remove_file(e.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
+fn is_our_part(name: &str, stem: &str) -> bool {
+    let Some(rest) = name
+        .strip_prefix(stem)
+        .and_then(|r| r.strip_prefix('-'))
+        .and_then(|r| r.strip_suffix(".clbackup.part"))
+    else {
+        return false;
+    };
+    let bytes = rest.as_bytes();
+    if bytes.len() < 15 || bytes[8] != b'-' {
+        return false;
+    }
+    let stamp_ok =
+        bytes[..8].iter().all(u8::is_ascii_digit) && bytes[9..15].iter().all(u8::is_ascii_digit);
+    stamp_ok && matches!(&rest[15..], "" | "-before-delete" | "-before-import")
+}
+
+/// Places a finished backup archive at `dest` and proves the copy on disk
+/// is whole before it counts (Q-P34i): written as `<dest>.part`, flushed
+/// to the disk, read back and hashed, its envelope checked, then renamed
+/// (retried for a cloud-sync lock). A copy that fails any step is removed
+/// and nothing is recorded.
+pub(crate) async fn place_verified(
+    result: &cl_api::ArchiveResult,
+    dest: &Path,
+    progress: &ProgressSink,
+) -> Result<u64, CompanyError> {
+    let src = result.path.clone().ok_or(CompanyError::JobFailed {
+        code: "NO_PATH".into(),
+    })?;
+    let expected = result.sha256.to_ascii_lowercase();
+    let dest = dest.to_path_buf();
+    progress(Progress::Copying);
+    let p2 = Arc::clone(progress);
+    tokio::task::spawn_blocking(move || place_verified_blocking(&src, &dest, &expected, &p2))
+        .await
+        .map_err(|_| CompanyError::Io {
+            what: "copy backup",
+            source: std::io::Error::other("worker stopped"),
+        })?
+}
+
+fn place_verified_blocking(
+    src: &Path,
+    dest: &Path,
+    expected: &str,
+    progress: &ProgressSink,
+) -> Result<u64, CompanyError> {
+    let part = part_path(dest);
+    if let Some(dir) = dest.parent() {
+        std::fs::create_dir_all(dir).map_err(CompanyError::io("create backup folder"))?;
+    }
+    let _ = std::fs::remove_file(&part);
+    let moved = std::fs::rename(src, &part).is_ok();
+    if !moved && let Err(e) = std::fs::copy(src, &part) {
+        let _ = std::fs::remove_file(&part);
+        return Err(CompanyError::Io {
+            what: "copy backup",
+            source: e,
+        });
+    }
+    let fail = |e: CompanyError| {
+        let _ = std::fs::remove_file(&part);
+        e
+    };
+    // Flush to the disk (a write handle: Windows refuses to flush a
+    // read-only one).
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&part)
+        .and_then(|f| f.sync_all())
+        .map_err(|e| {
+            fail(CompanyError::Io {
+                what: "flush backup",
+                source: e,
+            })
+        })?;
+    progress(Progress::Verifying);
+    // Read back: the envelope and the hash of what is on the disk.
+    let info = crate::restore::inspect_archive(&part, &cl_settings::RecentCompanies::default())
+        .map_err(|e| {
+            tracing::warn!("backup: the written copy is not a readable archive");
+            fail(match e {
+                CompanyError::Io { .. } => e,
+                _ => CompanyError::CopyMismatch,
+            })
+        })?;
+    if info.sha256 != expected {
+        tracing::warn!("backup: the written copy does not match the engine's file");
+        return Err(fail(CompanyError::CopyMismatch));
+    }
+    let mut tries = 0;
+    loop {
+        match std::fs::rename(&part, dest) {
+            Ok(()) => break,
+            Err(e) if tries + 1 < RENAME_TRIES => {
+                tracing::debug!(error = %e.kind(), "backup: rename waits");
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(500));
+            }
+            Err(e) => {
+                return Err(fail(CompanyError::Io {
+                    what: "save backup",
+                    source: e,
+                }));
+            }
+        }
+    }
+    if !moved {
+        let _ = std::fs::remove_file(src);
+    }
+    Ok(info.bytes)
+}
+
 /// Moves the finished archive to `dest` and checks its hash. The source is
 /// removed only after the copy verified.
 pub(crate) async fn place_archive(
@@ -418,7 +613,21 @@ fn writable(kind: BackupKind) -> Result<(), CompanyError> {
     }
 }
 
-/// Backs up one company. Works from any session scope.
+/// What P34 adds to a backup beyond [`BackupRequest`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BackupOptions {
+    /// Why the file is made (History shows it).
+    pub trigger: Option<cl_settings::BackupTrigger>,
+    /// The time to stamp (the scheduler's clock); the system clock when
+    /// `None`.
+    pub now: Option<Timestamp>,
+    /// Retention for regular backups (`keep_last`, `keep_months`): a
+    /// schedule's own values; the defaults when `None`.
+    pub keep: Option<(usize, u32)>,
+}
+
+/// Backs up one company. Works from any session scope. Waits for
+/// [`GATE`].
 ///
 /// # Errors
 /// `Metadata` for [`BackupKind::LegacyPortable`] (nothing sent);
@@ -430,6 +639,64 @@ pub async fn backup(
     store: &RecentStore,
     secrets: &dyn SecretStore,
     req: &BackupRequest,
+    progress: &ProgressSink,
+) -> Result<BackupOutcome, CompanyError> {
+    backup_with(
+        session,
+        store,
+        secrets,
+        req,
+        &BackupOptions::default(),
+        progress,
+    )
+    .await
+}
+
+/// [`backup`] with a trigger, a clock and retention values. Waits for
+/// [`GATE`].
+///
+/// # Errors
+/// As [`backup`].
+pub async fn backup_with(
+    session: &Session,
+    store: &RecentStore,
+    secrets: &dyn SecretStore,
+    req: &BackupRequest,
+    opts: &BackupOptions,
+    progress: &ProgressSink,
+) -> Result<BackupOutcome, CompanyError> {
+    let _gate = GATE.lock().await;
+    backup_ungated(session, store, secrets, req, opts, progress).await
+}
+
+/// [`backup_with`] for a caller that took [`GATE`] with [`try_gate`] (the
+/// backup on close, which never waits for a running test restore).
+///
+/// # Errors
+/// As [`backup`].
+pub async fn backup_holding(
+    _gate: GateGuard,
+    session: &Session,
+    store: &RecentStore,
+    secrets: &dyn SecretStore,
+    req: &BackupRequest,
+    opts: &BackupOptions,
+    progress: &ProgressSink,
+) -> Result<BackupOutcome, CompanyError> {
+    backup_ungated(session, store, secrets, req, opts, progress).await
+}
+
+/// [`backup_with`] for a caller that already holds [`GATE`] (delete, the
+/// transfer export, the scheduler).
+///
+/// # Errors
+/// As [`backup`].
+pub(crate) async fn backup_ungated(
+    session: &Session,
+    store: &RecentStore,
+    secrets: &dyn SecretStore,
+    req: &BackupRequest,
+    opts: &BackupOptions,
     progress: &ProgressSink,
 ) -> Result<BackupOutcome, CompanyError> {
     writable(req.kind)?;
@@ -471,23 +738,35 @@ pub async fn backup(
     let result = status.export_result().ok_or(CompanyError::JobFailed {
         code: "NO_RESULT".into(),
     })?;
-    let now = cl_settings::recent::now();
+    let now = opts.now.unwrap_or_else(cl_settings::recent::now);
     let dest = req
         .dest_dir
         .join(backup_file_name(&rec.name, now, req.kind));
-    let bytes = place_archive(&result, &dest, progress).await?;
+    // A `.part` an earlier run left behind (crash, power loss) goes first.
+    let swept = sweep_parts(&req.dest_dir, &rec.name);
+    if swept > 0 {
+        tracing::info!(swept, "backup: removed unfinished copies");
+    }
+    let bytes = place_verified(&result, &dest, progress).await?;
     let record = BackupRecord {
         path: dest.clone(),
         sha256: result.sha256.to_ascii_lowercase(),
         archive_id: result.archive_id.clone(),
         created_at: now,
         kind: req.kind,
+        trigger: opts.trigger,
+        tested: None,
     };
     let dest_dir = req.dest_dir.clone();
+    // One folder, one rule (Q-P34bj): a backup into the schedule's folder
+    // (manual, on close, before a transfer) prunes by the schedule's
+    // values, never by the defaults.
+    let keep = opts.keep.or_else(|| schedule_keep(&rec, &dest_dir));
+    // Retention only after the copy verified (Q-P34j).
     let pruned = store.update(|l| {
         l.record_backup(req.tenant_id, record.clone());
         l.get_mut(req.tenant_id)
-            .map(|r| retain(r, req, &dest_dir, now))
+            .map(|r| retain(r, req, &dest_dir, now, keep))
             .unwrap_or_default()
     })?;
     progress(Progress::Done);
@@ -496,6 +775,26 @@ pub async fn backup(
         bytes,
         pruned,
     })
+}
+
+/// The schedule's retention when `dir` is the company's schedule folder.
+#[must_use]
+pub fn schedule_keep(rec: &cl_settings::CompanyRecord, dir: &Path) -> Option<(usize, u32)> {
+    let s = rec.schedule.as_ref()?;
+    same_dir(&s.folder, dir).then_some((s.keep_last, s.keep_months))
+}
+
+/// The folder as one spelling: absolute, then resolved on disk when it
+/// exists (case, `..`, links), else as written.
+fn dir_key(p: &Path) -> PathBuf {
+    let abs = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
+    std::fs::canonicalize(&abs).unwrap_or(abs)
+}
+
+/// True when two spellings name one folder (review M2).
+#[must_use]
+pub fn same_dir(a: &Path, b: &Path) -> bool {
+    a == b || dir_key(a) == dir_key(b)
 }
 
 /// The retention a backup asked for: regular backups by
@@ -507,9 +806,21 @@ fn retain(
     req: &BackupRequest,
     dir: &Path,
     now: Timestamp,
+    keep: Option<(usize, u32)>,
 ) -> Vec<PathBuf> {
     match (req.apply_retention, req.kind, req.protected.as_ref()) {
-        (true, BackupKind::Backup, _) => prune_company_backups(rec, dir, now),
+        (true, BackupKind::Backup, _) => {
+            let (last, months) = keep.unwrap_or((KEEP_LAST, KEEP_MONTHS));
+            prune_kind(
+                rec,
+                dir,
+                now,
+                BackupKind::Backup,
+                last,
+                months,
+                &BTreeSet::new(),
+            )
+        }
         (true, BackupKind::BeforeImport, Some(keep)) => prune_before_import(rec, dir, now, keep),
         _ => Vec::new(),
     }
@@ -576,10 +887,26 @@ fn prune_kind(
         p.file_name()
             .is_some_and(|n| protected.contains(n.to_string_lossy().as_ref()))
     };
+    let dir = dir_key(dir);
+    let in_dir = |b: &BackupRecord| b.path.parent().is_some_and(|p| dir_key(p) == dir);
+    // The newest copy a test restore passed is never pruned (review S2): a
+    // new untested copy must not take the only proven one with it.
+    let proven = rec
+        .backups
+        .iter()
+        .filter(|b| b.kind == kind && b.tested.as_ref().is_some_and(|t| t.passed))
+        .filter(|b| in_dir(b))
+        .max_by_key(|b| b.created_at)
+        .map(|b| b.path.clone());
     let candidates: Vec<(PathBuf, Timestamp)> = rec
         .backups
         .iter()
-        .filter(|b| b.kind == kind && b.path.parent() == Some(dir) && !is_protected(&b.path))
+        .filter(|b| {
+            b.kind == kind
+                && in_dir(b)
+                && !is_protected(&b.path)
+                && proven.as_ref() != Some(&b.path)
+        })
         .map(|b| (b.path.clone(), b.created_at))
         .collect();
     let delete = prune_plan(&candidates, now, keep_last, keep_months);
@@ -672,6 +999,104 @@ mod tests {
         assert_eq!(host_transfers(&[]), Vec::new());
     }
 
+    fn engine_file(dir: &Path, extra: &[u8]) -> PathBuf {
+        let p = dir.join("engine-archive.zip");
+        let envelope = r#"{"format":"mybooks-tenant-archive","formatVersion":1,"archiveId":"a-1","createdAt":"2026-11-04T08:12:00.000Z","encryption":{"kdf":"pbkdf2-sha512"},"keyCheck":"x"}"#;
+        crate::zipfile::write_stored(
+            &p,
+            &[
+                ("envelope.json".into(), envelope.as_bytes().to_vec()),
+                ("manifest.json.enc".into(), extra.to_vec()),
+            ],
+        )
+        .expect("zip");
+        p
+    }
+
+    /// Q-P34i: the copy is written as `.part`, read back, checked and
+    /// renamed; a copy that does not match leaves nothing behind.
+    #[test]
+    fn placed_backups_are_read_back_before_they_count() {
+        let engine = tempfile::tempdir().expect("tmp");
+        let dest_dir = tempfile::tempdir().expect("tmp");
+        let src = engine_file(engine.path(), b"secret bytes");
+        let sha = sha256_file(&src).expect("hash");
+        let dest = dest_dir.path().join("Ozark-20261104-081200.clbackup");
+        let bytes = place_verified_blocking(&src, &dest, &sha, &silent()).expect("placed");
+        assert!(dest.is_file());
+        assert_eq!(bytes, std::fs::metadata(&dest).expect("m").len());
+        assert!(!part_path(&dest).exists(), "no .part left");
+        assert!(!src.exists(), "the engine's file moved");
+        assert_eq!(sha256_file(&dest).expect("hash"), sha);
+
+        // A hash that does not match: nothing at the destination, no .part.
+        let src = engine_file(engine.path(), b"other bytes");
+        let dest2 = dest_dir.path().join("Ozark-20261105-081200.clbackup");
+        let err = place_verified_blocking(&src, &dest2, &"0".repeat(64), &silent());
+        assert!(matches!(err, Err(CompanyError::CopyMismatch)), "{err:?}");
+        assert!(!dest2.exists() && !part_path(&dest2).exists());
+
+        // Not an archive at all (a damaged copy): refused the same way.
+        let junk = engine.path().join("junk.zip");
+        std::fs::write(&junk, b"not a zip").expect("write");
+        let sha = sha256_file(&junk).expect("hash");
+        let dest3 = dest_dir.path().join("Ozark-20261106-081200.clbackup");
+        let err = place_verified_blocking(&junk, &dest3, &sha, &silent());
+        assert!(matches!(err, Err(CompanyError::CopyMismatch)), "{err:?}");
+        assert!(!dest3.exists() && !part_path(&dest3).exists());
+    }
+
+    #[test]
+    fn only_this_companys_unfinished_copies_are_swept() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let names = [
+            ("Ozark-Ridge-20261104-081200.clbackup.part", true),
+            (
+                "Ozark-Ridge-20261104-081200-before-import.clbackup.part",
+                true,
+            ),
+            ("Ozark-Ridge-Two-20261104-081200.clbackup.part", false),
+            ("Ozark-Ridge-20261104-081200.clbackup", false),
+            ("Ozark-Ridge-notes.clbackup.part", false),
+            ("Shoal-20261104-081200.clbackup.part", false),
+        ];
+        for (n, _) in names {
+            std::fs::write(dir.path().join(n), b"x").expect("write");
+        }
+        assert_eq!(sweep_parts(dir.path(), "Ozark Ridge"), 2);
+        for (n, gone) in names {
+            assert_eq!(!dir.path().join(n).exists(), gone, "{n}");
+        }
+        assert_eq!(sweep_parts(&dir.path().join("missing"), "Ozark Ridge"), 0);
+    }
+
+    #[test]
+    fn the_schedule_folder_keeps_the_schedules_rule() {
+        let mut rec = cl_settings::CompanyRecord::new(
+            cl_core::ids::TenantId::parse("1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
+            "Ozark",
+            cl_settings::ACCENT_PALETTE[0],
+        );
+        let dir = Path::new("E:/Backups");
+        assert_eq!(schedule_keep(&rec, dir), None);
+        rec.schedule = Some(cl_settings::BackupSchedule {
+            folder: dir.to_path_buf(),
+            keep_last: 3,
+            keep_months: 2,
+            ..cl_settings::BackupSchedule::default()
+        });
+        assert_eq!(schedule_keep(&rec, dir), Some((3, 2)));
+        assert_eq!(schedule_keep(&rec, Path::new("F:/Elsewhere")), None);
+    }
+
+    #[tokio::test]
+    async fn the_gate_is_one_at_a_time() {
+        let held = GATE.lock().await;
+        assert!(gate_busy());
+        drop(held);
+        assert!(!gate_busy());
+    }
+
     #[test]
     fn sha256_and_hex() {
         let dir = tempfile::tempdir().expect("tmp");
@@ -702,6 +1127,8 @@ mod tests {
                     archive_id: at.to_wire(),
                     created_at: at,
                     kind,
+                    trigger: None,
+                    tested: None,
                 });
             };
         for i in 0..12 {
@@ -763,6 +1190,8 @@ mod tests {
                 archive_id: at.to_wire(),
                 created_at: at,
                 kind,
+                trigger: None,
+                tested: None,
             });
         };
         // 14 before-import files, one a month apart in 2025 and 2026 (a
@@ -834,6 +1263,8 @@ mod tests {
                 archive_id: at.to_wire(),
                 created_at: at,
                 kind: BackupKind::BeforeImport,
+                trigger: None,
+                tested: None,
             });
             names.push(name);
         }
@@ -865,6 +1296,8 @@ mod tests {
                 archive_id: at.to_wire(),
                 created_at: at,
                 kind: BackupKind::BeforeImport,
+                trigger: None,
+                tested: None,
             });
         }
         let mut req = BackupRequest {
@@ -875,11 +1308,11 @@ mod tests {
             protected: None,
         };
         assert!(
-            retain(&mut rec, &req, dir.path(), now).is_empty(),
+            retain(&mut rec, &req, dir.path(), now, None).is_empty(),
             "unknown: keep all"
         );
         req.protected = Some(keep);
-        assert_eq!(retain(&mut rec, &req, dir.path(), now).len(), 2);
+        assert_eq!(retain(&mut rec, &req, dir.path(), now, None).len(), 2);
         assert!(dir.path().join(&names[0]).is_file());
     }
 
@@ -917,6 +1350,8 @@ mod tests {
                 archive_id: at.to_wire(),
                 created_at: at,
                 kind: BackupKind::LegacyPortable,
+                trigger: None,
+                tested: None,
             });
         }
         let pruned = prune_company_backups(&mut rec, dir.path(), now);
@@ -950,5 +1385,77 @@ mod tests {
         assert_eq!(v["accent"], "#6E8B3D");
         let back: HostMetadata = serde_json::from_value(v).expect("back");
         assert_eq!(back, h);
+    }
+
+    /// Review S2: retention never deletes the newest copy a test restore
+    /// passed, even when newer untested copies fill the keep count. Review
+    /// M2: a folder spelled another way (`dir/./`) is still the same folder.
+    #[test]
+    fn retention_keeps_the_newest_proven_copy_and_matches_folder_spellings() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let now = Timestamp::parse_wire("2026-11-17T08:12:00.000Z").expect("ts");
+        let mut rec = cl_settings::CompanyRecord::new(
+            cl_core::ids::TenantId::parse("1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
+            "Ozark",
+            cl_settings::ACCENT_PALETTE[0],
+        );
+        for day in 1..=5u32 {
+            let at = Timestamp::parse_wire(&format!("2026-11-{day:02}T08:00:00.000Z")).expect("ts");
+            let path = dir
+                .path()
+                .join(backup_file_name("Ozark", at, BackupKind::Backup));
+            std::fs::write(&path, b"x").expect("write");
+            rec.backups.push(BackupRecord {
+                path,
+                sha256: "0".repeat(64),
+                archive_id: at.to_wire(),
+                created_at: at,
+                kind: BackupKind::Backup,
+                trigger: None,
+                tested: (day == 1).then_some(cl_settings::BackupTest {
+                    at,
+                    passed: true,
+                    reason: None,
+                    tb: None,
+                }),
+            });
+        }
+        let spelled = dir.path().join(".");
+        let pruned = prune_kind(
+            &mut rec,
+            &spelled,
+            now,
+            BackupKind::Backup,
+            2,
+            0,
+            &BTreeSet::new(),
+        );
+        assert_eq!(pruned.len(), 2, "days 2 and 3 go: {pruned:?}");
+        assert!(
+            rec.backups.iter().any(|b| b.tested.is_some()),
+            "the proven copy stays"
+        );
+        assert_eq!(rec.backups.len(), 3);
+    }
+
+    /// Review M3: a `.part` from before a rename is swept once it is a day
+    /// old; a fresh one of another company is left alone.
+    #[test]
+    fn stale_parts_of_any_name_are_swept() {
+        let dir = tempfile::tempdir().expect("tmp");
+        let old = dir.path().join("Old-Name-20261101-080000.clbackup.part");
+        let fresh = dir.path().join("Other-20261101-080000.clbackup.part");
+        std::fs::write(&old, b"x").expect("w");
+        std::fs::write(&fresh, b"x").expect("w");
+        let f = std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .expect("open");
+        f.set_modified(std::time::SystemTime::now() - 2 * STALE_PART)
+            .expect("set time");
+        drop(f);
+        assert_eq!(sweep_parts(dir.path(), "New Name"), 1);
+        assert!(!old.exists());
+        assert!(fresh.exists());
     }
 }

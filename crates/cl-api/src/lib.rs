@@ -102,6 +102,12 @@ pub use resources::form1099::{
     Form1099, THRESHOLDS_1099, Threshold1099Box, Thresholds1099, TinType, Vendor1099Profile,
     Vendor1099Update,
 };
+pub use resources::integrity::{
+    CheckResult, CheckStatus, Finding, FindingAmounts, FixKind, FixResult, FixSkipReason,
+    Integrity, IntegrityId, IntegrityLevel, IntegrityRun, IntegritySummary, MAX_FINDINGS,
+    RunLedgerVersion, RunSummary, Severity, SeverityCounts, SkippedFinding, Subject, SubjectKind,
+    is_integrity_stale,
+};
 pub use resources::inventory::{
     ADJUSTMENT_MAX_LINES, ADJUSTMENT_MEMO_MAX, AdjustmentLine, AdjustmentRecord,
     AdjustmentRecordLine, CountLine, CountResult, CountSheet, CountSheetRow, Inventory,
@@ -170,7 +176,8 @@ pub use resources::tenants::{
     ArchiveFileName, ArchiveJob, ArchiveJobStatus, ArchiveRequest, ArchiveResult, CreatedTenant,
     DOCUMENT_DRAFTS_OMITTED, DeleteReceipt, DeleteRequest, HOST_METADATA_MAX_BYTES, ImportJob,
     ImportRequest, ImportResult, ImportVerification, JobError, JobId, JobState, MissingFile,
-    NewTenant, TenantSummary, Tenants,
+    NewTenant, TenantSummary, Tenants, TestRestoreFailure, TestRestoreRequest, TestRestoreResult,
+    TrialBalanceComparison, TrialBalanceDifference, TrialBalanceSide, UnbalancedCounts,
 };
 pub use resources::transactions::{
     AccountRoles, Basis, BilledStatus, DELETE_REASON_MAX_CHARS, DeleteOptions,

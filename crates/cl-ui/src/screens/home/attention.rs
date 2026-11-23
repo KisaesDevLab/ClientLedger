@@ -109,12 +109,26 @@ pub(crate) fn items(
                 (None, Some(_)) => AttentionItem::unknown(kind, true),
                 _ => AttentionItem::unknown(kind, false),
             },
-            AttentionKind::ToDos | AttentionKind::HealthCheck => {
-                AttentionItem::unknown(kind, false)
-            }
+            AttentionKind::ToDos => AttentionItem::unknown(kind, false),
+            // P34 (U-12): the newest run's errors and warnings; no line
+            // until a check has run.
+            AttentionKind::HealthCheck => match data.health.value.as_ref().and_then(health_count) {
+                Some(n) => AttentionItem::counted(kind, n),
+                None => AttentionItem::unknown(kind, false),
+            },
             AttentionKind::Backup => AttentionItem::backup(backup_due),
         })
         .collect()
+}
+
+/// Errors and warnings of the newest Verify Data run (quick or full).
+fn health_count(s: &cl_api::IntegritySummary) -> Option<u64> {
+    let newest = match (&s.last_quick, &s.last_full) {
+        (Some(q), Some(f)) => Some(if f.finished_at >= q.finished_at { f } else { q }),
+        (Some(q), None) => Some(q),
+        (None, f) => f.as_ref(),
+    }?;
+    Some(newest.counts.error.saturating_add(newest.counts.warning))
 }
 
 /// `items` with the intake folders that need attention on this computer
@@ -284,9 +298,22 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
         let shown = usize::try_from(n).unwrap_or(usize::MAX);
         let name = |key: &str| t(&format!("home.attention.{key}.name"));
         match kind {
-            AttentionKind::ToDos | AttentionKind::HealthCheck => {
+            AttentionKind::ToDos => {
                 later = true;
             }
+            AttentionKind::HealthCheck => match item.count {
+                Some(n) if item.available && n > 0 => out.push(Line::task(
+                    t_count(
+                        "home.attention.health_check",
+                        usize::try_from(n).unwrap_or(usize::MAX),
+                        &[],
+                    ),
+                    "home.attention.health_check.open",
+                    opens,
+                )),
+                Some(_) if item.available => {}
+                _ => later = true,
+            },
             // Inventory off (or an engine without U-78): no line at all.
             AttentionKind::Reorder if !item.available => {}
             AttentionKind::Backup => {}
@@ -410,11 +437,19 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
         out.push(Line::muted(t("home.attention.later")));
     }
     let local = home.local;
+    if local.last_test_failed {
+        out.push(Line::task(
+            t("home.attention.test_failed"),
+            "home.attention.test_failed.open",
+            Some(crate::screens::company::backup_settings::KIND),
+        ));
+    }
     let when = local
         .last_backup
         .map(|b| when_text(b, local.zone, home.today));
     if home.backup_due() {
         let text = match &when {
+            _ if local.last_schedule_failed => t("home.attention.backup_failed"),
             Some(w) => t_with("home.attention.backup_due", &[("when", w)]),
             None => t("home.attention.backup_never"),
         };
@@ -432,6 +467,11 @@ pub(crate) fn lines(home: &HomeScreen, items: &[AttentionItem]) -> Vec<Line> {
     out
 }
 
+/// "Later" on the backup prompt (closes it for today, opens nothing).
+pub(crate) const PROMPT_LATER: &str = "home.backup_prompt.later";
+/// The backup prompt's answers: Back Up Now, Set Up a Schedule, Later.
+pub(crate) const PROMPT_IDS: [&str; 3] = ["file.backup", "file.backup_settings", PROMPT_LATER];
+
 /// The Needs attention card: the command a link opens, or [`RETRY`].
 pub(super) fn show(ui: &mut Ui, home: &HomeScreen, tokens: &Tokens) -> Option<&'static str> {
     heading(ui, tokens, &t("home.attention.title"));
@@ -445,6 +485,24 @@ pub(super) fn show(ui: &mut Ui, home: &HomeScreen, tokens: &Tokens) -> Option<&'
     let lines = lines(home, &items);
     let waiting = home.data.counts.value.is_none();
     let mut clicked = None;
+    // Q-217 (P34): once a day at open, when a backup is due and no
+    // schedule is on.
+    if home.backup_prompt {
+        ui.label(egui::RichText::new(t("backups.prompt.title")).strong());
+        ui.label(t("backups.prompt.body"));
+        ui.horizontal(|ui| {
+            for (key, id) in [
+                ("backups.prompt.now", PROMPT_IDS[0]),
+                ("backups.prompt.schedule", PROMPT_IDS[1]),
+                ("backups.prompt.later", PROMPT_IDS[2]),
+            ] {
+                if ui.button(t(key)).clicked() {
+                    clicked = Some(id);
+                }
+            }
+        });
+        rule(ui, tokens.border_row);
+    }
     let mut first = true;
     if waiting {
         note(ui, tokens, &t("home.attention.loading"));

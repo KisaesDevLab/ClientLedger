@@ -195,6 +195,12 @@ fn the_backup_cannot_be_written_into_the_data_folder() {
         .dump(&scratch.path("pgdata").join("backup.tar.gz"))
         .unwrap_err();
     assert!(matches!(err, PgError::Backup(_)), "{err:?}");
+    // P03 #17: another spelling of the same folder (through `..`) is refused too.
+    let other = scratch.path("b").join("..").join("pgdata").join("base");
+    std::fs::create_dir_all(scratch.path("b")).unwrap();
+    let err = cluster.dump(&other.join("backup.tar.gz")).unwrap_err();
+    assert!(matches!(err, PgError::Backup(_)), "{err:?}");
+    assert!(!other.join("backup.tar.gz").exists());
 }
 
 /// A minimal archive: `data/<name>` files plus an optional manifest.

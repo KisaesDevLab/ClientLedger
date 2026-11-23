@@ -756,6 +756,11 @@ fn host_restore(host: &Host, b: &Desk, scratch: &Path) {
     // A workstation can't restore: host-only, refused before the engine.
     let sb = b.sign_in(&host.password);
 
+    // P34 §10.2 (Q-P34u): a test restore on the host takes no hold and does
+    // not hold back the change feed: a workstation's save made while it runs
+    // reaches the host's feed, and the test still passes.
+    test_restore_keeps_the_feed_moving(host, &hs, b, &sb, &made.record.path);
+
     // PR-8 S6: a routine hold (payroll, an import) refuses the workstation
     // while it lasts but keeps it signed in; its next read works.
     if hs
@@ -851,6 +856,92 @@ fn host_restore(host: &Host, b: &Desk, scratch: &Path) {
     b.run(sb.ledger_version())
         .expect("the workstation reads the restored books");
     drop(hs);
+}
+
+/// P34 §10.2: start a test restore on the host, save a journal entry on the
+/// workstation meanwhile, and read the host's change feed until the entry
+/// is in it. With the pinned engine (f52b64ae) the feed skips the test
+/// restore's open transaction; the engine's own test pins the overlap
+/// exactly (`tenant-test-restore.test.ts`), here it is the whole path.
+fn test_restore_keeps_the_feed_moving(
+    host: &Host,
+    hs: &Session,
+    b: &Desk,
+    sb: &Session,
+    backup: &Path,
+) {
+    let rt = host.host_rt();
+    let caps = hs.client().capabilities();
+    assert!(
+        caps.has(cl_api::Capabilities::TENANT_ARCHIVE_TEST_RESTORE)
+            && caps.has(cl_api::Capabilities::CHANGES),
+        "the pinned engine has test restore and the change feed"
+    );
+    let start = rt.block_on(hs.changes(None)).expect("the host's feed");
+    let cursor = start.cursor.clone();
+    let job = rt
+        .block_on(hs.tenants().test_restore(&cl_api::TestRestoreRequest {
+            path: backup.to_path_buf(),
+            passphrase: Secret::new("lan-live-backup-passphrase-synthetic"),
+        }))
+        .expect("a test restore on the host");
+    // No hold: the workstation saves while the test runs.
+    let cash = account(b, sb, AccountType::Asset, "TR cash");
+    let supplies = account(b, sb, AccountType::Expense, "TR supplies");
+    let saved = b
+        .run(sb.transactions().create_journal_entry(
+            &je2(
+                on(),
+                &unique("during a test restore"),
+                supplies,
+                cash,
+                "12.34",
+            ),
+            &PostingOptions::default(),
+            key(),
+        ))
+        .expect("a workstation save during a test restore")
+        .record
+        .id
+        .to_string();
+    let mut overlapped = false;
+    wait_until(
+        "the save in the host's change feed",
+        Duration::from_secs(60),
+        || {
+            let status = rt
+                .block_on(hs.tenants().archive_job(&job.job_id))
+                .expect("job");
+            overlapped |= matches!(
+                status.status,
+                cl_api::JobState::Queued | cl_api::JobState::Running
+            );
+            let page = rt
+                .block_on(hs.changes(cursor.as_deref()))
+                .expect("the host's feed");
+            page.changes
+                .iter()
+                .any(|c| c.kind == "transactions" && c.id.eq_ignore_ascii_case(&saved))
+        },
+    );
+    eprintln!("test restore still running when the save was read back: {overlapped}");
+    let done = loop {
+        let st = rt
+            .block_on(hs.tenants().archive_job(&job.job_id))
+            .expect("job");
+        if matches!(
+            st.status,
+            cl_api::JobState::Succeeded | cl_api::JobState::Failed
+        ) {
+            break st;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    let result = done
+        .test_restore_result()
+        .expect("readable")
+        .unwrap_or_else(|| panic!("the test restore finished: {:?}", done.error));
+    assert!(result.passed, "{:?}", result.failures);
 }
 
 fn host_or_skip(scratch: &Path) -> Option<Host> {

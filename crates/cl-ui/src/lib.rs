@@ -16,6 +16,7 @@ pub mod about;
 pub mod account_names;
 pub mod app;
 pub mod automation;
+pub mod backup_runner;
 pub mod company;
 pub mod data_bus;
 pub mod engine_link;

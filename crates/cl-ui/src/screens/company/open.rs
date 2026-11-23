@@ -339,7 +339,17 @@ impl OpenCompanyScreen {
         let workstation = self.link.is_workstation();
         self.busy = Some("open.opening");
         self.opening_role = Some(row.role.clone());
+        // P34: switching away backs up the company being left, when the
+        // owner asked for it; it never stops the switch.
+        let before = self
+            .link
+            .open_tenant()
+            .filter(|t| *t != row.tenant_id)
+            .and_then(|t| crate::backup_runner::on_close_backup(&self.link, t));
         self.open_task = spawn_lifecycle(&self.link, group, move || async move {
+            if let Some(b) = before {
+                b.await;
+            }
             cl_company::open_company(&session, &store, row.tenant_id).await?;
             // The session's secrets (SMTP password, the AI key or Ollama
             // address) go to the engine now, from the keychain (Q-P09a).

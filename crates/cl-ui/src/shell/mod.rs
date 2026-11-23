@@ -189,6 +189,11 @@ pub struct Shell {
     demo: bool,
     /// The open company's templates catch-up (P15).
     runner: crate::templates_runner::TemplatesRunner,
+    /// The scheduled-backup thread's inputs (P34; `None` in the demo and
+    /// on a workstation).
+    backups: Option<Arc<crate::backup_runner::RunnerInputs>>,
+    /// The weekly quick check in flight (P34).
+    weekly: Option<crate::backup_runner::WeeklyCheck>,
     /// The pop-out document viewer window (A02).
     doc_viewer: crate::windows::doc_viewer::DocViewerWindow,
     /// The window the document viewer followed last.
@@ -301,14 +306,27 @@ impl Shell {
             close_company_after_prompt: false,
             closing: None,
             runner: crate::templates_runner::TemplatesRunner::default(),
+            backups: None,
+            weekly: None,
         };
         shell.palette.include_dev = options.demo;
+        // P34: scheduled backups (live, on this computer only).
+        shell.backups = shell
+            .company_link
+            .as_ref()
+            .and_then(crate::backup_runner::start);
         if options.demo {
             shell.load_demo();
         } else if shell.company_link.is_some() {
             // With an engine, start on the Open Company window (Q-182); the
             // remembered layout returns when the company opens.
             shell.dispatch_now(CommandId::new("file.open_company"));
+            // P34 (Q-P34o): the last run ended badly or the engine is down.
+            if crate::screens::company::crash_recovery::info().needs_window() {
+                shell.open_screen(CommandId::new(
+                    crate::screens::company::crash_recovery::KIND,
+                ));
+            }
         } else {
             shell.restore_layout_or_home();
         }
@@ -576,6 +594,8 @@ impl Shell {
                     }
                     // Catch-up runs after every open (P15, Q-P15h).
                     self.runner.opened(&link, tenant_id);
+                    // P34 (Q-P34f): the weekly quick check, for Admins.
+                    self.weekly = crate::backup_runner::weekly_check(&link);
                     self.rights_watch.opened(&link);
                     // U-33: an Admin's local sensitive marks move into the
                     // engine (once; refused ones stay with a note).
@@ -592,6 +612,7 @@ impl Shell {
                         self.status.user = Some(name.clone());
                     }
                     self.runner.closed(&link);
+                    self.weekly = None;
                     link.reset_rights();
                     self.company_role.clear();
                     self.doc_viewer.close_window();
@@ -1194,6 +1215,35 @@ impl Shell {
                     .active_mut()
                     .is_some_and(|w| w.screen.command(CommandId::new("file.open_practice")));
             }
+            // P34 (demo): the crash recovery window as an unclean start shows it.
+            "dev.crash_demo_unclean" => {
+                crate::screens::company::crash_recovery::set_info(
+                    crate::screens::company::crash_recovery::CrashInfo {
+                        unclean: true,
+                        recovered: true,
+                        engine_failed: false,
+                        log_dir: None,
+                    },
+                );
+                self.open_screen(CommandId::new(
+                    crate::screens::company::crash_recovery::KIND,
+                ));
+            }
+            "dev.integrity_demo_reset" => {
+                if let Some(link) = &self.company_link
+                    && let Some(mut d) = link.demo_state()
+                {
+                    d.integrity.reset();
+                }
+                // QA-1: an open Verify Data window keeps the last run;
+                // the next scenario starts from a fresh one.
+                if let Some(id) = self
+                    .windows
+                    .find_kind(CommandId::new(crate::screens::company::verify_data::KIND))
+                {
+                    self.windows.close_now(id);
+                }
+            }
             "file.restore" => {
                 let open = CommandId::new("file.open_company");
                 self.open_screen(open);
@@ -1494,6 +1544,21 @@ impl Shell {
         // password field, not to the form in front).
         if !self.idle.locked() {
             self.handle_keys(ctx);
+        }
+        // P34: the weekly quick check's answer refreshes Home.
+        if let Some((_, p)) = self.weekly.as_mut()
+            && let Some(r) = p.try_take()
+        {
+            self.weekly = None;
+            if matches!(r, Ok(true))
+                && let Some(link) = &self.company_link
+            {
+                link.bus().publish(crate::data_bus::Change::Ledger(None));
+            }
+        }
+        // P34: a locked app skips its scheduled backups (caught up later).
+        if let Some(b) = &self.backups {
+            b.set_locked(self.idle.locked());
         }
         if let Some(toast) = &self.toast
             && ctx.input(|i| i.time) > toast.until
@@ -2250,21 +2315,33 @@ fn start_close(link: &Arc<CompanyLink>) -> Option<Closing> {
     let session = link.session()?;
     let client = link.client()?.clone();
     let group = link.group()?.ok()?;
-    let pending = send_close(&group, &client, session).ok()?;
+    // P34: "Back up when I close a company" runs first, in the same write;
+    // it never stops the close.
+    let before = link
+        .open_tenant()
+        .and_then(|t| crate::backup_runner::on_close_backup(link, t));
+    let pending = send_close(&group, &client, session, before).ok()?;
     Some((group, crate::company::Task::Pending(pending)))
 }
+
+/// What runs before the close (the on-close backup).
+type BeforeClose = std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>;
 
 /// The close itself: a write (never aborted with its group).
 fn send_close(
     group: &cl_api::RequestGroup,
     client: &cl_api::Client,
     session: cl_api::Session,
+    before: Option<BeforeClose>,
 ) -> Result<cl_api::Pending<Result<(), cl_company::CompanyError>>, cl_api::QueueError> {
     let label = cl_api::OrphanLabel {
         what: "orphan.lifecycle",
         key: None,
     };
     group.write(client, label, move |_c| async move {
+        if let Some(b) = before {
+            b.await;
+        }
         Ok(cl_company::close_company(&session).await)
     })
 }

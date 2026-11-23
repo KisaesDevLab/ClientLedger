@@ -563,6 +563,22 @@ pub fn inline_note(ui: &mut Ui, tokens: &Tokens, text: &str) {
         });
 }
 
+/// A good outcome inline ("Schedule saved."): the info tint, never the
+/// warning colours (P34 QA-7). Not selectable, so no stop in the tab order.
+pub fn inline_success(ui: &mut Ui, tokens: &Tokens, text: &str) {
+    egui::Frame::new()
+        .fill(tokens.accent_tint)
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(Margin::symmetric(10, 6))
+        .show(ui, |ui| {
+            ui.add(
+                egui::Label::new(RichText::new(text).color(tokens.text_primary))
+                    .wrap()
+                    .selectable(false),
+            );
+        });
+}
+
 /// A short progress line.
 pub fn progress_line(ui: &mut Ui, tokens: &Tokens, text: &str) {
     ui.horizontal(|ui| {

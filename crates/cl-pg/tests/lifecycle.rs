@@ -24,6 +24,7 @@ fn second_start_reuses_the_cluster_and_its_data() {
 
     let cluster = Cluster::ensure(&scratch.data_dir(), bins.clone(), &store).unwrap();
     let first = cluster.start().unwrap();
+    assert!(!first.recovered, "a new cluster replays nothing");
     let _stop = Guard(&cluster);
     let mut db = common::connect(&cluster, first.port, "postgres");
     db.batch_execute("create table t(id int primary key, v text); insert into t values (1,'a')")
@@ -33,6 +34,7 @@ fn second_start_reuses_the_cluster_and_its_data() {
     // Starting a running server adopts it.
     let again = cluster.start().unwrap();
     assert!(again.reused);
+    assert!(!again.recovered);
     assert_eq!(again.port, first.port);
     assert_eq!(cluster.running_port(), Some(first.port));
 
@@ -46,6 +48,7 @@ fn second_start_reuses_the_cluster_and_its_data() {
     let cluster2 = Cluster::ensure(&scratch.data_dir(), bins, &store).unwrap();
     assert_eq!(store.get().unwrap().unwrap(), pw_before);
     let second = cluster2.start().unwrap();
+    assert!(!second.recovered, "P34: a clean stop is not a crash");
     let _stop2 = Guard(&cluster2);
     let mut db = common::connect(&cluster2, second.port, "postgres");
     let n: i64 = db.query_one("select count(*) from t", &[]).unwrap().get(0);
@@ -77,6 +80,10 @@ fn recovers_after_the_server_is_killed() {
     let restarted = cluster.start().unwrap();
     eprintln!("restart after kill took {:?}", t0.elapsed());
     assert!(!restarted.reused);
+    assert!(
+        restarted.recovered,
+        "P34: the start after a kill replays the log"
+    );
     let mut db = common::connect(&cluster, restarted.port, "postgres");
     let n: i64 = db.query_one("select count(*) from t", &[]).unwrap().get(0);
     assert_eq!(n, 1000, "committed rows survive the crash");
@@ -131,6 +138,7 @@ fn a_stale_pid_file_owned_by_another_program_is_cleared() {
     let running = cluster.start().unwrap();
     let _stop = Guard(&cluster);
     assert!(!running.reused);
+    assert!(running.recovered, "a crash left the pid file");
     assert_ne!(running.pid, me);
     common::connect(&cluster, running.port, "postgres");
 }

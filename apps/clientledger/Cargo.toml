@@ -16,6 +16,10 @@ cl-settings = { path = "../../crates/cl-settings" }
 cl-ui = { path = "../../crates/cl-ui" }
 tracing = "0.1.44"
 
+[target.'cfg(unix)'.dependencies]
+# SIGTERM / SIGHUP end the session in order (P34 review S4). MIT OR Apache-2.0.
+ctrlc = { version = "3.5.2", features = ["termination"] }
+
 [lints]
 workspace = true
 

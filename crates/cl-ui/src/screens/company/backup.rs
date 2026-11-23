@@ -152,7 +152,7 @@ impl BackupScreen {
                         .await
                         .map(Outcome::Export)
                 }
-                Job::Backup => cl_company::backup(
+                Job::Backup => cl_company::backup::backup_with(
                     &session,
                     &store,
                     secrets.as_ref(),
@@ -162,6 +162,10 @@ impl BackupScreen {
                         dest_dir,
                         apply_retention: true,
                         protected: None,
+                    },
+                    &cl_company::backup::BackupOptions {
+                        trigger: Some(cl_settings::BackupTrigger::Manual),
+                        ..Default::default()
                     },
                     &sink,
                 )

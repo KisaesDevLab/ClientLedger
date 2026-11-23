@@ -36,7 +36,7 @@ fn quote(name: &str) -> String {
     format!("\"{name}\"")
 }
 
-fn sql_error(context: &str, e: &postgres::Error) -> PgError {
+pub(crate) fn sql_error(context: &str, e: &postgres::Error) -> PgError {
     // The server's message names the object and the problem, never the
     // password we sent; the full Debug form could echo a statement, so only
     // the SQLSTATE and the short message are kept.

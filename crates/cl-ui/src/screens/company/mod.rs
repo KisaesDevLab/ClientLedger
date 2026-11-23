@@ -2,12 +2,15 @@
 //! Recovery key, Opening balances, Back Up / Export, Delete.
 
 pub mod backup;
+pub mod backup_settings;
+pub mod crash_recovery;
 pub mod delete;
 pub mod form;
 pub mod new_interview;
 pub mod open;
 pub mod opening_balances;
 pub mod recovery_key;
+pub mod verify_data;
 
 use std::sync::Arc;
 
@@ -43,6 +46,12 @@ pub fn make(
             open,
         )),
         "file.delete_company" => Box::new(delete::DeleteCompanyScreen::new(link, open)),
+        verify_data::KIND => Box::new(verify_data::VerifyDataScreen::new(link, open)),
+        backup_settings::KIND => Box::new(backup_settings::BackupSettingsScreen::new(link, open)),
+        crash_recovery::KIND => Box::new(crash_recovery::CrashRecoveryScreen::new(
+            link,
+            crash_recovery::info(),
+        )),
         RECOVERY_KEY => Box::new(recovery_key::RecoveryKeyScreen::new(link)),
         OPENING_BALANCES => Box::new(opening_balances::OpeningBalancesScreen::new(link, today)),
         _ => return None,
@@ -55,6 +64,7 @@ pub fn extra_title(kind: CommandId) -> Option<String> {
     match kind.as_str() {
         RECOVERY_KEY => Some(crate::i18n::t("recovery.tab")),
         OPENING_BALANCES => Some(crate::i18n::t("opening.tab")),
+        crash_recovery::KIND => Some(crate::i18n::t("crash.tab")),
         _ => None,
     }
 }
@@ -78,6 +88,9 @@ mod tests {
             ("file.backup", "Back Up Company"),
             ("file.export_all", "Export All Data"),
             ("file.delete_company", "Delete Company"),
+            (verify_data::KIND, "Verify Data"),
+            (backup_settings::KIND, "Scheduled Backups and History"),
+            (crash_recovery::KIND, "ClientLedger didn't close normally"),
             (RECOVERY_KEY, "Recovery Key"),
             (OPENING_BALANCES, "Opening Balances"),
         ];

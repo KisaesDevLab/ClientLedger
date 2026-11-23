@@ -179,6 +179,7 @@ pub async fn restore(
     progress: &ProgressSink,
     stats: &Statistics,
 ) -> Result<RestoreOutcome, CompanyError> {
+    let _gate = crate::backup::GATE.lock().await;
     let list = store.load()?;
     let path = std::path::absolute(&req.path).map_err(CompanyError::io("resolve archive"))?;
     let info = {
@@ -619,6 +620,8 @@ mod tests {
                 archive_id: "arch-1".into(),
                 created_at: Timestamp::from_unix_millis(1).expect("ts"),
                 kind: BackupKind::Backup,
+                trigger: None,
+                tested: None,
             },
         );
         let info = inspect_archive(&p, &list).expect("info");
@@ -639,6 +642,8 @@ mod tests {
                 archive_id: "arch-1".into(),
                 created_at: Timestamp::from_unix_millis(1).expect("ts"),
                 kind: BackupKind::Backup,
+                trigger: None,
+                tested: None,
             },
         );
         let e = inspect_archive(&p, &list).expect_err("tampered");

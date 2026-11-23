@@ -234,13 +234,18 @@ pub const COMMANDS: &[Command] = &[
     // P19 (Q-P19ao): close the company the normal way and open the practice company.
     cmd("file.open_practice", "Open Practice Company", Some(Menu::File), 0, None, Scope::Global),
     built("file.backup", "Back Up Company", Some(Menu::File), 1, None),
+    // P34: scheduled backups, their history and test restores; Verify Data.
+    built("file.backup_settings", "Scheduled Backups and History", Some(Menu::File), 1, None),
+    built("file.verify_data", "Verify Data (Utilities)", Some(Menu::File), 1, None),
     cmd("file.restore", "Restore a Backup", Some(Menu::File), 1, None, Scope::Global),
     built("file.export_all", "Export All Data", Some(Menu::File), 1, None),
     // P32 (Q-126): lists and journal entries for QuickBooks Desktop.
     built("file.export_iif", "Export IIF File", Some(Menu::File), 1, None),
     // P31 D5 (Q-125): invoices, bills and journal entries from a spreadsheet.
     built("file.import_transactions", "Import Transactions from a Spreadsheet", Some(Menu::File), 1, None),
-    screen("file.full_backup", "Full Database Backup (Utilities)", Some(Menu::File), 1, None, "P34"),
+    // P34 built the cold-copy plumbing (`cl_host::cluster_ops`); the window
+    // needs the supervisor handed over and re-attached live (Q-P34y).
+    screen("file.full_backup", "Full Database Backup (Utilities)", Some(Menu::File), 1, None, "P37"),
     // P31: bring the books over from another program (Admins only; no
     // submenus, so a group of its own under File).
     built("file.import_qbd", "Import from QuickBooks Desktop", Some(Menu::File), 6, None),
@@ -766,6 +771,15 @@ pub const DEV_COMMANDS: &[Command] = &[
         "dev.transfer_demo_release",
         "Finish the Held Demo Transfer (developer)",
     ),
+    // P34: the demo's crash recovery window and a fresh Verify Data fault.
+    dev_action(
+        "dev.crash_demo_unclean",
+        "Show the Demo Crash Recovery (developer)",
+    ),
+    dev_action(
+        "dev.integrity_demo_reset",
+        "Reset the Demo Verify Data (developer)",
+    ),
     dev_action(
         "dev.transfer_demo_ask_backup_passphrase",
         "Ask for the Demo Backup Passphrase (developer)",
@@ -1141,6 +1155,9 @@ mod tests {
             // P32
             "company.send_to_accountant",
             "file.export_iif",
+            // P34
+            "file.backup_settings",
+            "file.verify_data",
             // P33
             "company.lan_setup",
         ];

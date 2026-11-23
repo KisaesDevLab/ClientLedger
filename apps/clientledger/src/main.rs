@@ -57,6 +57,54 @@ struct Running {
     /// (`set_running_host`), so dropping this stops the proxy first.
     _lan: Option<Arc<cl_ui::lan_link::LanHost>>,
     _link: HostLink,
+    /// P34 (Q-P34o): `running` until this orderly end marks it clean.
+    marker: Option<cl_host::SessionMarker>,
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        // A panic is not an orderly end: the next start offers recovery.
+        if !std::thread::panicking()
+            && let Some(m) = &self.marker
+            && let Err(e) = m.mark_clean()
+        {
+            tracing::warn!(error = %e, "the session marker could not be marked clean");
+        }
+    }
+}
+
+/// What the operating system's termination request does (review S4): the
+/// session ends in order, so it is marked clean at once (the OS may kill
+/// the process a few seconds later, before the window finishes closing),
+/// then the window is asked to close the usual way (unsaved forms still
+/// prompt). Platform-neutral so it is tested everywhere.
+fn termination_handler(
+    marker: Option<cl_host::SessionMarker>,
+    stop: Arc<std::sync::atomic::AtomicBool>,
+) -> impl Fn() + Send + 'static {
+    move || {
+        if let Some(m) = &marker
+            && let Err(e) = m.mark_clean()
+        {
+            tracing::warn!(error = %e, "the session marker could not be marked clean");
+        }
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// `SIGTERM`, `SIGHUP` (log-out, `systemctl`, `kill`) and `SIGINT` run
+/// [`termination_handler`] instead of ending the process on the spot. On
+/// Windows a GUI app gets no console events; nothing is installed.
+#[cfg(unix)]
+fn on_termination(handler: impl Fn() + Send + 'static) {
+    if let Err(e) = ctrlc::set_handler(handler) {
+        tracing::warn!(error = %e, "the termination handler could not be installed");
+    }
+}
+
+#[cfg(not(unix))]
+fn on_termination(handler: impl Fn() + Send + 'static) {
+    drop(handler);
 }
 
 /// Host mode turns automatic sign-in off and forgets the saved password:
@@ -168,6 +216,7 @@ fn lan_serve(paths: &AppPaths, args: &args::Args, lan: &LanSettings) -> Result<(
     cfg.lan_host = true;
     let link = HostLink::start_tagged(cfg, guard, Some(cl_host::service::BACKGROUND_TAG));
     let lan_host = start_lan_host(&link, paths, lan);
+    on_termination(termination_handler(None, Arc::clone(&link.stop)));
     while !link.stop.load(std::sync::atomic::Ordering::SeqCst) {
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
@@ -245,6 +294,23 @@ fn main() -> Result<()> {
             // starts, even when the link can't (never an empty local book).
             start_workstation(&paths, &lan, guard, &mut shell, &mut options)?;
         } else if let Some(exe) = find_engine_exe(args.engine_exe.as_deref()) {
+            // P34 (Q-P34o): how did the last run end? Read before this run
+            // writes `running`.
+            let (marker, last_exit) = match cl_host::begin_session(&paths) {
+                Ok((m, e)) => (Some(m), e),
+                Err(e) => {
+                    tracing::warn!(error = %e, "the session marker could not be read");
+                    (None, cl_host::LastExit::Unknown)
+                }
+            };
+            cl_ui::screens::company::crash_recovery::set_info(
+                cl_ui::screens::company::crash_recovery::CrashInfo {
+                    unclean: last_exit == cl_host::LastExit::Unclean,
+                    recovered: false,
+                    engine_failed: false,
+                    log_dir: Some(paths.logs_dir()),
+                },
+            );
             let mut cfg = HostConfig::new(paths.clone(), exe);
             cfg.lan_host = lan.mode == Mode::Host && lan.host.is_some();
             let link = HostLink::start(cfg, guard);
@@ -254,6 +320,7 @@ fn main() -> Result<()> {
             }
             shell.host = Some(link.probe());
             shell.company = Some(company_link(&link, &paths)?);
+            on_termination(termination_handler(marker.clone(), Arc::clone(&link.stop)));
             options.focus_request = Some(Arc::clone(&link.focus));
             options.stop_request = Some(Arc::clone(&link.stop));
             // Dropped when the window closes, which stops the engine and the
@@ -261,6 +328,7 @@ fn main() -> Result<()> {
             options.keep_alive = Some(Box::new(Running {
                 _lan: lan_host,
                 _link: link,
+                marker,
             }));
         } else {
             // Still hold the single-instance lock for this run.
@@ -281,7 +349,21 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::start_control;
+    use super::{start_control, termination_handler};
+
+    /// Review S4: a termination request marks the session clean and asks
+    /// the window to close, so the next start shows no crash window.
+    #[test]
+    fn termination_marks_clean_and_asks_to_stop() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = cl_host::AppPaths::at(dir.path().to_path_buf()).unwrap();
+        let (marker, _) = cl_host::begin_session(&paths).unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        termination_handler(Some(marker), std::sync::Arc::clone(&stop))();
+        assert!(stop.load(std::sync::atomic::Ordering::SeqCst));
+        let (_, last) = cl_host::begin_session(&paths).unwrap();
+        assert_eq!(last, cl_host::LastExit::Clean);
+    }
 
     #[test]
     fn no_flag_means_no_server_and_no_file() {

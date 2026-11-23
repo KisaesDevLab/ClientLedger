@@ -172,11 +172,13 @@ mod sensitive;
 // P32: Send to My Accountant and the IIF export.
 mod send_to_accountant;
 // P33: the office network.
+pub(crate) mod backups;
 pub(crate) mod lan;
 
 /// Every part of the English catalog.
-const TABLES: [&[(&str, &str)]; 63] = [
+const TABLES: [&[(&str, &str)]; 64] = [
     lan::ENGLISH,
+    backups::ENGLISH,
     send_to_accountant::ENGLISH,
     audit::ENGLISH,
     auth::ENGLISH,
@@ -630,6 +632,9 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("backup.done", "Backed up to {path}"),
     ("backup.export_done", "Exported to {path}"),
     ("backup.toast", "Backup finished."),
+    ("backup.on_close.done", "The company was backed up as it closed."),
+    ("backup.on_close.failed", "The backup when closing did not finish. The company closed anyway; back it up from File › Back Up Company."),
+    ("backup.on_close.busy", "No backup was made when closing: another backup or test restore was running. The company closed anyway."),
     ("delete.tab", "Delete Company"),
     ("delete.title", "Delete company"),
     ("delete.intro", "This removes {name} from this computer after taking one last backup."),
@@ -1362,7 +1367,7 @@ pub const ENGLISH: &[(&str, &str)] = &[
     ("home.attention.reorder.one", "1 item at or below its reorder point"),
     ("home.attention.reorder.open", "Reorder"),
     ("home.attention.reorder.name", "Items to reorder"),
-    ("home.attention.later", "To-dos and the weekly health check arrive in a later update."),
+    ("home.attention.later", "To-dos arrive in a later update."),
     ("home.attention.backup_due", "Not backed up since {when}"),
     ("home.attention.backup_never", "This company hasn't been backed up yet"),
     ("home.attention.back_up_now", "Back up now"),

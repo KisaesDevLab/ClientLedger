@@ -24,6 +24,8 @@ compile_error!(
     "the `test-support` feature is for tests only and must not be enabled in a release build"
 );
 
+/// Whole-database backup and restore with the supervisor stopped (P34 A4).
+pub mod cluster_ops;
 mod database;
 mod desktop;
 mod docread_worker;
@@ -39,6 +41,7 @@ mod procs;
 mod secrets;
 /// The background LAN host: start at sign-in, hand-over (P33).
 pub mod service;
+mod session_marker;
 mod supervisor;
 #[cfg(windows)]
 mod win_print;
@@ -73,6 +76,7 @@ pub use paths::{
     find_ocr_dir, tesseract_exe_name,
 };
 pub use secrets::EngineSecrets;
+pub use session_marker::{LastExit, MARKER_FILE, SessionMarker, begin_session};
 pub use supervisor::{
     Component, Endpoint, HostConfig, HostFault, HostSnapshot, HostState, HostStatus, RestartCounts,
     RestartPolicy, Supervisor, in_memory_stores, lan_generation,

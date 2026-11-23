@@ -52,7 +52,8 @@ use sha2::{Digest, Sha256};
 /// Since pin a3d9a509 (engine PRs #73, #75-#77, U-261 to U-266) the import
 /// batch create, list, read, commit and undo routes are; since pin d9b2e037
 /// (engine PR #78, U-267, U-271) the tie-out, verify, spot-check and batch
-/// transactions routes are.
+/// transactions routes are. Since pin f52b64ae (engine PRs #102, #103) the P34
+/// test restore (U-296) and Verify Data (U-12) routes are.
 pub const OUTSIDE_SPEC: [(&str, &str); 14] = [
     ("GET", "/api/v1/desktop/info"),
     ("GET", "/openapi.json"),

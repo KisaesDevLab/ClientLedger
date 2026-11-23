@@ -16,7 +16,15 @@ keyring = "4.2.0"
 postgres = "0.19.14"
 postgres-protocol = "0.6.12"
 sha2 = "0.11.1"
+# Free disk space for the restore limit (P34, Q-P34n); MIT, already in the tree
+# through cl-host.
+sysinfo = { version = "0.39.6", default-features = false, features = ["disk"] }
 tar = "0.4.46"
 thiserror = "2.0.21"
 tracing = "0.1.44"
 zeroize = { version = "1.9.1", default-features = false, features = ["alloc"] }
+
+[features]
+# Test-only SQL against the engine's database (P34 live tests). Never enabled
+# in a build users run.
+test-support = []

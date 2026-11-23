@@ -44,6 +44,7 @@ impl DatabaseService for FakeDb {
             port: 5999,
             pid: 0,
             url: Secret::new("postgres://app:FAKE-DB-PASSWORD@127.0.0.1:5999/db"),
+            recovered: false,
         })
     }
 

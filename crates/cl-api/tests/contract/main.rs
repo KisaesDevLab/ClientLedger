@@ -92,6 +92,9 @@ mod contract_team;
 mod contract_templates;
 mod contract_thresholds_1099;
 mod contract_transfer;
+// P34: test restore (U-296) and Verify Data (U-12).
+mod contract_integrity;
+mod contract_test_restore;
 #[path = "../support/imports_expect.rs"]
 mod imports_expect;
 #[path = "../support/payroll_expect.rs"]
@@ -1028,7 +1031,17 @@ fn main() -> std::process::ExitCode {
         (
             "transfer::export_preview_and_refusal_u284",
             contract_transfer::transfer_export_preview_and_refusal_u284,
-        ),        (
+        ),
+        // P34: test restore (U-296) and Verify Data (U-12).
+        (
+            "test_restore::passes_and_leaves_no_company_u296",
+            contract_test_restore::test_restore_passes_and_leaves_no_company_u296,
+        ),
+        (
+            "integrity::verify_data_on_a_healthy_company_u12",
+            contract_integrity::verify_data_on_a_healthy_company_u12,
+        ),
+        (
             "iif::transaction_list_ties_to_the_trial_balance_t9",
             contract_iif::transaction_list_ties_to_the_trial_balance_t9,
         ),
