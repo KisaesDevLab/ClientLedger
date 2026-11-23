@@ -312,6 +312,13 @@ struct Inner {
     boot_epoch: u64,
     /// Set while the database runs (Q-335).
     statistics: Option<StatisticsRefresher>,
+    /// Some database start of this supervisor followed a crash, so
+    /// `PostgreSQL` replayed its write-ahead log (P34, crash recovery view).
+    database_recovered: bool,
+    /// The engine's database URL while the database runs (live tests seed
+    /// faults through it).
+    #[cfg(feature = "test-support")]
+    database_url: Option<Secret>,
 }
 
 /// Status and endpoint read together. See [`Supervisor::snapshot`].
@@ -462,6 +469,9 @@ impl Supervisor {
                 },
                 endpoint: None,
                 statistics: None,
+                database_recovered: false,
+                #[cfg(feature = "test-support")]
+                database_url: None,
                 boot_epoch: next_boot_epoch(&config.paths.root().join("engine-epoch")),
             }),
             changed: Condvar::new(),
@@ -684,6 +694,38 @@ impl Supervisor {
         refresher.ok_or(HostError::NotRunning)?.run()
     }
 
+    /// True when a database start of this supervisor followed a crash: the
+    /// server found a dead server's lock file and replayed its write-ahead
+    /// log (cl-pg [`cl_pg::Running::recovered`]). The crash recovery view
+    /// says "the database replayed its journal" only when this is true.
+    #[must_use]
+    pub fn database_recovered(&self) -> bool {
+        self.shared
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .database_recovered
+    }
+
+    /// Run SQL on the engine's database as the application role (live
+    /// tests seed integrity faults). Compiled only with `test-support`.
+    ///
+    /// # Errors
+    /// [`HostError::NotRunning`] while the database is down; the
+    /// database's error otherwise.
+    #[cfg(feature = "test-support")]
+    pub fn exec_sql_for_tests(&self, sql: &str) -> Result<()> {
+        let url = self
+            .shared
+            .inner
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .database_url
+            .clone()
+            .ok_or(HostError::NotRunning)?;
+        cl_pg::exec_sql_for_tests(&url, sql).map_err(HostError::from)
+    }
+
     /// Stop the engine, then the database, and wait for both.
     pub fn stop(mut self) {
         self.shutdown();
@@ -900,9 +942,19 @@ impl Worker {
                         self.log.info("database ready");
                         scrub_values.push(ep.url.clone());
                         let statistics = db.statistics(&ep);
+                        if ep.recovered {
+                            self.log.warn(
+                                "the database was not shut down cleanly; it replayed its journal",
+                            );
+                        }
                         self.shared.update(|i| {
                             i.status.database_pid = Some(ep.pid);
                             i.statistics = statistics;
+                            i.database_recovered |= ep.recovered;
+                            #[cfg(feature = "test-support")]
+                            {
+                                i.database_url = Some(ep.url.clone());
+                            }
                         });
                         db_ep = Some(ep);
                     }

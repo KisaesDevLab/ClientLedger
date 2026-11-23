@@ -22,6 +22,9 @@ pub struct DbEndpoint {
     pub pid: u32,
     /// `DATABASE_URL` for the engine (contains the role password).
     pub url: Secret,
+    /// This start followed a crash: the server replayed its write-ahead
+    /// log (cl-pg `Running::recovered`).
+    pub recovered: bool,
 }
 
 /// A database the supervisor can start, watch, and stop.
@@ -160,6 +163,7 @@ impl DatabaseService for PgService {
             port: running.port,
             pid: running.pid,
             url: Cluster::app_url(running.port, APP_ROLE, APP_DATABASE, &self.app_password),
+            recovered: running.recovered,
         })
     }
 
