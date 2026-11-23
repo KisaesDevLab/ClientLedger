@@ -331,6 +331,37 @@ async fn a_changed_or_wrong_file_is_a_failed_test_not_an_error() {
     );
 }
 
+/// Q-P34bi: no disk space (or a busy engine) says nothing about the file:
+/// an error, and nothing recorded on the backup.
+#[tokio::test]
+async fn an_engine_that_could_not_run_it_records_nothing() {
+    let dir = tempfile::tempdir().expect("tmp");
+    let server = engine(&["tenant-archive-v1", TEST_CAP]).await;
+    let s = session(&server, false).await;
+    let (store, secrets) = stores(dir.path());
+    let (p, sha) = recorded_backup(&store, dir.path());
+    mount_test_job(
+        &server,
+        json!({"jobId":"job_t","kind":"test-restore","status":"failed",
+            "error":{"code":"INSUFFICIENT_STORAGE","message":"full"}}),
+    )
+    .await;
+    let e = test_restore(&s, &store, &secrets, &p, &cl_company::backup::silent())
+        .await
+        .expect_err("could not run");
+    assert!(
+        matches!(&e, CompanyError::JobFailed { code } if code == "INSUFFICIENT_STORAGE"),
+        "{e:?}"
+    );
+    let list = store.load().expect("load");
+    let b = list
+        .get(t(T1))
+        .expect("c")
+        .backup_by_sha256(&sha)
+        .expect("b");
+    assert_eq!(b.tested, None);
+}
+
 #[tokio::test]
 async fn without_the_capability_nothing_is_sent() {
     let dir = tempfile::tempdir().expect("tmp");

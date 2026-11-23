@@ -708,7 +708,10 @@ pub(crate) async fn backup_ungated(
         tested: None,
     };
     let dest_dir = req.dest_dir.clone();
-    let keep = opts.keep;
+    // One folder, one rule (Q-P34bj): a backup into the schedule's folder
+    // (manual, on close, before a transfer) prunes by the schedule's
+    // values, never by the defaults.
+    let keep = opts.keep.or_else(|| schedule_keep(&rec, &dest_dir));
     // Retention only after the copy verified (Q-P34j).
     let pruned = store.update(|l| {
         l.record_backup(req.tenant_id, record.clone());
@@ -722,6 +725,18 @@ pub(crate) async fn backup_ungated(
         bytes,
         pruned,
     })
+}
+
+/// The schedule's retention when `dir` is the company's schedule folder.
+#[must_use]
+pub fn schedule_keep(rec: &cl_settings::CompanyRecord, dir: &Path) -> Option<(usize, u32)> {
+    let s = rec.schedule.as_ref()?;
+    let same = s.folder == dir
+        || matches!(
+            (std::path::absolute(&s.folder), std::path::absolute(dir)),
+            (Ok(a), Ok(b)) if a == b
+        );
+    same.then_some((s.keep_last, s.keep_months))
 }
 
 /// The retention a backup asked for: regular backups by
@@ -979,6 +994,25 @@ mod tests {
             assert_eq!(!dir.path().join(n).exists(), gone, "{n}");
         }
         assert_eq!(sweep_parts(&dir.path().join("missing"), "Ozark Ridge"), 0);
+    }
+
+    #[test]
+    fn the_schedule_folder_keeps_the_schedules_rule() {
+        let mut rec = cl_settings::CompanyRecord::new(
+            cl_core::ids::TenantId::parse("1b0c4e8e-6f6e-4c1d-8a37-6c1f4d8e9a01").expect("id"),
+            "Ozark",
+            cl_settings::ACCENT_PALETTE[0],
+        );
+        let dir = Path::new("E:/Backups");
+        assert_eq!(schedule_keep(&rec, dir), None);
+        rec.schedule = Some(cl_settings::BackupSchedule {
+            folder: dir.to_path_buf(),
+            keep_last: 3,
+            keep_months: 2,
+            ..cl_settings::BackupSchedule::default()
+        });
+        assert_eq!(schedule_keep(&rec, dir), Some((3, 2)));
+        assert_eq!(schedule_keep(&rec, Path::new("F:/Elsewhere")), None);
     }
 
     #[tokio::test]

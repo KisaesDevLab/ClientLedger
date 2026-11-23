@@ -28,8 +28,7 @@ pub mod reason {
     pub const TRANSFER_FILE: &str = "TRANSFER_FILE";
     /// Written by a newer `ClientLedger`.
     pub const TOO_NEW: &str = "ARCHIVE_TOO_NEW";
-    /// The file is gone or cannot be read.
-    pub const UNREADABLE: &str = "UNREADABLE";
+
     /// The restored books did not match the file (trial balance, counts,
     /// content or totals).
     pub const MISMATCH: &str = "VERIFY_MISMATCH";
@@ -74,18 +73,30 @@ pub fn local_refusal(e: &CompanyError) -> Option<&'static str> {
         CompanyError::NotABackup => Some(reason::NOT_A_BACKUP),
         CompanyError::TransferNotABackup => Some(reason::TRANSFER_FILE),
         CompanyError::ArchiveTooNew => Some(reason::TOO_NEW),
-        CompanyError::Io { .. } => Some(reason::UNREADABLE),
+        // A read error (a drive gone, a cloud-sync lock) says nothing
+        // about the file: an error, never a failed test.
         _ => None,
     }
+}
+
+/// True for an engine job code that is a verdict about the file itself
+/// (`ARCHIVE_CORRUPT`, `ARCHIVE_PASSPHRASE_INVALID`, `ARCHIVE_TOO_NEW`,
+/// `ARCHIVE_VERIFY_FAILED`, …): every such code starts `ARCHIVE_`.
+/// `INSUFFICIENT_STORAGE`, `TENANT_BUSY`, `TIMEOUT` and the like are not.
+#[must_use]
+pub fn is_file_verdict(code: &str) -> bool {
+    code.starts_with("ARCHIVE_")
 }
 
 /// Test-restores a backup file. Waits for [`GATE`].
 ///
 /// # Errors
 /// `Unavailable` without `tenant-archive-test-restore-v1`; `NoPassphrase`;
-/// `Api` and `JobFailed` (`TIMEOUT`, `JOB_UNKNOWN`) when the engine could
-/// not be asked. A file the app or the engine refuses (changed, damaged,
-/// wrong passphrase, too new) is a failed test, not an error.
+/// `Io` when the file cannot be read; `Api` and `JobFailed` (`TIMEOUT`,
+/// `JOB_UNKNOWN`, `INSUFFICIENT_STORAGE`, `TENANT_BUSY`) when the engine
+/// could not run it; nothing is recorded then. A file the app or the
+/// engine refuses (changed, damaged, wrong passphrase, too new, did not
+/// verify) is a failed test, not an error.
 pub async fn test_restore(
     session: &Session,
     store: &RecentStore,
@@ -101,6 +112,7 @@ pub async fn test_restore(
 ///
 /// # Errors
 /// As [`test_restore`].
+#[allow(clippy::too_many_lines, reason = "one linear sequence of steps")]
 pub(crate) async fn test_restore_ungated(
     session: &Session,
     store: &RecentStore,
@@ -166,9 +178,15 @@ pub(crate) async fn test_restore_ungated(
         recorded: false,
     };
     if status.status == JobState::Failed {
-        // Wrong passphrase, damaged, too new, no disk space: the engine's
-        // code is the reason (never a path).
         let code = status.error_code();
+        if !is_file_verdict(&code) {
+            // No disk space, busy, an engine fault: nothing is known about
+            // the file, so nothing is recorded (Q-P34bi).
+            tracing::warn!(code = %code, "test restore: could not run");
+            return Err(CompanyError::JobFailed { code });
+        }
+        // Wrong passphrase, damaged, too new, did not verify: the
+        // engine's code is the reason (never a path).
         tracing::info!(code = %code, "test restore: the engine refused the file");
         out.test.reason = Some(code);
     } else {
