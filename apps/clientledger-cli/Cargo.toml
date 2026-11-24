@@ -14,6 +14,9 @@ cl-core = { path = "../../crates/cl-core" }
 # A03 step 19: `read` prints the worker's reading (types only, no worker parsers).
 cl-docread = { path = "../../crates/cl-docread" }
 cl-host = { path = "../../crates/cl-host" }
+# A11 D4: `mcp`, the stdio relay (protocol and frames) and the keychain token.
+cl-mcp = { path = "../../crates/cl-mcp" }
+cl-settings = { path = "../../crates/cl-settings" }
 # P29 WP9 `qa seed`: the QA company through real engine routes. Only in a
 # build with the `qa-seed` feature (`cargo xtask qa-company`), never in a
 # release build (security review minor 9: it holds fixed QA passwords).
@@ -21,13 +24,15 @@ cl-api = { path = "../../crates/cl-api", optional = true }
 cl-company = { path = "../../crates/cl-company", optional = true }
 cl-model = { path = "../../crates/cl-model", optional = true }
 cl-pg = { path = "../../crates/cl-pg", optional = true }
-cl-settings = { path = "../../crates/cl-settings", optional = true }
 tokio = { version = "1.53.3", features = ["rt-multi-thread", "time"], optional = true }
 # `read`: the owner's today. MIT OR Apache-2.0 (already used by cl-ui).
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 ctrlc = "3.5.2"
 serde_json = "1.0.154"
 
+[dev-dependencies]
+tempfile = "3.27.0"
+
 [features]
 # `clientledger-cli qa seed` (developer QA only; `cargo xtask qa-company` turns it on).
-qa-seed = ["dep:cl-api", "dep:cl-company", "dep:cl-model", "dep:cl-pg", "dep:cl-settings", "dep:tokio"]
+qa-seed = ["dep:cl-api", "dep:cl-company", "dep:cl-model", "dep:cl-pg", "dep:tokio"]

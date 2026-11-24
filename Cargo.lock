@@ -1137,11 +1137,13 @@ dependencies = [
  "cl-core",
  "cl-docread",
  "cl-host",
+ "cl-mcp",
  "cl-model",
  "cl-pg",
  "cl-settings",
  "ctrlc",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

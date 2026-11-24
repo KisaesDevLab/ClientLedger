@@ -6,6 +6,7 @@
 
 mod host;
 mod lan;
+mod mcp;
 #[cfg(feature = "qa-seed")]
 mod qa;
 mod read;
@@ -19,6 +20,7 @@ clientledger-cli
 Usage:
   clientledger-cli host status|start|stop|logs [options]
   clientledger-cli lan install|uninstall|status [options]
+  clientledger-cli mcp --connection <id> [--data-dir <path>]
   clientledger-cli read <file> [--json]
   clientledger-cli ui --control <path> <method> [arguments]
   clientledger-cli tools
@@ -33,6 +35,7 @@ fn main() -> ExitCode {
     match args.first().map(String::as_str) {
         Some("host") => host::run(&args[1..]),
         Some("lan") => lan::run(&args[1..]),
+        Some("mcp") => mcp::run(&args[1..]),
         Some("read") => read::run(&args[1..]),
         Some("ui") => ui::run_ui(&args[1..]),
         Some("tools") => ui::run_tools(),
