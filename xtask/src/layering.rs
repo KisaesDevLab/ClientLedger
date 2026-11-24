@@ -7,7 +7,7 @@
 use crate::meta::Member;
 
 /// Crates that sit below `cl-ui`: they may not depend on `cl-ui` or on apps.
-const BELOW_UI: [&str; 13] = [
+const BELOW_UI: [&str; 14] = [
     "cl-core",
     "cl-api",
     "cl-pg",
@@ -22,6 +22,8 @@ const BELOW_UI: [&str; 13] = [
     "cl-lan",
     // A03: reading rules and the worker protocol (no I/O).
     "cl-docread",
+    // A11: the MCP bookkeeper's form mapping, tools and bridge (no egui).
+    "cl-mcp",
 ];
 
 /// Crates allowed to depend directly on the egui family.
@@ -44,6 +46,9 @@ fn allowed_internal(name: &str) -> Option<Vec<&'static str>> {
             below(&["cl-core"])
         }
         "cl-grid" => below(&["cl-core", "cl-model"]),
+        // A11 (Q-A11l): the shared form mapping reads cl-model form state and
+        // builds cl-api requests; transports and secrets stay in the host.
+        "cl-mcp" => below(&["cl-core", "cl-model", "cl-api"]),
         // Everything except apps (and itself).
         "cl-ui" => Some(BELOW_UI.to_vec()),
         // Remaining library crates may use anything below the UI.
@@ -353,6 +358,25 @@ mod tests {
             test_features_in_tree("cl-lan feature \"lan-test-listener\"\n").len(),
             1
         );
+    }
+
+    #[test]
+    fn mcp_uses_only_core_model_and_api() {
+        assert_eq!(
+            check(&[m(
+                "cl-mcp",
+                &[("cl-core", true), ("cl-model", true), ("cl-api", true)]
+            )]),
+            Vec::<String>::new()
+        );
+        for bad in ["cl-host", "cl-settings", "cl-ui", "clientledger"] {
+            assert_eq!(check(&[m("cl-mcp", &[(bad, true)])]).len(), 1, "{bad}");
+        }
+        assert_eq!(check(&[m("cl-mcp", &[("egui", false)])]).len(), 1);
+        // The UI and the host may call the shared mapping.
+        for user in ["cl-ui", "cl-host"] {
+            assert!(check(&[m(user, &[("cl-mcp", true)])]).is_empty(), "{user}");
+        }
     }
 
     #[test]

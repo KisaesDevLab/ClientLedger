@@ -1,0 +1,17 @@
+[package]
+name = "cl-mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "MCP bookkeeper (A11): the shared form-to-request mapping, the allow-listed tool table, policy, the bridge to the local engine, the applier and undo planner."
+
+[dependencies]
+cl-api = { path = "../cl-api" }
+cl-core = { path = "../cl-core" }
+cl-model = { path = "../cl-model" }
+# Error enums (MIT OR Apache-2.0; already in the tree).
+thiserror = "2.0.21"
+
+[lints]
+workspace = true

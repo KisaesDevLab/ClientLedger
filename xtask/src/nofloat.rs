@@ -20,7 +20,7 @@ use std::path::{Path, PathBuf};
 use syn::visit::Visit;
 
 /// Directories (and single files) scanned, relative to the repo root.
-pub const SCAN_DIRS: [&str; 8] = [
+pub const SCAN_DIRS: [&str; 9] = [
     "crates/cl-core/src",
     "crates/cl-api/src",
     // Entry rules (amounts, calculator, dates) and the grid core (Q-P10b).
@@ -36,6 +36,8 @@ pub const SCAN_DIRS: [&str; 8] = [
     // The one RunRef every Report Builder run sends (A08 plan §4); a file,
     // not a directory: the editor's screens draw with egui's float geometry.
     "crates/cl-ui/src/screens/reports/builder_ref.rs",
+    // A11: the shared form-to-request mapping and the MCP bridge (money).
+    "crates/cl-mcp/src",
 ];
 
 /// Files inside [`SCAN_DIRS`] that may use floating point for page geometry
