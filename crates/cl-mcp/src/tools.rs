@@ -840,6 +840,54 @@ mod tests {
         }
     }
 
+    /// Every step is a route the desktop's typed client already covers
+    /// (`cl-api/operations.txt`), so the bridge sends what the forms send.
+    /// The routes cl-api does not cover yet are named, each with why.
+    #[test]
+    fn every_step_is_a_route_cl_api_covers() {
+        const NOT_IN_CL_API: &[(&str, &str)] = &[
+            ("GET /api/v1/banking/reconciliations/preview", "U-300, new"),
+            ("GET /api/v1/mcp-actions/{id}", "U-300, new"),
+            // The engine has them (checked below); the bridge's client adds
+            // them in D2.
+            (
+                "GET /api/v1/payments/write-off-recoveries/{id}",
+                "D2: one recovery's read",
+            ),
+            (
+                "POST /api/v1/banking/statement-lines/{lineId}/confirm",
+                "D2: review S11's match",
+            ),
+            ("GET /api/v1/reports/catalog", "D2: the catalog read"),
+            // D2 maps `run` onto the fixed report routes cl-api covers.
+            (
+                "GET /api/v1/reports/{report}",
+                "D2: one fixed route per report",
+            ),
+        ];
+        let text = include_str!("../../cl-api/operations.txt");
+        let covered: HashSet<String> = text
+            .lines()
+            .filter(|l| !l.starts_with('#'))
+            .filter_map(|l| {
+                let mut p = l.split_whitespace();
+                Some(format!("{} {}", p.next()?, p.next()?))
+            })
+            .collect();
+        let mut missing = Vec::new();
+        for (t, a, s) in routes() {
+            let key = format!("{} {}", s.method, s.template);
+            if !covered.contains(&key) && !NOT_IN_CL_API.iter().any(|(k, _)| *k == key) {
+                missing.push(format!("{}.{}: {key}", t.name, a.name));
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "not in cl-api/operations.txt:\n{}",
+            missing.join("\n")
+        );
+    }
+
     /// The stale classes declared here are the engine's (`x-stale` in its
     /// `OpenAPI` export). Reads `engine/openapi.json`, or the file named by
     /// `CL_ENGINE_OPENAPI`; routes the pin does not have yet (U-300's

@@ -6,7 +6,10 @@
 //! a human save send identical JSON. The engine enforces every rule again
 //! (plan §1), so a bridge bug cannot widen access.
 //!
-//! No egui here (layering): `cl-ui` calls [`forms`]; the host owns transports.
+//! No egui here (layering): `cl-ui` calls [`forms`]. [`protocol`] answers MCP over a
+//! [`protocol::Bridge`]; [`transport`] is the loopback listener the host starts
+//! and the frames [`relay`] (`clientledger-cli mcp`) sends it; the host owns the
+//! endpoint file and the keychain. Only `cl-lan` binds a LAN address.
 //! Money is exact: `cl_core::Money` and `rust_decimal`, never floats.
 #![forbid(unsafe_code)]
 #![deny(

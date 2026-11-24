@@ -655,6 +655,102 @@ pub(crate) mod tests {
         );
     }
 
+    /// Plan section 8 row 1: for every switch set, review setting,
+    /// Delete/Void availability and connection state, the bridge is called
+    /// for exactly the actions the policy allows, and `tools/list` offers
+    /// exactly those.
+    #[test]
+    fn the_bridge_gets_only_what_the_switches_allow() {
+        use crate::tools::TOOLS;
+        let states = [
+            ConnectionState::Active,
+            ConnectionState::Revoked,
+            ConnectionState::Unconfirmed,
+        ];
+        for bits in 0u32..64 {
+            for reinstate in [false, true] {
+                for state in states {
+                    let mut s = Switches {
+                        on: bits & 1 == 1,
+                        ..Switches::default()
+                    };
+                    for (i, c) in Class::ALL.into_iter().enumerate() {
+                        s.set(c, bits & (2 << i) != 0);
+                        s.set_review(c, (bits >> i) & 1 == 0);
+                    }
+                    let b = Fake::new(s);
+                    {
+                        let mut p = b.policy.lock().expect("lock");
+                        if let Ok(p) = p.as_mut() {
+                            p.reinstate = reinstate;
+                            p.connection = state;
+                        }
+                    }
+                    let p = b.policy.lock().expect("lock").clone().expect("policy");
+                    let listed = ask(&b, "tools/list", &json!({}));
+                    let listed: Vec<(String, Vec<String>)> = listed["result"]["tools"]
+                        .as_array()
+                        .expect("tools")
+                        .iter()
+                        .map(|t| {
+                            let actions = t["inputSchema"]["properties"]["action"]["enum"]
+                                .as_array()
+                                .expect("enum")
+                                .iter()
+                                .map(|a| a.as_str().expect("str").to_string())
+                                .collect();
+                            (t["name"].as_str().expect("name").to_string(), actions)
+                        })
+                        .collect();
+                    for t in TOOLS {
+                        for a in t.actions {
+                            let allowed = policy::decide_action(&p, t, a).ok();
+                            let shown = listed
+                                .iter()
+                                .any(|(n, acts)| n == t.name && acts.iter().any(|x| x == a.name));
+                            assert_eq!(
+                                shown,
+                                allowed.is_some(),
+                                "{}.{} {bits} {state:?}",
+                                t.name,
+                                a.name
+                            );
+                            let before = b.calls.lock().expect("lock").len();
+                            let r = ask(
+                                &b,
+                                "tools/call",
+                                &json!({"name": t.name, "arguments": {"action": a.name}}),
+                            );
+                            let after = b.calls.lock().expect("lock").len();
+                            let host_answered = t.name == "mcp_status" && a.name == "get";
+                            match allowed {
+                                Some(ok) if !host_answered => {
+                                    assert_eq!(after, before + 1, "{}.{}", t.name, a.name);
+                                    assert_eq!(b.calls.lock().expect("lock")[before].2, ok);
+                                }
+                                _ => {
+                                    assert_eq!(after, before, "{}.{} {bits}", t.name, a.name);
+                                    if allowed.is_none() {
+                                        assert_eq!(r["result"]["isError"], true);
+                                    }
+                                }
+                            }
+                            // Review on for any class it needs: it waits.
+                            if let Some(ok) = allowed {
+                                let wants = a.classes.iter().any(|&c| s.reviewed(c));
+                                assert_eq!(ok.review, wants);
+                                assert!(
+                                    !a.classes.contains(&Class::DeleteVoid) || reinstate,
+                                    "Delete/Void only with reinstate"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn titles_read_as_words() {
         assert_eq!(title("bill_change"), "Bill change");
