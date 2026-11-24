@@ -19,6 +19,7 @@ pub mod daily_sales;
 pub mod deposit;
 pub mod invoice;
 pub mod journal;
+pub mod lists;
 pub mod loan_payment;
 pub mod owner_money;
 pub mod payment;

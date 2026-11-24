@@ -102,14 +102,7 @@ pub fn roles_of(t: ContactType) -> Roles {
 }
 
 /// The engine contact type of roles.
-#[must_use]
-pub fn api_roles(r: Roles) -> ContactType {
-    match r {
-        Roles::Client => ContactType::Customer,
-        Roles::Vendor => ContactType::Vendor,
-        Roles::Both => ContactType::Both,
-    }
-}
+pub use cl_mcp::forms::lists::api_roles;
 
 /// The list entry of an engine contact.
 #[must_use]

@@ -6,7 +6,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use cl_api::{Account, AccountReport, AccountReportLine, AccountType, ReportDate};
+use cl_api::{Account, AccountReport, AccountReportLine, ReportDate};
 use cl_core::CalendarDate;
 use cl_core::ids::AccountId;
 use cl_grid::{
@@ -14,7 +14,7 @@ use cl_grid::{
     RowModel, RowState, SelectionMode, TextKey, WidthSpec,
 };
 use cl_model::amount_entry::AmountRules;
-use cl_model::lists::accounts::{AccountKind, Chart, ChartEntry, ChartFilter, detail_label};
+use cl_model::lists::accounts::{Chart, ChartEntry, ChartFilter, detail_label};
 use cl_model::register::DisplaySign;
 
 use crate::i18n::t;
@@ -92,19 +92,7 @@ pub fn chart_spec(numbers: bool, compact: bool) -> GridSpec {
 }
 
 /// The engine type for a list kind.
-#[must_use]
-pub fn api_type(kind: AccountKind) -> AccountType {
-    match kind {
-        AccountKind::Asset => AccountType::Asset,
-        AccountKind::Liability => AccountType::Liability,
-        AccountKind::Equity => AccountType::Equity,
-        AccountKind::Income => AccountType::Revenue,
-        AccountKind::Cogs => AccountType::Cogs,
-        AccountKind::Expense => AccountType::Expense,
-        AccountKind::OtherIncome => AccountType::OtherRevenue,
-        AccountKind::OtherExpense => AccountType::OtherExpense,
-    }
-}
+pub use cl_mcp::forms::lists::api_type;
 
 /// The list kind of an engine type (shared with the MCP tools, A11 D0).
 pub use cl_mcp::forms::accounts::kind_of;

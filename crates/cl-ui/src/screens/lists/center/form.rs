@@ -14,12 +14,12 @@ use cl_core::Money;
 use cl_core::ids::{AccountId, ContactId};
 use cl_model::forms::{AfterSave, FormState, SaveIntent, SaveStart};
 use cl_model::lists::contacts::{
-    AddressDraft, CheckedContact, ContactDraft, ContactField, ContactProblem, Role, Roles,
-    TaxIdKind, Terms, TermsChoice, check, masked_tax_id,
+    AddressDraft, ContactDraft, ContactField, ContactProblem, Role, Roles, TaxIdKind, Terms,
+    TermsChoice, check, masked_tax_id,
 };
 use eframe::egui::{self, RichText, Ui};
 
-use super::model::{api_roles, roles_of};
+use super::model::roles_of;
 use super::{CenterScreen, Panel};
 use crate::company::Task;
 use crate::i18n::{t, t_with};
@@ -84,13 +84,6 @@ pub(super) fn kind_of(t: Option<TinType>) -> Option<TaxIdKind> {
     t.map(|t| match t {
         TinType::Ssn => TaxIdKind::Ssn,
         TinType::Ein => TaxIdKind::Ein,
-    })
-}
-
-fn tin_of(k: Option<TaxIdKind>) -> Option<TinType> {
-    k.map(|k| match k {
-        TaxIdKind::Ssn => TinType::Ssn,
-        TaxIdKind::Ein => TinType::Ein,
     })
 }
 
@@ -258,49 +251,8 @@ impl FormPanel {
     }
 }
 
-/// Engine fields for a checked draft, keeping what the form does not edit
-/// (countries, default tag) and, for a contact without the vendor role,
-/// its vendor fields as they were.
-fn fields_for(checked: &CheckedContact, existing: Option<&ContactFields>) -> ContactFields {
-    let mut f = existing
-        .cloned()
-        .unwrap_or_else(|| ContactFields::named(api_roles(checked.roles), checked.name.clone()));
-    f.contact_type = api_roles(checked.roles);
-    f.display_name.clone_from(&checked.name);
-    f.company_name.clone_from(&checked.company);
-    f.first_name.clone_from(&checked.first);
-    f.last_name.clone_from(&checked.last);
-    f.email.clone_from(&checked.email);
-    f.phone.clone_from(&checked.phone);
-    let [l1, l2, city, state, zip] = checked.billing.clone();
-    (
-        f.billing_line1,
-        f.billing_line2,
-        f.billing_city,
-        f.billing_state,
-        f.billing_zip,
-    ) = (l1, l2, city, state, zip);
-    let [l1, l2, city, state, zip] = checked.shipping.clone();
-    (
-        f.shipping_line1,
-        f.shipping_line2,
-        f.shipping_city,
-        f.shipping_state,
-        f.shipping_zip,
-    ) = (l1, l2, city, state, zip);
-    f.default_payment_terms.clone_from(&checked.terms);
-    f.notes.clone_from(&checked.notes);
-    if checked.roles.has(Role::Vendor) {
-        f.default_expense_account_id = checked.expense_account;
-        f.vendor_account_number.clone_from(&checked.vendor_account);
-        f.is1099_eligible = checked.track_1099;
-        // An empty field keeps the tax ID on file unless it was removed.
-        if checked.tax_id.is_some() || checked.clear_tax_id || existing.is_none() {
-            f.tax_id.clone_from(&checked.tax_id);
-        }
-    }
-    f
-}
+/// Engine fields for a checked draft (A11 D0: shared with the MCP tools).
+use cl_mcp::forms::lists::contact_fields as fields_for;
 
 impl CenterScreen {
     /// Alt+N / Alt+S / Enter in a field. Returns true when the save
@@ -368,13 +320,8 @@ impl CenterScreen {
                 .or_else(|| self.contacts.iter().find(|c| c.id == id).cloned())
         });
         let fields = fields_for(&checked, existing.as_ref().map(|c| &c.fields));
-        let vendor = checked.roles.has(Role::Vendor);
-        let (kind0, backup0) = panel.profile_before;
-        let update = Vendor1099Update {
-            tin_type: (vendor && checked.tax_id_kind != kind0).then(|| tin_of(checked.tax_id_kind)),
-            backup_withholding: (vendor && checked.backup_withholding != backup0)
-                .then_some(checked.backup_withholding),
-        };
+        let update = cl_mcp::forms::lists::vendor_1099_update(&checked, panel.profile_before);
+
         let profile_ok = self
             .link
             .rights()

@@ -831,37 +831,8 @@ impl ItemsScreen {
             }
             SaveStart::Busy | SaveStart::Unconfirmed => return false,
         }
-        let opening = part.opening.map(|o| cl_api::OpeningStock {
-            quantity: o.quantity,
-            value: o.value,
-            as_of: o.as_of,
-        });
-        let fields = ItemFields {
-            purchase: cl_api::ItemPurchase {
-                purchase_description: part.purchase_description,
-                purchase_cost: part.cost,
-                expense_account_id: part.expense_account,
-                asset_account_id: part.asset_account,
-                cogs_account_id: part.cogs_account,
-                preferred_vendor_id: part.preferred_vendor,
-                reorder_point: part.reorder_point,
-                reorder_quantity: part.reorder_quantity,
-                unit_label: part.unit_label,
-                unit_set_id: part.unit_set,
-                default_purchase_unit_id: part.purchase_unit,
-                default_sale_unit_id: part.sale_unit,
-            },
-            name: checked.name,
-            description: checked.description,
-            unit_price: checked.price,
-            income_account_id: checked.income_account,
-            is_taxable: checked.taxable,
-            item_type: type_of(checked.kind),
-            discount_percent: checked
-                .discount_percent
-                .and_then(|q| cl_api::SignedPercent::parse(&q.to_wire()).ok()),
-            tax_code_id: checked.tax_code,
-        };
+        let opening = cl_mcp::forms::lists::opening_stock(&part);
+        let fields = cl_mcp::forms::lists::item_fields(checked, part);
         // P33: an edit is guarded by the item as the panel opened it,
         // never by the list as it is now (a refresh would hide their change).
         let editing = panel.editing;
@@ -1600,18 +1571,6 @@ fn kind_of(t: cl_api::ItemType) -> ItemKind {
         cl_api::ItemType::Discount => ItemKind::Discount,
         cl_api::ItemType::Subtotal => ItemKind::Subtotal,
         cl_api::ItemType::InventoryPart => ItemKind::InventoryPart,
-    }
-}
-
-/// The engine's item type of a kind.
-fn type_of(k: ItemKind) -> cl_api::ItemType {
-    match k {
-        ItemKind::Service => cl_api::ItemType::Service,
-        ItemKind::NonInventory => cl_api::ItemType::NonInventory,
-        ItemKind::OtherCharge => cl_api::ItemType::OtherCharge,
-        ItemKind::Discount => cl_api::ItemType::Discount,
-        ItemKind::Subtotal => cl_api::ItemType::Subtotal,
-        ItemKind::InventoryPart => cl_api::ItemType::InventoryPart,
     }
 }
 

@@ -47,9 +47,7 @@ use cl_model::{CommandId, Scope, commands};
 use eframe::egui::{self, RichText, Ui};
 use serde_json::{Value, json};
 
-use self::model::{
-    COL_NAME, ChartModel, ReportModel, api_type, chart_spec, detail_text, report_spec,
-};
+use self::model::{COL_NAME, ChartModel, ReportModel, chart_spec, detail_text, report_spec};
 use crate::company::{CompanyLink, Task};
 use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
@@ -794,14 +792,8 @@ impl ChartScreen {
             || checked.name.clone(),
             |a| crate::account_names::stored_name(a, &checked.name),
         );
-        let fields = AccountFields {
-            name,
-            account_number: checked.number.clone(),
-            account_type: api_type(checked.kind),
-            detail_type: checked.detail.clone(),
-            description: checked.description.clone(),
-            parent_id: checked.parent,
-        };
+        let fields = cl_mcp::forms::lists::account_fields(&checked, name);
+
         let sensitive = checked.sensitive;
         // "Card ends in" (A03): only when the engine stores it and the
         // account is a credit card; `None` clears it.
