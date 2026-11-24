@@ -21,5 +21,6 @@ pub mod claude_desktop;
 pub mod forms;
 pub mod policy;
 pub mod protocol;
+pub mod relay;
 pub mod tools;
 pub mod undo;
