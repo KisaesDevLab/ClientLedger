@@ -691,6 +691,12 @@ mod tests {
             // An exact NOT_A_TOOL entry and a tool contradict each other; a
             // prefix entry may cover verbs a tool names.
             let exact = NOT_A_TOOL.iter().any(|(n, _)| *n == id);
+            // A window needs a tool or its own row: a prefix row covers only
+            // in-window keys, so a new window can never pass unnoticed.
+            assert!(
+                !c.opens || tool || exact,
+                "window {id} needs a tool or an exact NOT_A_TOOL row"
+            );
             assert!(!(tool && exact), "{id} is a tool and in NOT_A_TOOL");
         }
     }
@@ -850,6 +856,13 @@ mod tests {
             std::path::PathBuf::from,
         );
         let Ok(text) = std::fs::read_to_string(&path) else {
+            // CI runs with the submodule checked out (CL_API_REQUIRE=1, as
+            // cl-api's spec checks): there a missing file fails.
+            assert!(
+                std::env::var("CL_API_REQUIRE").as_deref() != Ok("1"),
+                "{} is missing",
+                path.display()
+            );
             eprintln!(
                 "NOTE: {} is not here (engine submodule not checked out)",
                 path.display()

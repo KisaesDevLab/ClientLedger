@@ -119,6 +119,10 @@ pub fn request_line(
 pub const WRONG_KEY: &str = "ClientLedger refused the connection. Close the AI app and open it \
      again; if it keeps happening, connect again in ClientLedger: Settings \u{203a} Claude Desktop.";
 
+/// What the agent is told when a message is too large to send.
+pub const TOO_LARGE: &str =
+    "The request is too large (at most 256 KB). Send fewer lines at a time.";
+
 /// Answer one request frame (the part shared by the loopback listener and
 /// the LAN host's `/cl-mcp`, which passes the pinned `device` and no key).
 #[must_use]
@@ -146,19 +150,24 @@ pub fn answer_frame(
     if let Err(why) = auth.check(connection, frame["token"].as_str().unwrap_or(""), device) {
         return refused(&why);
     }
-    let fingerprint = bridge
-        .policy(connection)
-        .map(|p| policy::fingerprint(&p))
-        .unwrap_or_default();
-    let answer = match frame["kind"].as_str() {
-        Some("probe") => Value::Null,
-        Some("mcp") => {
-            protocol::handle(bridge, connection, &frame["message"]).unwrap_or(Value::Null)
+    match frame["kind"].as_str() {
+        // Only a probe needs what the connection is shown (empty: no
+        // company open).
+        Some("probe") => {
+            let fingerprint = bridge
+                .policy(connection)
+                .map(|p| policy::fingerprint(&p))
+                .unwrap_or_default();
+            json!({"v": FRAME_VERSION, "ok": true, "instance": instance,
+                "fingerprint": fingerprint, "answer": null})
         }
-        _ => return refused("The relay sent something ClientLedger does not know."),
-    };
-    json!({"v": FRAME_VERSION, "ok": true, "instance": instance,
-        "fingerprint": fingerprint, "answer": answer})
+        Some("mcp") => {
+            let answer =
+                protocol::handle(bridge, connection, &frame["message"]).unwrap_or(Value::Null);
+            json!({"v": FRAME_VERSION, "ok": true, "instance": instance, "answer": answer})
+        }
+        _ => refused("The relay sent something ClientLedger does not know."),
+    }
 }
 
 /// The host's loopback listener. Dropping it stops it.
@@ -331,6 +340,11 @@ impl<L: Locate> Loopback<L> {
         let ep = self.locate.endpoint()?;
         let token = self.locate.token()?;
         let line = request_line(&ep.key, self.locate.connection(), &token, kind, message);
+        // The listener drops a longer line unread; say so here instead of
+        // answering "interrupted" for a call that was never taken.
+        if line.len() > MAX_REQUEST {
+            return Err(UpstreamError::Refused(TOO_LARGE.into()));
+        }
         let Ok(stream) = TcpStream::connect_timeout(&ep.addr, CONNECT_TIMEOUT) else {
             return Err(UpstreamError::Closed);
         };
@@ -561,6 +575,52 @@ mod tests {
         }
         // Still serving.
         assert!(upstream(&l, KEY, "secret").probe().is_ok());
+    }
+
+    #[test]
+    fn a_message_too_large_to_send_says_so_and_the_relay_answers_it() {
+        let (l, _) = host(on());
+        let big = json!({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+            "params": {"name": "bill_change", "arguments": {"action": "create",
+                "fields": {"memo": "x".repeat(MAX_REQUEST)}}}});
+        let up = upstream(&l, KEY, "secret");
+        assert_eq!(up.send(&big), Err(UpstreamError::Refused(TOO_LARGE.into())));
+        let up: Arc<dyn Upstream> = Arc::new(up);
+        let out = crate::relay::tests::Shared::default();
+        let input = format!("{big}\n");
+        crate::relay::relay_every(
+            &up,
+            input.as_bytes(),
+            Box::new(out.clone()),
+            Duration::from_secs(3600),
+        );
+        let r = out.replies();
+        assert_eq!(r[0]["id"], 9);
+        assert_eq!(r[0]["result"]["isError"], true);
+        assert_eq!(r[0]["result"]["content"][0]["text"], TOO_LARGE);
+    }
+
+    #[test]
+    fn only_a_probe_carries_the_fingerprint() {
+        let auth = Tokens(Mutex::new(Vec::new()));
+        let bridge = Fake::new(on());
+        let probe: Value =
+            serde_json::from_str(&request_line(KEY, ID, "secret", FrameKind::Probe, None))
+                .expect("json");
+        let ping = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
+        let mcp: Value = serde_json::from_str(&request_line(
+            KEY,
+            ID,
+            "secret",
+            FrameKind::Mcp,
+            Some(&ping),
+        ))
+        .expect("json");
+        let p = answer_frame(&probe, Some(KEY), None, "r", &auth, &bridge);
+        assert!(p["fingerprint"].is_string());
+        let m = answer_frame(&mcp, Some(KEY), None, "r", &auth, &bridge);
+        assert!(m.get("fingerprint").is_none());
+        assert_eq!(m["answer"]["id"], 1);
     }
 
     #[test]

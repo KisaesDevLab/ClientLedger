@@ -17,13 +17,15 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 /// Existing socket users outside cl-lan, all loopback-only.
-pub const LOOPBACK_USERS: [&str; 6] = [
+pub const LOOPBACK_USERS: [&str; 7] = [
     "crates/cl-host/src/health.rs",
     "crates/cl-host/src/instance_lock.rs",
     "crates/cl-pg/src/ports.rs",
     "crates/cl-automation/src/server.rs",
     "crates/cl-ui/src/engine_link.rs",
     "crates/cl-api/src/client.rs",
+    // A11 D4: the MCP relay's listener on this computer (plan section 1, Reach).
+    "crates/cl-mcp/src/transport.rs",
 ];
 
 const LAN_CRATE: &str = "crates/cl-lan/";
