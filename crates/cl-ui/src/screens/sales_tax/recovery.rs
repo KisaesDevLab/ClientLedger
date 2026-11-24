@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use cl_api::{
     ApiError, Capabilities, ClosedPeriodAuthorization, Contact, ContactFilter, ContactType,
-    NewRecovery, OrphanLabel, PostingOptions, RecoveryRefusal, RecoveryResult, RequestGroup,
+    OrphanLabel, PostingOptions, RecoveryRefusal, RecoveryResult, RequestGroup,
 };
 use cl_core::ids::{ContactId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
@@ -238,12 +238,8 @@ impl RecoveryScreen {
             return;
         }
         let key = self.key.key_for(&plan.attempt);
-        let r = NewRecovery {
-            invoice_id: plan.invoice,
-            date: plan.date,
-            amount: plan.amount,
-            memo: plan.memo.clone(),
-        };
+        let r = cl_mcp::forms::sales_tax::recovery(&plan);
+
         let live = r.clone();
         let demo_key = key.as_header();
         let opts = PostingOptions {

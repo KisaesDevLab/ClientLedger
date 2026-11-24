@@ -25,6 +25,7 @@ pub mod owner_money;
 pub mod pay_bills;
 pub mod payment;
 pub mod personal_funds;
+pub mod sales_tax;
 pub mod tag_gate;
 pub mod transfer;
 

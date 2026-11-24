@@ -16,16 +16,14 @@ use std::sync::Arc;
 
 use cl_api::{
     Account, AccountFilter, ApiError, Capabilities, ClosedPeriodAuthorization, IdempotencyKey,
-    LinkLine, LinkPaymentRequest, OrphanLabel, PayAdjustment, PayLine, PayPreview,
-    PaySalesTaxRefusal, PaySalesTaxRequest, PaySalesTaxResult, PostingOptions, RequestGroup,
-    SalesTaxAgency, SalesTaxItem, SalesTaxPayMethod, SalesTaxPayProblemKind, SalesTaxPaymentRecord,
+    LinkLine, LinkPaymentRequest, OrphanLabel, PayPreview, PaySalesTaxRefusal, PaySalesTaxResult,
+    PostingOptions, RequestGroup, SalesTaxAgency, SalesTaxItem, SalesTaxPaymentRecord,
     TransactionFilter,
 };
 use cl_core::ids::{AccountId, SalesTaxAgencyId, SalesTaxItemId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
 use cl_model::forms::sales_tax::pay::{
-    LinkForm, PayFigures, PayForm, PayLineFigure, PayMethod, PayPostPlan, PayProblem,
-    PayRequestPlan,
+    LinkForm, PayFigures, PayForm, PayMethod, PayPostPlan, PayProblem,
 };
 use cl_model::{CommandId, Scope};
 use eframe::egui::{self, RichText, Ui};
@@ -130,77 +128,9 @@ fn fmt(m: Money) -> String {
     m.format(MoneyStyle::default())
 }
 
-fn method(m: PayMethod) -> SalesTaxPayMethod {
-    match m {
-        PayMethod::Check => SalesTaxPayMethod::Check,
-        PayMethod::Electronic => SalesTaxPayMethod::Electronic,
-    }
-}
-
-/// The request the engine takes for a plan (`lines`: the posted lines).
-fn request(p: &PayRequestPlan, lines: Option<Vec<PayLine>>) -> PaySalesTaxRequest {
-    PaySalesTaxRequest {
-        agency_id: p.agency,
-        through_date: p.through,
-        date: p.date,
-        bank_account_id: p.bank,
-        method: method(p.method),
-        lines: lines.or_else(|| {
-            p.amounts.as_ref().map(|a| {
-                a.iter()
-                    .map(|(i, m)| PayLine {
-                        tax_item_id: *i,
-                        // `None`: what the item owes plus its adjustments,
-                        // the engine's figure (review finding 5).
-                        amount: *m,
-                        expected_owed: None,
-                    })
-                    .collect()
-            })
-        }),
-        adjustments: p
-            .adjustments
-            .iter()
-            .map(|a| PayAdjustment {
-                tax_item_id: a.item,
-                account_id: a.account,
-                amount: a.amount,
-                reason: a.reason.clone(),
-            })
-            .collect(),
-        print_later: p.print_later,
-        check_number: p.check_number,
-        memo: None,
-        expected_owed: None,
-    }
-}
-
-/// The preview as the model's figures (copied, never recomputed).
-fn figures_of(p: &PayPreview) -> PayFigures {
-    PayFigures {
-        lines: p
-            .lines
-            .iter()
-            .map(|l| PayLineFigure {
-                item: l.tax_item_id,
-                owed: l.owed,
-                adjustment: l.adjustment,
-                amount: l.amount,
-                expected_owed: l.expected_owed,
-            })
-            .collect(),
-        total: p.total,
-        owed: p.expected_owed_total(),
-        legacy_unassigned: p
-            .problems
-            .iter()
-            .any(|x| x.kind() == SalesTaxPayProblemKind::LegacyUnassigned),
-        more_than_owed: p
-            .problems
-            .iter()
-            .any(|x| x.kind() == SalesTaxPayProblemKind::AmountMoreThanOwed),
-    }
-}
+// A11 D0: the request and the preview's figures are shared with the MCP
+// tools.
+use cl_mcp::forms::sales_tax::{figures_of, request};
 
 impl PayScreen {
     /// The window over the open company: tax owed through the end of last
@@ -512,18 +442,9 @@ impl PayScreen {
         };
         let job = match pending.clone() {
             Pending::Pay(plan) => {
-                let lines: Vec<PayLine> = plan
-                    .lines
-                    .iter()
-                    .map(|(i, a, e)| PayLine {
-                        tax_item_id: *i,
-                        amount: *a,
-                        expected_owed: Some(*e),
-                    })
-                    .collect();
-                let mut r = request(&plan.request, Some(lines));
                 // The preview's owed total, copied (engine PR #219).
-                r.expected_owed = Some(plan.expected_owed);
+                let r = cl_mcp::forms::sales_tax::post_request(&plan);
+
                 let live = r.clone();
                 engine::write(
                     &self.link,
