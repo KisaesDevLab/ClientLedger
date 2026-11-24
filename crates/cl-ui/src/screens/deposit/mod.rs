@@ -416,44 +416,18 @@ impl DepositScreen {
 
     /// The tenant's Payments Clearing account.
     pub(crate) fn clearing(&self) -> Option<AccountId> {
-        self.accounts
-            .iter()
-            .find(|a| a.system_tag.as_deref() == Some("payments_clearing"))
-            .map(|a| a.id)
+        cl_mcp::forms::deposit::clearing(&self.accounts)
     }
 
     /// The tenant's Accounts Payable account.
     pub(crate) fn payables(&self) -> Option<AccountId> {
-        self.accounts
-            .iter()
-            .find(|a| {
-                a.system_tag.as_deref() == Some("accounts_payable")
-                    || crate::screens::register::class_of(a) == Some(AccountClass::Payable)
-            })
-            .map(|a| a.id)
+        cl_mcp::forms::deposit::payables(&self.accounts)
     }
 
     /// Payments Clearing, A/R, A/P and Sales Tax Payable: cash back can't
     /// go there (PR #159).
     pub(crate) fn control_accounts(&self) -> Vec<AccountId> {
-        self.accounts
-            .iter()
-            .filter(|a| {
-                matches!(
-                    a.system_tag.as_deref(),
-                    Some(
-                        "payments_clearing"
-                            | "accounts_receivable"
-                            | "accounts_payable"
-                            | "sales_tax_payable"
-                    )
-                ) || matches!(
-                    crate::screens::register::class_of(a),
-                    Some(AccountClass::Receivable | AccountClass::Payable)
-                )
-            })
-            .map(|a| a.id)
-            .collect()
+        cl_mcp::forms::deposit::control_accounts(&self.accounts)
     }
 
     /// What `check` needs.

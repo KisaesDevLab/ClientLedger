@@ -14,10 +14,7 @@
 
 use std::sync::Arc;
 
-use cl_api::{
-    ApiError, BankPosting, CardChargeDraft, CheckDraft, LocalValidation, RequestGroup, SplitLine,
-    Transaction, TxnType, Versioned,
-};
+use cl_api::{ApiError, LocalValidation, RequestGroup, Transaction, TxnType, Versioned};
 use cl_core::ids::{AccountId, ContactId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
 use cl_grid::GridHeight;
@@ -520,52 +517,13 @@ impl LoanPaymentScreen {
     /// The checked payment as the engine posting and the demo's copy,
     /// field by field (no arithmetic: the lines come from `check`).
     pub(crate) fn outbound(&self, c: &CheckedLoanPayment) -> Result<Outbound, LocalValidation> {
-        let lines: Vec<SplitLine> = c
-            .lines
-            .iter()
-            .map(|l| SplitLine {
-                account: l.account,
-                amount: l.amount,
-                memo: l.memo.clone(),
-                contact: None,
-                billable: false,
-                tag: None,
-                item: None,
-            })
-            .collect();
         let lender_name = c.lender.and_then(|l| self.books.contact_name(l));
-        let (posting, kind, number) = match c.posting {
-            LoanPosting::Check(number) => (
-                BankPosting::check(CheckDraft {
-                    bank: c.pay_from,
-                    date: c.date,
-                    payee: c.lender,
-                    payee_name: lender_name.clone().unwrap_or_default(),
-                    check_number: number,
-                    print_later: false,
-                    payee_address: None,
-                    memo: c.memo.clone(),
-                    printed_memo: c.memo.clone(),
-                    tag_ids: Vec::new(),
-                    draft_attachment: None,
-                    amount: c.payment,
-                    lines,
-                })?,
-                "check",
-                number.map(|n| n.to_string()).unwrap_or_default(),
-            ),
-            LoanPosting::Online => (
-                BankPosting::card_charge(CardChargeDraft {
-                    pay_from: c.pay_from,
-                    date: c.date,
-                    number: None,
-                    payee: c.lender,
-                    memo: c.memo.clone(),
-                    lines,
-                })?,
-                "card_charge",
-                String::new(),
-            ),
+        let posting = cl_mcp::forms::loan_payment::posting(c, lender_name.clone())?;
+        let (kind, number) = match c.posting {
+            LoanPosting::Check(number) => {
+                ("check", number.map(|n| n.to_string()).unwrap_or_default())
+            }
+            LoanPosting::Online => ("card_charge", String::new()),
         };
         let demo = DemoPosting {
             kind,
@@ -1631,8 +1589,8 @@ impl LoanPaymentScreen {
         // The company's rules as they are now (Preferences may have changed
         // them since this window read its lists).
         let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
-        let lines = cl_model::forms::tag_rule::expense_lines(&[], &form.extras, &list, false);
-        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
+        cl_mcp::forms::loan_payment::tag_gate(form, &list, &self.books.accounts)
+            .map_err(|r| crate::forms::tag_gate::refusal_texts(&r, &list))
     }
 
     /// A refused save's problems, checked again against the form as it is

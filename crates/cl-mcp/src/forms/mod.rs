@@ -11,7 +11,20 @@
 //! `cl-ui`.
 
 pub mod accounts;
+pub mod batch;
+pub mod bill;
+pub mod card;
+pub mod check;
+pub mod daily_sales;
+pub mod deposit;
+pub mod invoice;
+pub mod journal;
+pub mod loan_payment;
+pub mod owner_money;
+pub mod payment;
+pub mod personal_funds;
 pub mod tag_gate;
+pub mod transfer;
 
 use cl_core::ids::TagId;
 use cl_model::lists::tags::TagList;

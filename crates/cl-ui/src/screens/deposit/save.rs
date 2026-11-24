@@ -9,18 +9,17 @@
 use std::sync::Arc;
 
 use cl_api::{
-    ApiError, BankPosting, CashBack, ClosedPeriodAuthorization, ConflictReason, DepositDraft,
-    DepositRecord, DepositSource, GroupedPayment, IdempotencyKey, LocalValidation, OrphanLabel,
-    PageRequest, PostingOptions, RecordVersion, SplitLine, Transaction, TransactionFilter,
-    TxnStatus, TxnType, Versioned, is_already_deposited,
+    ApiError, BankPosting, ClosedPeriodAuthorization, ConflictReason, DepositDraft, DepositRecord,
+    IdempotencyKey, LocalValidation, OrphanLabel, PageRequest, PostingOptions, RecordVersion,
+    Transaction, TransactionFilter, TxnStatus, TxnType, Versioned, is_already_deposited,
 };
 use cl_core::ids::{AccountId, TransactionId};
 use cl_core::{CalendarDate, Secret};
 use cl_model::closing::{is_locked, needs_password};
 use cl_model::forms::deposit::{
-    CashBackForm, CheckedDeposit, DepositField, DepositForm, DepositProblem, PickedPayment, check,
+    CashBackForm, DepositField, DepositForm, DepositProblem, PickedPayment, check,
 };
-use cl_model::forms::lines::{FormLine, FormLines, PostingLine};
+use cl_model::forms::lines::{FormLine, FormLines};
 use cl_model::forms::{SaveFailure, SaveIntent, SaveStart};
 
 use super::{DepositRow, DepositScreen, Editing, Field, Nav, Pending, Saved, VoidPrompt, blank};
@@ -38,69 +37,10 @@ pub(crate) struct SaveIdentity {
     pub password: bool,
 }
 
-fn split(l: &PostingLine) -> SplitLine {
-    SplitLine {
-        account: l.account,
-        amount: l.amount,
-        memo: l.memo.clone(),
-        contact: l.contact,
-        billable: false,
-        tag: l.tag,
-        item: None,
-    }
-}
-
-/// The checked deposit as the engine's draft, field by field (no
-/// arithmetic): each picked payment is a whole source line on Payments
-/// Clearing at the engine's amount, the lines and fees keep the owner's
-/// typed amounts (fees positive; cl-api sends them negative).
-///
-/// # Errors
-/// `Local(InvalidValue)` when payments are picked and the tenant has no
-/// Payments Clearing account.
-pub fn to_draft(c: &CheckedDeposit, clearing: Option<AccountId>) -> Result<DepositDraft, ApiError> {
-    let payments = if c.payments.is_empty() {
-        Vec::new()
-    } else {
-        let clearing = clearing.ok_or(ApiError::Local(LocalValidation::InvalidValue))?;
-        c.payments
-            .iter()
-            .map(|p| GroupedPayment {
-                source: p.source,
-                kind: DepositSource::Payment,
-                account: clearing,
-                amount: p.amount,
-                contact: p.contact,
-                memo: None,
-            })
-            .collect()
-    };
-    Ok(DepositDraft {
-        account: c.account,
-        date: c.date,
-        memo: c.memo.clone(),
-        payments,
-        lines: c.lines.iter().map(split).collect(),
-        deductions: c.deductions.iter().map(split).collect(),
-        cash_back: c.cash_back.as_ref().map(|b| CashBack {
-            account: b.account,
-            amount: b.amount,
-            memo: b.memo.clone(),
-        }),
-    })
-}
-
-/// The accounts a deposit touches (Q-262): the bank, Payments Clearing
-/// when payments were taken, every line, fee and cash-back account.
-pub(crate) fn touched(d: &DepositDraft) -> Vec<AccountId> {
-    let mut v = vec![d.account];
-    v.extend(d.payments.iter().map(|p| p.account));
-    v.extend(d.lines.iter().chain(&d.deductions).map(|l| l.account));
-    v.extend(d.cash_back.as_ref().map(|c| c.account));
-    v.sort();
-    v.dedup();
-    v
-}
+/// The checked deposit as the engine's draft and the accounts a draft
+/// touches (A11 D0: shared with the MCP tools).
+pub use cl_mcp::forms::deposit::to_draft;
+pub(crate) use cl_mcp::forms::deposit::touched;
 
 /// The accounts a saved deposit touches (for a void).
 fn touched_by(r: &DepositRecord) -> Vec<AccountId> {
@@ -183,8 +123,8 @@ impl DepositScreen {
         form: &cl_model::forms::deposit::DepositForm,
     ) -> Result<(), Vec<String>> {
         let list = crate::forms::tag_gate::form_list(&self.tags, &self.link);
-        let lines = cl_model::forms::tag_rule::expense_lines(&[], &form.lines, &list, false);
-        crate::forms::tag_gate::check(&list, &lines, &self.accounts)
+        cl_mcp::forms::deposit::tag_gate(form, &list, &self.accounts)
+            .map_err(|r| crate::forms::tag_gate::refusal_texts(&r, &list))
     }
 
     fn refuse(&mut self, problems: Vec<DepositProblem>) {

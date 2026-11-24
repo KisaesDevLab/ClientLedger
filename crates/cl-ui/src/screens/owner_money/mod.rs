@@ -14,10 +14,7 @@ pub(crate) mod remember;
 
 use std::sync::Arc;
 
-use cl_api::{
-    ApiError, BankPosting, CardChargeDraft, CheckDraft, DepositDraft, LocalValidation,
-    RequestGroup, SplitLine, Transaction, TxnType, Versioned,
-};
+use cl_api::{ApiError, LocalValidation, RequestGroup, Transaction, TxnType, Versioned};
 use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, MoneyStyle, Secret};
 use cl_model::amount_entry::AmountRules;
@@ -381,67 +378,19 @@ impl OwnerMoneyScreen {
     /// The checked form as the engine posting and the demo's copy, field
     /// by field: one line of exactly the typed amount.
     pub(crate) fn outbound(&self, c: &CheckedOwnerMoney) -> Result<Outbound, LocalValidation> {
-        let line = SplitLine {
-            account: c.equity,
-            amount: c.amount,
-            memo: None,
-            contact: None,
-            billable: false,
-            tag: None,
-            item: None,
-        };
         let name = c
             .who
             .and_then(|w| self.books.contact_name(w))
             .or_else(|| (!c.who_name.is_empty()).then(|| c.who_name.clone()));
-        let (posting, kind, number, own_debit) = match c.posting {
+        let posting = cl_mcp::forms::owner_money::posting(c, name.clone())?;
+        let (kind, number, own_debit) = match c.posting {
             OwnerPosting::Check { number } => (
-                BankPosting::check(CheckDraft {
-                    bank: c.bank,
-                    date: c.date,
-                    payee: c.who,
-                    payee_name: name.clone().unwrap_or_default(),
-                    check_number: number,
-                    print_later: false,
-                    payee_address: None,
-                    memo: c.memo.clone(),
-                    printed_memo: c.memo.clone(),
-                    tag_ids: Vec::new(),
-                    draft_attachment: None,
-                    amount: c.amount,
-                    lines: vec![line],
-                })?,
                 "check",
                 number.map(|n| n.to_string()).unwrap_or_default(),
                 false,
             ),
-            OwnerPosting::Payment => (
-                BankPosting::card_charge(CardChargeDraft {
-                    pay_from: c.bank,
-                    date: c.date,
-                    number: None,
-                    payee: c.who,
-                    memo: c.memo.clone(),
-                    lines: vec![line],
-                })?,
-                "card_charge",
-                String::new(),
-                false,
-            ),
-            OwnerPosting::Deposit => (
-                BankPosting::deposit(DepositDraft::plain(
-                    c.bank,
-                    c.date,
-                    c.memo.clone(),
-                    vec![SplitLine {
-                        contact: c.who,
-                        ..line
-                    }],
-                ))?,
-                "deposit",
-                String::new(),
-                true,
-            ),
+            OwnerPosting::Payment => ("card_charge", String::new(), false),
+            OwnerPosting::Deposit => ("deposit", String::new(), true),
         };
         let demo = DemoPosting {
             kind,

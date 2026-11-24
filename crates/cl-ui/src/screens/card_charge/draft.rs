@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use cl_api::{CardChargeDraft, LocalValidation, SplitLine};
+use cl_api::{CardChargeDraft, LocalValidation};
 use cl_core::ids::{AccountId, ContactId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
 use cl_docread::correct::{Final, FinalValues};
@@ -475,28 +475,10 @@ impl CardChargeScreen {
         self.sync_inputs();
     }
 
-    /// The checked charge as the engine draft (no arithmetic).
+    /// The checked charge as the engine draft (no arithmetic; A11 D0:
+    /// shared with the MCP tools).
     pub(crate) fn charge_draft(c: &CheckedCard) -> CardChargeDraft {
-        CardChargeDraft {
-            pay_from: c.card,
-            date: c.date,
-            number: c.ref_no.clone(),
-            payee: c.payee,
-            memo: c.memo.clone(),
-            lines: c
-                .lines
-                .iter()
-                .map(|l| SplitLine {
-                    account: l.account,
-                    amount: l.amount,
-                    memo: l.memo.clone(),
-                    contact: l.contact,
-                    billable: l.billable,
-                    tag: l.tag,
-                    item: None,
-                })
-                .collect(),
-        }
+        cl_mcp::forms::card::charge_draft(c)
     }
 
     /// Accept: the checked charge through the draft. The register search

@@ -22,8 +22,7 @@ mod template;
 use std::sync::Arc;
 
 use cl_api::{
-    ApiError, BankPosting, Capabilities, CardChargeDraft, DepositDraft, LocalValidation,
-    RequestGroup, SplitLine, Transaction, TxnType, Versioned,
+    ApiError, Capabilities, LocalValidation, RequestGroup, Transaction, TxnType, Versioned,
 };
 use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
@@ -574,50 +573,7 @@ impl CardChargeScreen {
     /// The checked form as the engine posting and the demo's copy, field
     /// by field (no arithmetic).
     pub(crate) fn outbound(&self, c: &CheckedCard) -> Result<Outbound, LocalValidation> {
-        let split = |l: &cl_model::forms::lines::PostingLine| SplitLine {
-            account: l.account,
-            amount: l.amount,
-            memo: l.memo.clone(),
-            contact: l.contact,
-            billable: l.billable,
-            tag: l.tag,
-            item: None,
-        };
-        let posting = match c.mode {
-            CardMode::Charge => BankPosting::card_charge_with(
-                CardChargeDraft {
-                    pay_from: c.card,
-                    date: c.date,
-                    number: c.ref_no.clone(),
-                    payee: c.payee,
-                    memo: c.memo.clone(),
-                    lines: c
-                        .lines
-                        .iter()
-                        .map(split)
-                        .chain(
-                            c.item_lines
-                                .iter()
-                                .map(crate::screens::write_check::item_split),
-                        )
-                        .collect(),
-                },
-                self.line_billable(),
-            )?,
-            CardMode::Credit => BankPosting::deposit(DepositDraft::plain(
-                c.card,
-                c.date,
-                c.memo.clone(),
-                c.lines
-                    .iter()
-                    .map(|l| SplitLine {
-                        contact: l.contact.or(c.payee),
-                        billable: false,
-                        ..split(l)
-                    })
-                    .collect(),
-            ))?,
-        };
+        let posting = cl_mcp::forms::card::posting(c, self.line_billable())?;
         let demo = DemoPosting {
             kind: match c.mode {
                 CardMode::Charge => "card_charge",
@@ -1928,13 +1884,8 @@ impl CardChargeScreen {
         // The company's rules as they are now (Preferences may have changed
         // them since this window read its lists).
         let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
-        let lines = cl_model::forms::tag_rule::tabbed_lines(
-            &form.header_tags,
-            &form.lines,
-            &form.items,
-            &list,
-        );
-        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
+        cl_mcp::forms::card::tag_gate(form, &list, &self.books.accounts)
+            .map_err(|r| crate::forms::tag_gate::refusal_texts(&r, &list))
     }
 
     /// A refused save's problems, checked again against the form as it is

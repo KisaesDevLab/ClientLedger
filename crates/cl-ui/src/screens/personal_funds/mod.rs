@@ -13,9 +13,8 @@
 use std::sync::Arc;
 
 use cl_api::{
-    Account, AccountFields, AccountType, ApiError, BankPosting, Capabilities, CardChargeDraft,
-    IdempotencyKey, LocalValidation, OrphanLabel, RequestGroup, SplitLine, Transaction, TxnType,
-    Versioned,
+    Account, AccountFields, AccountType, ApiError, Capabilities, IdempotencyKey, LocalValidation,
+    OrphanLabel, RequestGroup, Transaction, TxnType, Versioned,
 };
 use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
@@ -142,34 +141,11 @@ pub struct PersonalFundsScreen {
 /// or liability account.
 const FUNDS_TYPES: &[TxnType] = &[TxnType::Expense];
 
-/// How Who paid is kept in the books: the engine's expense has no contact
-/// on the equity or liability line it is paid from, so the owner's name
-/// starts the memo ("Paid by Dana Ortiz — new hose"). Fixed English text,
-/// not translated: it is data in the books (and the accountant reads it),
-/// and Prev/Next or the register read it back from there.
-const WHO_PREFIX: &str = "Paid by ";
-/// Between the name and the owner's own memo.
-const WHO_SEPARATOR: &str = " \u{2014} ";
-
-/// The memo sent: who paid first, then the owner's memo.
-pub(crate) fn memo_with_who(who: Option<&str>, memo: Option<&str>) -> Option<String> {
-    match (who.map(str::trim).filter(|w| !w.is_empty()), memo) {
-        (Some(w), Some(m)) => Some(format!("{WHO_PREFIX}{w}{WHO_SEPARATOR}{m}")),
-        (Some(w), None) => Some(format!("{WHO_PREFIX}{w}")),
-        (None, m) => m.map(str::to_string),
-    }
-}
-
-/// A saved memo split back into who paid (the name) and the owner's memo.
-pub(crate) fn split_who(memo: &str) -> (Option<&str>, String) {
-    let Some(rest) = memo.strip_prefix(WHO_PREFIX) else {
-        return (None, memo.to_string());
-    };
-    match rest.split_once(WHO_SEPARATOR) {
-        Some((name, m)) => (Some(name), m.to_string()),
-        None => (Some(rest), String::new()),
-    }
-}
+/// How Who paid is kept in the books (A11 D0: in cl-model, shared with the
+/// MCP tools).
+#[cfg(test)]
+pub(crate) use cl_model::forms::personal_funds::memo_with_who;
+pub(crate) use cl_model::forms::personal_funds::split_who;
 
 impl PersonalFundsScreen {
     /// A new form in the open company.
@@ -586,34 +562,9 @@ impl PersonalFundsScreen {
     /// The checked form as the engine posting and the demo's copy.
     pub(crate) fn outbound(&self, c: &CheckedPersonalFunds) -> Result<Outbound, LocalValidation> {
         // Who paid rides in the memo (see [`memo_with_who`]).
-        let memo = memo_with_who(
-            c.who.and_then(|w| self.books.contact_name(w)).as_deref(),
-            c.memo.as_deref(),
-        );
-        let c = &CheckedPersonalFunds { memo, ..c.clone() };
-        let posting = BankPosting::card_charge_with(
-            CardChargeDraft {
-                pay_from: c.offset,
-                date: c.date,
-                number: None,
-                payee: c.payee,
-                memo: c.memo.clone(),
-                lines: c
-                    .lines
-                    .iter()
-                    .map(|l| SplitLine {
-                        account: l.account,
-                        amount: l.amount,
-                        memo: l.memo.clone(),
-                        contact: l.contact,
-                        billable: l.billable,
-                        tag: l.tag,
-                        item: None,
-                    })
-                    .collect(),
-            },
-            self.line_billable(),
-        )?;
+        let who = c.who.and_then(|w| self.books.contact_name(w));
+        let c = &cl_mcp::forms::personal_funds::with_who(c, who.as_deref());
+        let posting = cl_mcp::forms::personal_funds::posting(c, self.line_billable())?;
         let demo = DemoPosting {
             kind: "card_charge",
             date: c.date,
@@ -1569,9 +1520,8 @@ impl PersonalFundsScreen {
         // The company's rules as they are now (Preferences may have changed
         // them since this window read its lists).
         let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
-        let lines =
-            cl_model::forms::tag_rule::expense_lines(&form.header_tags, &form.lines, &list, false);
-        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
+        cl_mcp::forms::personal_funds::tag_gate(form, &list, &self.books.accounts)
+            .map_err(|r| crate::forms::tag_gate::refusal_texts(&r, &list))
     }
 
     /// A refused save's problems, checked again against the form as it is

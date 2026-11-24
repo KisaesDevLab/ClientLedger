@@ -1,0 +1,353 @@
+//! Create Invoices, Credit Memos and Sales Receipts (P20, P22): the one
+//! place the API's and the form model's types meet. The checked
+//! `InvoiceRequest` becomes a `cl_api::NewInvoice` (or credit memo, or
+//! sales receipt) field by field, and the engine's preview becomes the
+//! model's `PreviewFigures`. Nothing is computed here.
+
+use cl_api::{ApiError, InvoicePreview, LocalValidation, NewInvoice, PriceSource, SignedPercent};
+use cl_model::forms::invoice::{
+    DocTaxFigure, DocTaxMemberFigure, InvoiceForm, InvoiceRequest, LayoutPick, LineCodeFigure,
+    PreviewFigures, PreviewLineFigures, PreviewTotals, RateSource,
+};
+use cl_model::forms::tag_rule::TagRefusal;
+use cl_model::lists::tags::TagList;
+/// A percent the model holds as a `Quantity` (markup, discount) as the
+/// API's exact percent.
+fn percent(q: Option<cl_core::Quantity>) -> Result<Option<SignedPercent>, ApiError> {
+    q.map(|q| {
+        let w = q.to_wire();
+        let t = if w.contains('.') {
+            w.trim_end_matches('0').trim_end_matches('.').to_string()
+        } else {
+            w
+        };
+        SignedPercent::parse(&t)
+    })
+    .transpose()
+    .map_err(ApiError::Local)
+}
+
+/// The checked request as the engine's invoice, field by field (the tax
+/// rate is never sent; a billable line sends no item, quantity or price).
+///
+/// # Errors
+/// `Local(InvalidValue)` for a markup the API can't carry.
+pub fn new_invoice(r: &InvoiceRequest) -> Result<NewInvoice, ApiError> {
+    let mut lines = Vec::with_capacity(r.lines.len());
+    for l in &r.lines {
+        let markup = percent(l.markup_percent)?;
+        lines.push(cl_api::InvoiceLine {
+            account_id: l.account,
+            item_id: l.item,
+            description: l.description.clone(),
+            service_date: l.service_date,
+            quantity: l.quantity,
+            unit_price: l.unit_price,
+            discount_percent: percent(l.discount_percent)?,
+            is_taxable: l.taxable,
+            tax_rate: None,
+            tag_id: l.tag,
+            billable_source_line_id: l.billable_source_line,
+            markup_percent: markup,
+            tax_code_id: l.tax_code,
+            unit_id: l.unit,
+            return_of: None,
+        });
+    }
+    let mut n = NewInvoice::new(r.client, r.date, lines);
+    n.sales_tax_id = r.sales_tax;
+    n.use_current_rates = r.use_current_rates;
+    n.due_date = r.due_date;
+    n.payment_terms.clone_from(&r.terms);
+    n.terms_days = r.terms_days.map(u32::from);
+    n.memo = Some(r.memo.clone());
+    n.customer_message.clone_from(&r.customer_message);
+    n.po_number.clone_from(&r.po_number);
+    n.tag_ids.clone_from(&r.header_tags);
+    n.hide_zero_lines = r.hide_zero_lines;
+    n.txn_number.clone_from(&r.number);
+    n.print_later = Some(r.print_later);
+    n.layout_id = match &r.layout {
+        LayoutPick::Unset => cl_api::LayoutChoice::Omitted,
+        LayoutPick::CompanyDefault => cl_api::LayoutChoice::CompanyDefault,
+        LayoutPick::Layout(id) => cl_api::InvoiceLayoutId::parse(id)
+            .map(cl_api::LayoutChoice::Layout)
+            .map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?,
+    };
+    Ok(n)
+}
+
+/// The checked request of a credit memo as the engine's memo (P22): the
+/// same lines as an invoice; no terms, due date or P.O. number. The
+/// applications at save are added by the caller from the model's plan.
+///
+/// # Errors
+/// As [`new_invoice`].
+pub fn new_credit_memo(r: &InvoiceRequest) -> Result<cl_api::NewCreditMemo, ApiError> {
+    let mut inv = new_invoice(r)?;
+    // P24 (Q-P24e/u): every item line says which sale it returns (`null`:
+    // unlinked), so an edit never keeps a link the owner took off.
+    for (line, req) in inv.lines.iter_mut().zip(&r.lines) {
+        if req.item.is_some() {
+            line.return_of = Some(req.return_of);
+        }
+    }
+    let mut m = cl_api::NewCreditMemo::new(r.client, r.date, inv.lines);
+    m.memo = inv.memo;
+    m.customer_message = inv.customer_message;
+    m.tag_ids = inv.tag_ids;
+    m.hide_zero_lines = inv.hide_zero_lines;
+    m.layout_id = inv.layout_id;
+    m.txn_number = inv.txn_number;
+    m.print_later = inv.print_later;
+    m.sales_tax_id = inv.sales_tax_id;
+    m.use_current_rates = inv.use_current_rates;
+    Ok(m)
+}
+
+/// The engine's payment method of a sales receipt (the form keeps the
+/// wire string).
+fn payment_method(m: Option<&str>) -> Option<cl_api::PaymentMethod> {
+    m.map(|m| match m {
+        "check" => cl_api::PaymentMethod::Check,
+        "cash" => cl_api::PaymentMethod::Cash,
+        "credit_card" => cl_api::PaymentMethod::CreditCard,
+        "ach" => cl_api::PaymentMethod::Ach,
+        _ => cl_api::PaymentMethod::Other,
+    })
+}
+
+/// The checked request of a sales receipt as the engine's receipt (P22,
+/// Q-P20u): the invoice's lines plus Deposit to, method and reference.
+///
+/// # Errors
+/// As [`new_invoice`].
+pub fn new_sales_receipt(r: &InvoiceRequest) -> Result<cl_api::NewSalesReceipt, ApiError> {
+    let inv = new_invoice(r)?;
+    let mut s = cl_api::NewSalesReceipt::new(r.date, inv.lines);
+    s.contact_id = Some(r.client);
+    s.deposit_to_account_id = r.deposit_to;
+    s.payment_method = payment_method(r.payment_method.as_deref());
+    s.ref_no.clone_from(&r.ref_no);
+    s.memo = inv.memo;
+    s.customer_message = inv.customer_message;
+    s.tag_ids = inv.tag_ids;
+    s.hide_zero_lines = inv.hide_zero_lines;
+    s.layout_id = inv.layout_id;
+    s.txn_number = inv.txn_number;
+    s.print_later = inv.print_later;
+    s.sales_tax_id = inv.sales_tax_id;
+    s.use_current_rates = inv.use_current_rates;
+    Ok(s)
+}
+
+/// A credit memo preview's apply figures as the model's (copied strings
+/// and tokens, never recomputed).
+#[must_use]
+pub fn credit_figures_of(
+    p: &cl_api::CreditMemoPreview,
+) -> cl_model::forms::credit_memo::CreditMemoFigures {
+    use cl_model::forms::credit_memo::{CreditMemoFigures, OpenInvoiceFigure, SuggestedFigure};
+    CreditMemoFigures {
+        total: p.figures.total,
+        open_invoices: p
+            .open_invoices
+            .iter()
+            .map(|o| OpenInvoiceFigure {
+                invoice: o.invoice_id,
+                number: o.number.clone().unwrap_or_default(),
+                date: o.date,
+                due: o.due_date,
+                balance_due: o.balance_due,
+                token: o.balance_due_exact.clone(),
+            })
+            .collect(),
+        suggested: p
+            .suggested_applications
+            .iter()
+            .map(|s| SuggestedFigure {
+                invoice: s.invoice_id,
+                amount: s.amount,
+            })
+            .collect(),
+        remaining_credit: p.remaining_credit,
+        problems: p.problems.iter().map(|x| x.code.clone()).collect(),
+    }
+}
+
+/// Where the engine says a rate came from.
+#[must_use]
+pub fn source_of(s: Option<PriceSource>) -> RateSource {
+    match s {
+        Some(PriceSource::Input) => RateSource::Typed,
+        Some(PriceSource::Item) => RateSource::Item,
+        Some(PriceSource::PriceLevel) => RateSource::PriceLevel,
+        Some(PriceSource::PriceLevelPercent) => RateSource::PriceLevelPercent,
+        Some(PriceSource::Unpriced) => RateSource::Unpriced,
+        Some(PriceSource::BillableCost) => RateSource::Billable,
+        Some(PriceSource::Other) | None => RateSource::Other,
+    }
+}
+
+/// The engine's preview as the form model's figures (copied, never
+/// recomputed).
+#[must_use]
+pub fn figures_of(p: &InvoicePreview) -> PreviewFigures {
+    PreviewFigures {
+        lines: p
+            .lines
+            .iter()
+            .map(|l| PreviewLineFigures {
+                quantity: l.quantity,
+                unit_price: l.unit_price,
+                source: source_of(l.unit_price_source),
+                amount: l.amount,
+                tax_amount: l.tax_amount,
+                display_rate: l.display_rate,
+                billed_elsewhere: l.error.is_some(),
+                tax_code: l.tax_code.as_ref().map(|c| LineCodeFigure {
+                    id: c.id,
+                    code: c.code.clone(),
+                    taxable: c.taxable,
+                }),
+            })
+            .collect(),
+        billed_on: p
+            .lines
+            .iter()
+            .filter_map(|l| l.error.as_ref())
+            .map(|e| e.invoice_number.clone().unwrap_or_default())
+            .collect(),
+        totals: PreviewTotals {
+            subtotal: p.subtotal,
+            tax_total: p.tax_total,
+            tax_rate: p.tax_rate,
+            sales_tax: p.sales_tax.as_ref().map(|s| DocTaxFigure {
+                id: s.id,
+                name: s.name.clone(),
+                rate: s.rate,
+                members: s
+                    .members
+                    .iter()
+                    .map(|m| DocTaxMemberFigure {
+                        name: m.name.clone(),
+                        rate: m.rate,
+                        tax: m.tax,
+                    })
+                    .collect(),
+            }),
+            total: p.total,
+            due_date: p.due_date,
+            balance_after: p.contact_balance_after,
+        },
+    }
+}
+
+/// The tag rules on the form's lines (P29 WP7, Q-276): `list` is the
+/// company's tag list with its rules as they are now, `accounts` the chart
+/// the form read.
+///
+/// # Errors
+/// The refused lines (nothing is sent).
+pub fn tag_gate(
+    form: &InvoiceForm,
+    list: &TagList,
+    accounts: &[cl_api::Account],
+) -> Result<(), TagRefusal> {
+    let lines = cl_model::forms::tag_rule::invoice_lines(form, list);
+    super::tag_gate::check(list, &lines, accounts)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cl_core::ids::ContactId;
+    use cl_core::{CalendarDate, Money, Quantity};
+    use cl_model::forms::invoice::RequestLine;
+    use cl_model::rowkey::RowKeyGen;
+
+    #[test]
+    fn the_request_maps_field_by_field_and_never_sends_a_tax_rate() {
+        let client = ContactId::parse("d0000000-0000-4000-8000-c00000000001").expect("id");
+        let date = CalendarDate::from_ymd(2026, 11, 4).expect("date");
+        let r = InvoiceRequest {
+            kind: cl_model::forms::invoice::SalesDocKind::Invoice,
+            deposit_to: None,
+            payment_method: None,
+            ref_no: None,
+            client,
+            date,
+            due_date: None,
+            terms: Some("custom".into()),
+            terms_days: Some(12),
+            number: Some("1097".into()),
+            memo: String::new(),
+            po_number: Some(String::new()),
+            customer_message: Some("Thanks".into()),
+            header_tags: Some(Vec::new()),
+            hide_zero_lines: Some(true),
+            print_later: false,
+            layout: LayoutPick::Unset,
+            lines: vec![RequestLine {
+                key: RowKeyGen::new().next_key(),
+                account: None,
+                item: None,
+                description: Some("x".into()),
+                service_date: None,
+                quantity: Some(Quantity::parse_wire("18").expect("q")),
+                unit_price: Some(Money::parse_wire("65").expect("m")),
+                discount_percent: None,
+                taxable: Some(false),
+                tag: None,
+                billable_source_line: None,
+                markup_percent: Some(Quantity::parse_wire("10").expect("q")),
+                tax_code: None,
+                unit: None,
+                return_of: None,
+            }],
+            sales_tax: None,
+            use_current_rates: false,
+        };
+        let n = new_invoice(&r).expect("maps");
+        assert_eq!(n.terms_days, Some(12));
+        assert_eq!(n.txn_number.as_deref(), Some("1097"));
+        assert_eq!(n.lines[0].tax_rate, None);
+        assert_eq!(
+            n.lines[0]
+                .markup_percent
+                .map(SignedPercent::to_wire)
+                .as_deref(),
+            Some("10")
+        );
+        assert_eq!(n.memo.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn sources_map_and_unknowns_are_other() {
+        assert_eq!(source_of(Some(PriceSource::Input)), RateSource::Typed);
+        assert_eq!(
+            source_of(Some(PriceSource::PriceLevelPercent)),
+            RateSource::PriceLevelPercent
+        );
+        assert_eq!(
+            source_of(Some(PriceSource::BillableCost)),
+            RateSource::Billable
+        );
+        assert_eq!(source_of(None), RateSource::Other);
+    }
+
+    #[test]
+    fn stored_percents_reach_the_wire_exactly() {
+        let q = |s: &str| Some(Quantity::parse_wire(s).expect("q"));
+        assert_eq!(
+            percent(q("10.0000"))
+                .expect("ok")
+                .map(SignedPercent::to_wire),
+            Some("10".to_string())
+        );
+        assert_eq!(
+            percent(q("12.5")).expect("ok").map(SignedPercent::to_wire),
+            Some("12.5".to_string())
+        );
+        assert_eq!(percent(None).expect("ok"), None);
+    }
+}

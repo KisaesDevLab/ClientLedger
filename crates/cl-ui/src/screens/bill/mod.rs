@@ -602,13 +602,7 @@ impl EnterBillScreen {
         if let Some(d) = self.link.demo_state() {
             return crate::company::demo::bills::caps(&d);
         }
-        let c = self.link.capabilities();
-        BillCaps {
-            closing: c.has(Capabilities::AP_CLOSING),
-            lines: c.has(Capabilities::BILL_LINES),
-            terms: c.has(Capabilities::BILL_TERMS),
-            received: c.has(Capabilities::BILL_RECEIVED),
-        }
+        cl_mcp::forms::bill::caps(&self.link.capabilities())
     }
 
     /// The engine edits credits, deletes, and guards edits inside its row

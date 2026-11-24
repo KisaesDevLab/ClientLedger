@@ -304,6 +304,37 @@ pub fn check(
     }
 }
 
+/// How Who paid is kept in the books: the engine's expense has no contact
+/// on the equity or liability line it is paid from, so the owner's name
+/// starts the memo ("Paid by Dana Ortiz — new hose"). Fixed English text,
+/// not translated: it is data in the books (and the accountant reads it),
+/// and Prev/Next or the register read it back from there.
+pub const WHO_PREFIX: &str = "Paid by ";
+/// Between the name and the owner's own memo.
+pub const WHO_SEPARATOR: &str = " \u{2014} ";
+
+/// The memo sent: who paid first, then the owner's memo.
+#[must_use]
+pub fn memo_with_who(who: Option<&str>, memo: Option<&str>) -> Option<String> {
+    match (who.map(str::trim).filter(|w| !w.is_empty()), memo) {
+        (Some(w), Some(m)) => Some(format!("{WHO_PREFIX}{w}{WHO_SEPARATOR}{m}")),
+        (Some(w), None) => Some(format!("{WHO_PREFIX}{w}")),
+        (None, m) => m.map(str::to_string),
+    }
+}
+
+/// A saved memo split back into who paid (the name) and the owner's memo.
+#[must_use]
+pub fn split_who(memo: &str) -> (Option<&str>, String) {
+    let Some(rest) = memo.strip_prefix(WHO_PREFIX) else {
+        return (None, memo.to_string());
+    };
+    match rest.split_once(WHO_SEPARATOR) {
+        Some((name, m)) => (Some(name), m.to_string()),
+        None => (Some(rest), String::new()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

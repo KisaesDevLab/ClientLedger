@@ -732,18 +732,20 @@ impl WriteCheckScreen {
     /// tag in its header (part of the clean form, so it is not "unsaved").
     /// Never on a check being edited, nor once the owner touched it.
     pub(crate) fn fill_default_tag(&mut self) {
-        let tags = cl_model::forms::tag_rule::new_form_header_tags(&self.tag_list);
         // A check saved in this window stays as saved (Save & New starts
         // the next one with the default itself).
-        if tags.is_empty()
-            || self.editing.is_some()
+        if self.editing.is_some()
             || self.save.count > 0
             || self.nav.at.is_some()
             || self.header.is_dirty()
-            || !self.header.current().header_tags.is_empty()
         {
             return;
         }
+        let Some(tags) =
+            cl_mcp::forms::default_header_tags(&self.tag_list, &self.header.current().header_tags)
+        else {
+            return;
+        };
         let mut f = self.header.current().clone();
         f.header_tags = tags;
         self.header.load(f);

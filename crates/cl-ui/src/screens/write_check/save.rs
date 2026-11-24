@@ -11,15 +11,15 @@ use std::sync::Arc;
 
 use cl_api::{
     ApiError, AuditAction, AuditEntity, BankPosting, CheckDraft, CheckEditOptions, CheckRecord,
-    ClosedPeriodAuthorization, ConflictReason, DraftKey, IdempotencyKey, LocalValidation,
-    OrphanLabel, PageRequest, PostingOptions, PrintStatus, PrintedCheckChange, RecordVersion,
-    SplitLine, TxnStatus, TxnType, Versioned, is_check_printed, is_line_billed, is_number_used,
+    ClosedPeriodAuthorization, ConflictReason, IdempotencyKey, LocalValidation, OrphanLabel,
+    PageRequest, PostingOptions, PrintStatus, PrintedCheckChange, RecordVersion, TxnStatus,
+    TxnType, Versioned, is_check_printed, is_line_billed, is_number_used,
 };
 use cl_core::ids::{AccountId, TransactionId};
 use cl_core::{CalendarDate, Secret};
 use cl_model::closing::{is_locked, needs_password};
 use cl_model::forms::check::{
-    CheckContext, CheckField, CheckForm, CheckProblem, CheckedCheck, NumberField, check,
+    CheckContext, CheckField, CheckForm, CheckProblem, NumberField, check,
 };
 use cl_model::forms::item_lines::ItemLines;
 use cl_model::forms::lines::{FormLine, FormLines};
@@ -111,74 +111,9 @@ pub(crate) struct Saved {
     pub warnings: Vec<cl_api::NegativeStock>,
 }
 
-/// The checked check as the engine's draft, field by field (no
-/// arithmetic): the amount and every line amount are the owner's typed
-/// `Money`, the memo is also the printed memo (Q-P13n), and an empty name
-/// on the check takes the payee's display name.
-///
-/// # Errors
-/// `Local(InvalidValue)` when a draft attachment's id is not one the
-/// engine gave.
-pub fn to_draft(c: &CheckedCheck, payee_display: &str) -> Result<CheckDraft, ApiError> {
-    let draft_attachment = match &c.draft_attachment {
-        None => None,
-        Some(a) => Some(
-            DraftKey::parse(&a.id).map_err(|_| ApiError::Local(LocalValidation::InvalidValue))?,
-        ),
-    };
-    Ok(CheckDraft {
-        bank: c.bank,
-        date: c.date,
-        payee: Some(c.payee),
-        payee_name: if c.payee_name.is_empty() {
-            payee_display.to_string()
-        } else {
-            c.payee_name.clone()
-        },
-        check_number: c.number,
-        print_later: c.print_later,
-        payee_address: c.address.clone(),
-        memo: c.memo.clone(),
-        printed_memo: c.memo.clone(),
-        tag_ids: c.header_tags.clone(),
-        draft_attachment,
-        amount: c.amount,
-        lines: c
-            .lines
-            .iter()
-            .map(|l| SplitLine {
-                account: l.account,
-                amount: l.amount,
-                memo: l.memo.clone(),
-                contact: l.contact,
-                billable: l.billable,
-                tag: l.tag,
-                item: None,
-            })
-            .chain(c.item_lines.iter().map(item_split))
-            .collect(),
-    })
-}
-
-/// A checked item line as the engine's split line (P24, U-158): the item,
-/// its quantity and cost go with the line; the amount is the checked one.
-#[must_use]
-pub fn item_split(l: &cl_model::forms::item_lines::CheckedItemLine) -> SplitLine {
-    SplitLine {
-        account: l.account,
-        amount: l.amount,
-        memo: l.description.clone(),
-        contact: l.contact,
-        billable: l.billable,
-        tag: l.tag,
-        item: l.item.map(|item| cl_api::SplitItem {
-            item,
-            quantity: l.qty,
-            unit_price: l.rate,
-            unit: l.unit,
-        }),
-    }
-}
+/// The checked check as the engine's draft and a checked item line as a
+/// split line (A11 D0: shared with the MCP tools).
+pub use cl_mcp::forms::check::{item_split, to_draft};
 
 /// A saved record's line that names an item (P24) as an Items-tab line.
 #[must_use]
@@ -338,13 +273,8 @@ impl WriteCheckScreen {
         // The company's rules as they are now (Preferences may have changed
         // them since this window read its lists).
         let list = crate::forms::tag_gate::form_list(&self.tags, &self.link);
-        let lines = cl_model::forms::tag_rule::tabbed_lines(
-            &form.header_tags,
-            &form.lines,
-            &form.items,
-            &list,
-        );
-        crate::forms::tag_gate::check(&list, &lines, &self.accounts)
+        cl_mcp::forms::check::tag_gate(form, &list, &self.accounts)
+            .map_err(|r| crate::forms::tag_gate::refusal_texts(&r, &list))
     }
 
     /// The problems a refused save showed, checked again against the form

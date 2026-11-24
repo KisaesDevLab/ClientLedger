@@ -9,16 +9,16 @@ use std::sync::Arc;
 
 use cl_api::{
     ApiError, Basis, ClosedPeriodAuthorization, ConflictReason, DeleteOptions, IdempotencyKey,
-    JE_AR_AP_NAME_REQUIRED, JE_AR_AP_ONE_PER_ENTRY, JeLine, JeOptions, LocalValidation,
-    NewJournalEntry, OrphanLabel, PageRequest, PostingOptions, REVERSAL_EDITED, RecordVersion,
-    Side, SortDir, TransactionFilter, TxnSort, TxnType, has_code,
+    JE_AR_AP_NAME_REQUIRED, JE_AR_AP_ONE_PER_ENTRY, LocalValidation, NewJournalEntry, OrphanLabel,
+    PageRequest, PostingOptions, REVERSAL_EDITED, RecordVersion, SortDir, TransactionFilter,
+    TxnSort, TxnType, has_code,
 };
 use cl_core::ids::{AccountId, TransactionId};
 use cl_core::{CalendarDate, Secret};
 use cl_model::CommandId;
 use cl_model::closing::{is_locked, needs_password};
 use cl_model::forms::SaveIntent;
-use cl_model::forms::journal::{CheckedJournal, JeSide, JournalField, JournalProblem, check};
+use cl_model::forms::journal::{CheckedJournal, JournalField, JournalProblem, check};
 
 use super::{Editing, JournalScreen, KIND, Pending, SaveIdentity, field};
 use crate::company::{CompanyEvent, Task};
@@ -50,7 +50,8 @@ pub(crate) fn delete_answer(r: Result<(), ApiError>, retry: bool) -> Result<(), 
 }
 
 impl JournalScreen {
-    /// The checked form as the engine's entry, field by field.
+    /// The checked form as the engine's entry, field by field (A11 D0:
+    /// shared with the MCP tools).
     ///
     /// # Errors
     /// What `NewJournalEntry::new_with` refuses (nothing is sent).
@@ -59,32 +60,7 @@ impl JournalScreen {
         c: &CheckedJournal,
         basis: Basis,
     ) -> Result<NewJournalEntry, LocalValidation> {
-        let lines = c
-            .lines
-            .iter()
-            .map(|l| JeLine {
-                account: l.account,
-                side: match l.side {
-                    JeSide::Debit(m) => Side::Debit(m),
-                    JeSide::Credit(m) => Side::Credit(m),
-                },
-                description: l.memo.clone(),
-                tag: l.tag,
-                contact: l.contact,
-            })
-            .collect();
-        NewJournalEntry::new_with(
-            c.date,
-            c.memo.clone(),
-            basis,
-            lines,
-            JeOptions {
-                number: c.number.clone(),
-                adjusting: c.adjusting,
-                reverse_on: c.reverse_on,
-            },
-            &self.roles(),
-        )
+        cl_mcp::forms::journal::entry_of(c, basis, &self.roles())
     }
 
     /// Commits the dates still being typed. False when a typed date is not

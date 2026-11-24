@@ -37,11 +37,10 @@ use cl_api::{
 use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, MoneyStyle};
 use cl_model::forms::journal::{
-    JournalContext, JournalForm, JournalProblem, NameKind, check, line_from_side, side_of,
+    JournalContext, JournalForm, JournalProblem, check, line_from_side, side_of,
 };
 use cl_model::forms::lines::FormLines;
 use cl_model::forms::{FormState, SaveIntent};
-use cl_model::register::AccountClass;
 use cl_model::{CommandId, Scope};
 use eframe::egui::Ui;
 use serde_json::{Value, json};
@@ -333,56 +332,13 @@ impl JournalScreen {
 
     /// The chart's A/R and A/P accounts.
     pub(crate) fn roles(&self) -> AccountRoles {
-        let mut r = AccountRoles::default();
-        for a in &self.books.accounts {
-            match crate::screens::register::class_of(a) {
-                Some(AccountClass::Receivable) => {
-                    r.receivable.insert(a.id);
-                }
-                Some(AccountClass::Payable) => {
-                    r.payable.insert(a.id);
-                }
-                _ => {}
-            }
-        }
-        r
+        cl_mcp::forms::journal::roles(&self.books.accounts)
     }
 
     /// What `check` needs: the A/R-A/P accounts, each name's kind and the
     /// engine's P15 capabilities.
     pub(crate) fn context(&self) -> JournalContext {
-        let roles = self.roles();
-        let names = self
-            .books
-            .contacts
-            .iter()
-            .map(|c| {
-                let kind = match c.fields.contact_type {
-                    cl_api::ContactType::Customer => NameKind {
-                        customer: true,
-                        vendor: false,
-                    },
-                    cl_api::ContactType::Vendor => NameKind {
-                        customer: false,
-                        vendor: true,
-                    },
-                    cl_api::ContactType::Both => NameKind {
-                        customer: true,
-                        vendor: true,
-                    },
-                };
-                (c.id, kind)
-            })
-            .collect();
-        JournalContext {
-            receivable: roles.receivable,
-            payable: roles.payable,
-            names,
-            names_supported: self.has(Capabilities::JE_NAMES),
-            number_supported: self.has(Capabilities::JE_NUMBER),
-            adjusting_supported: self.has(Capabilities::JE_ADJUSTING),
-            reversing_supported: self.has(Capabilities::JE_REVERSING),
-        }
+        cl_mcp::forms::journal::context(&self.books.accounts, &self.books.contacts, |c| self.has(c))
     }
 
     /// The whole form: the header with the grid's lines.
@@ -879,8 +835,8 @@ impl JournalScreen {
         // The company's rules as they are now (Preferences may have changed
         // them since this window read its lists).
         let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
-        let lines = cl_model::forms::tag_rule::expense_lines(&[], &form.lines, &list, false);
-        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
+        cl_mcp::forms::journal::tag_gate(form, &list, &self.books.accounts)
+            .map_err(|r| crate::forms::tag_gate::refusal_texts(&r, &list))
     }
 
     /// A refused save's problems, checked again against the form as it is

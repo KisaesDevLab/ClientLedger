@@ -21,8 +21,7 @@ use std::sync::Arc;
 use cl_api::{
     Account, AccountFilter, ApiError, BankPosting, Capabilities, ClosedPeriodAuthorization,
     ConflictReason, IdempotencyKey, LocalValidation, OrphanLabel, PageRequest, PostingOptions,
-    RecordVersion, RequestGroup, Transaction, TransactionFilter, TransferDraft, TxnStatus, TxnType,
-    Versioned,
+    RecordVersion, RequestGroup, Transaction, TransactionFilter, TxnStatus, TxnType, Versioned,
 };
 use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
@@ -586,13 +585,8 @@ impl TransferScreen {
                 return false;
             }
         };
-        let draft = TransferDraft {
-            from: c.from,
-            to: c.to,
-            date: c.date,
-            amount: c.amount,
-            memo: c.memo.clone(),
-        };
+        let draft = cl_mcp::forms::transfer::to_draft(&c);
+
         let posting = match BankPosting::transfer(draft.clone()) {
             Ok(p) => p,
             Err(LocalValidation::SameAccount) => {

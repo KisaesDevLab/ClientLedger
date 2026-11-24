@@ -1121,23 +1121,26 @@ impl InvoiceScreen {
         // The company's rules as they are now (Preferences may have changed
         // them since this window read its lists).
         let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
-        let lines = cl_model::forms::tag_rule::invoice_lines(form, &list);
-        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
+        cl_mcp::forms::invoice::tag_gate(form, &list, &self.books.accounts)
+            .map_err(|r| crate::forms::tag_gate::refusal_texts(&r, &list))
     }
 
     /// Q-276: a new, untouched form starts with the company's default tag
     /// in its header (part of the clean form). Never on an edit.
     pub(crate) fn fill_default_tag(&mut self) {
-        let tags = cl_model::forms::tag_rule::new_form_header_tags(&self.books.tag_list);
-        if tags.is_empty()
-            || self.editing.is_some()
+        if self.editing.is_some()
             || self.saved_count > 0
             || self.nav_at.is_some()
             || self.header.is_dirty()
-            || !self.header.current().header_tags.is_empty()
         {
             return;
         }
+        let Some(tags) = cl_mcp::forms::default_header_tags(
+            &self.books.tag_list,
+            &self.header.current().header_tags,
+        ) else {
+            return;
+        };
         let mut f = self.header.current().clone();
         f.header_tags = tags;
         self.header.load(f);
