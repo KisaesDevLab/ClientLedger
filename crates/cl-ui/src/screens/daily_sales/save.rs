@@ -8,13 +8,11 @@
 //! layout and day) before anything is sent again; a failed post keeps the
 //! draft, which the next save posts (Q-P14u).
 
-use cl_api::{
-    ApiError, DailyEntry, DailyEntryDraft, DailyEntryQuery, DailyValue, EntryStatus, IdempotencyKey,
-};
+use cl_api::{ApiError, DailyEntry, DailyEntryDraft, DailyEntryQuery, EntryStatus, IdempotencyKey};
 use cl_core::ids::{AccountId, DailyEntryId, UserId};
 use cl_core::{Money, Secret};
 use cl_model::closing::{ClosingStage, is_locked, needs_password};
-use cl_model::forms::daily_sales::{CheckedDaily, DailySalesForm, check};
+use cl_model::forms::daily_sales::{DailySalesForm, check};
 use cl_model::forms::{SaveFailure, SaveIntent};
 
 use super::{
@@ -164,49 +162,17 @@ async fn adopt<A: DailyApi>(api: &A, plan: &Plan, lost: ApiError) -> Result<Dail
         .await
 }
 
-/// The checked day as the engine's draft, field by field (no arithmetic).
-pub(crate) fn to_draft(c: &CheckedDaily) -> DailyEntryDraft {
-    DailyEntryDraft {
-        template: c.template,
-        date: c.date,
-        tag: c.tag,
-        notes: c.notes.clone(),
-        values: c
-            .values
-            .iter()
-            .map(|(line, amount)| DailyValue {
-                line: *line,
-                amount: *amount,
-                tag: None,
-            })
-            .collect(),
-    }
-}
+/// The checked day as the engine's draft (A11 D0: shared with the MCP
+/// tools).
+pub(crate) use cl_mcp::forms::daily_sales::to_draft;
 
 impl DailySalesScreen {
     /// The tag rules on the day (P29 WP7, Q-276): one tag for the whole
     /// day, so every layout line is saved with it.
     pub(crate) fn tag_gate(&self, form: &DailySalesForm) -> Result<(), Vec<String>> {
-        use cl_model::forms::tag_rule::{Place, TagLine};
         let list = crate::forms::tag_gate::form_list(&self.tags, &self.link);
-        let tags: Vec<cl_core::ids::TagId> = form.tag.into_iter().collect();
-        let mut lines = vec![TagLine {
-            place: Place::Entry,
-            account: None,
-            tags: tags.clone(),
-        }];
-        lines.extend(
-            self.layout
-                .lines
-                .iter()
-                .filter_map(|l| l.account)
-                .map(|a| TagLine {
-                    place: Place::Entry,
-                    account: Some(a),
-                    tags: tags.clone(),
-                }),
-        );
-        crate::forms::tag_gate::check(&list, &lines, &self.accounts)
+        cl_mcp::forms::daily_sales::tag_gate(form, &self.layout, &list, &self.accounts)
+            .map_err(|r| crate::forms::tag_gate::refusal_texts(&r, &list))
     }
 
     /// A refused save's problems, checked again against the day as it is
