@@ -12,6 +12,13 @@ cl-core = { path = "../cl-core" }
 cl-model = { path = "../cl-model" }
 # Error enums (MIT OR Apache-2.0; already in the tree).
 thiserror = "2.0.21"
+# D1/D4: MCP JSON-RPC messages and Claude Desktop's config (MIT OR Apache-2.0; already in the tree).
+serde_json = "1.0.154"
+# D4: the relay's log lines go to stderr or a file, never stdout (MIT; already in the tree).
+tracing = "0.1.44"
+
+[dev-dependencies]
+tempfile = "3.27.0"
 
 [lints]
 workspace = true
