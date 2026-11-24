@@ -20,5 +20,6 @@ pub mod bridge;
 pub mod claude_desktop;
 pub mod forms;
 pub mod policy;
+pub mod protocol;
 pub mod tools;
 pub mod undo;
