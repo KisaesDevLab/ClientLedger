@@ -9,8 +9,8 @@
 use std::sync::Arc;
 
 use cl_api::{
-    AccountType, ApiError, Capabilities, IdempotencyKey, NewAdjustment, OrphanLabel,
-    PostingOptions, RequestGroup, SavedAdjustment,
+    AccountType, ApiError, Capabilities, IdempotencyKey, OrphanLabel, PostingOptions, RequestGroup,
+    SavedAdjustment,
 };
 use cl_core::CalendarDate;
 use cl_core::ids::AccountId;
@@ -176,21 +176,7 @@ impl AdjustScreen {
             }
         };
         self.problems.clear();
-        let a = NewAdjustment {
-            date: checked.date,
-            adjustment_account_id: checked.account,
-            memo: checked.memo,
-            lines: checked
-                .lines
-                .iter()
-                .map(|l| cl_api::AdjustmentLine {
-                    item_id: l.item,
-                    quantity_change: l.quantity_change,
-                    value_change: l.value_change,
-                    unit_id: l.unit,
-                })
-                .collect(),
-        };
+        let a = cl_mcp::forms::inventory::adjustment(checked);
         let key = IdempotencyKey::new();
         let label = OrphanLabel {
             what: "orphan.inventory_adjustment",

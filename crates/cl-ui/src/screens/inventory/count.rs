@@ -9,8 +9,8 @@
 use std::sync::Arc;
 
 use cl_api::{
-    AccountType, ApiError, Capabilities, CountResult, CountSheet, IdempotencyKey, NewCount,
-    OrphanLabel, PostingOptions, RequestGroup,
+    AccountType, ApiError, Capabilities, CountResult, CountSheet, IdempotencyKey, OrphanLabel,
+    PostingOptions, RequestGroup,
 };
 use cl_core::CalendarDate;
 use cl_core::ids::{AccountId, ItemId};
@@ -234,20 +234,7 @@ impl CountScreen {
         let (Some(as_of), Some(account)) = (self.sheet.as_of, self.sheet.account) else {
             return false;
         };
-        let c = NewCount {
-            as_of,
-            adjustment_account_id: account,
-            memo: (!self.sheet.memo.trim().is_empty()).then(|| self.sheet.memo.trim().to_string()),
-            lines: lines
-                .iter()
-                .map(|l| cl_api::CountLine {
-                    item_id: l.item,
-                    sheet_on_hand: l.sheet_on_hand,
-                    counted_quantity: l.counted,
-                    unit_id: l.unit,
-                })
-                .collect(),
-        };
+        let c = cl_mcp::forms::inventory::count(as_of, account, &self.sheet.memo, &lines);
         let key = IdempotencyKey::new();
         let label = OrphanLabel {
             what: "orphan.inventory_count",
