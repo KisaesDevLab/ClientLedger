@@ -31,8 +31,8 @@ use std::sync::mpsc::Receiver;
 
 use cl_api::{
     ApiError, CustomerStatement, EmailMessage, IdempotencyKey, IssuedStatementRecord,
-    NewStatementRun, OrphanLabel, RequestGroup, SendMethod, SendRecord, StatementFormat,
-    StatementListQuery, StatementListRow, StatementQuery,
+    NewStatementRun, OrphanLabel, RequestGroup, SendMethod, SendRecord, StatementListQuery,
+    StatementListRow, StatementQuery,
 };
 use cl_core::ids::{ContactId, TenantId};
 use cl_core::{CalendarDate, MoneyStyle};
@@ -181,13 +181,7 @@ impl std::fmt::Debug for StatementsScreen {
     }
 }
 
-fn wire_format(f: StatementFormatChoice) -> StatementFormat {
-    match f {
-        StatementFormatChoice::OpenItem => StatementFormat::OpenItem,
-        StatementFormatChoice::BalanceForward => StatementFormat::BalanceForward,
-        StatementFormatChoice::Transaction => StatementFormat::Transaction,
-    }
-}
+use cl_mcp::forms::statements::wire_format;
 
 fn split(s: &str) -> Vec<String> {
     s.split([',', ';'])
@@ -560,15 +554,7 @@ impl StatementsScreen {
             .iter()
             .map(|c| {
                 let key = self.keys.entry((c.attempt, c.index)).or_default().clone();
-                (
-                    NewStatementRun {
-                        as_of: plan.as_of,
-                        format: wire_format(plan.format),
-                        start: plan.start,
-                        contact_ids: c.clients.clone(),
-                    },
-                    key,
-                )
+                (cl_mcp::forms::statements::run(&plan, c), key)
             })
             .collect();
         let Some(first) = runs.first().map(|(_, k)| k.clone()) else {
