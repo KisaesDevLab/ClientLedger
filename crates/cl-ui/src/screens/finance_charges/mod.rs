@@ -26,9 +26,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use cl_api::{
-    ApiError, AssessContact, AssessRequest, AssessResult, AssessedInvoice, CompanySettings,
-    FinanceChargePreview, FinanceChargeRefusal, IdempotencyKey, RequestGroup,
-    finance_charge_refusal,
+    ApiError, AssessRequest, AssessResult, AssessedInvoice, CompanySettings, FinanceChargePreview,
+    FinanceChargeRefusal, IdempotencyKey, RequestGroup, finance_charge_refusal,
 };
 use cl_core::ids::{AccountId, ContactId, TenantId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret};
@@ -535,17 +534,7 @@ impl FinanceChargesScreen {
             .map(|c| {
                 let key = self.keys.entry((c.attempt, c.index)).or_default().clone();
                 (
-                    AssessRequest {
-                        assessment_date: plan.date,
-                        contacts: c
-                            .clients
-                            .iter()
-                            .map(|(contact_id, expected_charge)| AssessContact {
-                                contact_id: *contact_id,
-                                expected_charge: *expected_charge,
-                            })
-                            .collect(),
-                    },
+                    cl_mcp::forms::finance_charges::assess_request(plan.date, c),
                     key,
                 )
             })

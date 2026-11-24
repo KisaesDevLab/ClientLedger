@@ -17,6 +17,8 @@ pub mod card;
 pub mod check;
 pub mod daily_sales;
 pub mod deposit;
+pub mod finance_charges;
+pub mod inventory;
 pub mod invoice;
 pub mod journal;
 pub mod lists;
@@ -26,6 +28,7 @@ pub mod pay_bills;
 pub mod payment;
 pub mod personal_funds;
 pub mod sales_tax;
+pub mod statements;
 pub mod tag_gate;
 pub mod transfer;
 
