@@ -22,6 +22,7 @@ pub mod journal;
 pub mod lists;
 pub mod loan_payment;
 pub mod owner_money;
+pub mod pay_bills;
 pub mod payment;
 pub mod personal_funds;
 pub mod tag_gate;

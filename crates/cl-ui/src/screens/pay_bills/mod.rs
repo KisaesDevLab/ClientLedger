@@ -36,9 +36,9 @@ use std::sync::Arc;
 use std::fmt;
 
 use cl_api::{
-    Account, AccountFilter, ApiError, BillToPay, Capabilities, CheckNumbering,
-    ClosedPeriodAuthorization, CreatedPayment, CreditToApply, IdempotencyKey, OrphanLabel,
-    PayBillsRequest, PayMethod, PayableFilter, PayableList, PostingOptions, RequestGroup,
+    Account, AccountFilter, ApiError, Capabilities, CheckNumbering, ClosedPeriodAuthorization,
+    CreatedPayment, IdempotencyKey, OrphanLabel, PayBillsRequest, PayMethod, PayableFilter,
+    PayableList, PostingOptions, RequestGroup,
 };
 use cl_core::ids::{AccountId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, Secret};
@@ -738,7 +738,7 @@ impl PayBillsScreen {
                 }
             },
         };
-        let any_discount = plan.bills.iter().any(|b| b.discount.is_positive());
+        let any_discount = cl_mcp::forms::pay_bills::takes_discount(&plan);
         let discount_account = self.discount_account.or(self.discount_default);
         if any_discount && discount_account.is_none() {
             // Q-P18a: ask for the account once; it becomes the default.
@@ -748,31 +748,13 @@ impl PayBillsScreen {
             self.notice = Some("paybills.discount.account_needed");
             return None;
         }
-        Some(PayBillsRequest {
-            bank_account: account,
+        Some(cl_mcp::forms::pay_bills::request(
+            &plan,
+            account,
             date,
-            bills: plan
-                .bills
-                .iter()
-                .map(|b| BillToPay {
-                    bill: b.bill,
-                    cash: b.cash,
-                    discount: b.discount,
-                })
-                .collect(),
-            credits: plan
-                .credits
-                .iter()
-                .map(|c| CreditToApply {
-                    credit: c.credit,
-                    bill: c.bill,
-                    amount: c.amount,
-                })
-                .collect(),
-            discount_account: if any_discount { discount_account } else { None },
             method,
-            memo: None,
-        })
+            discount_account,
+        ))
     }
 
     /// Checks and pays. Nothing is sent unless the check passes, and
