@@ -333,7 +333,12 @@ macro_rules! txn_change {
         &[
             act("create", CREATE, &[post_new($create)], "make a new one"),
             edit(&[put_u(TXN_ONE)]),
-            act("void", VOID, &[TXN_VOID], "void one (kept, with zero amounts)"),
+            act(
+                "void",
+                VOID,
+                &[TXN_VOID],
+                "void one (kept, with zero amounts)",
+            ),
         ]
     };
 }
@@ -348,7 +353,7 @@ pub const TOOLS: &[Tool] = &[
         edit(&[put_u("/api/v1/bills/{id}")]),
         act("void", VOID, &[void_u("/api/v1/bills/{id}/void")], "void a bill"),
     ]),
-    read_tool("vendor_credit_read", &[], "Read vendor credits.", reads!("/api/v1/vendor-credits", "/api/v1/vendor-credits/{id}")),
+    read_tool("vendor_credit_read", &["vendors.enter_bill"], "Read vendor credits.", reads!("/api/v1/vendor-credits", "/api/v1/vendor-credits/{id}")),
     change_tool("vendor_credit_change", &[], &["bill.kind_toggle"], "Enter, change or void a vendor credit.", &[
         act("create", CREATE, &[post_new("/api/v1/vendor-credits")], "enter a new vendor credit"),
         edit(&[put_u("/api/v1/vendor-credits/{id}")]),
@@ -679,7 +684,10 @@ mod tests {
             let id = c.id.as_str();
             let tool = tools_for(id).next().is_some();
             let why = not_a_tool(id);
-            assert!(tool || why.is_some(), "{id} is neither a tool nor in NOT_A_TOOL");
+            assert!(
+                tool || why.is_some(),
+                "{id} is neither a tool nor in NOT_A_TOOL"
+            );
             // An exact NOT_A_TOOL entry and a tool contradict each other; a
             // prefix entry may cover verbs a tool names.
             let exact = NOT_A_TOOL.iter().any(|(n, _)| *n == id);
@@ -731,7 +739,13 @@ mod tests {
                 "/permission",
                 "/tb/",
             ] {
-                assert!(!s.template.contains(bad), "{}.{} {}", t.name, a.name, s.template);
+                assert!(
+                    !s.template.contains(bad),
+                    "{}.{} {}",
+                    t.name,
+                    a.name,
+                    s.template
+                );
             }
         }
     }
@@ -743,12 +757,26 @@ mod tests {
                 match t.kind {
                     Kind::Read => {
                         assert_eq!(a.classes, READ, "{}.{}", t.name, a.name);
-                        assert!(a.steps.iter().all(|s| s.method == "GET"), "{}.{}", t.name, a.name);
+                        assert!(
+                            a.steps.iter().all(|s| s.method == "GET"),
+                            "{}.{}",
+                            t.name,
+                            a.name
+                        );
                     }
                     Kind::Change => {
                         assert!(!a.classes.contains(&Class::Read), "{}.{}", t.name, a.name);
-                        assert!(!a.classes.contains(&Class::SendPrint), "{}.{}", t.name, a.name);
-                        assert!(a.steps.iter().all(|s| s.method != "GET" && s.kind != StepKind::Email));
+                        assert!(
+                            !a.classes.contains(&Class::SendPrint),
+                            "{}.{}",
+                            t.name,
+                            a.name
+                        );
+                        assert!(
+                            a.steps
+                                .iter()
+                                .all(|s| s.method != "GET" && s.kind != StepKind::Email)
+                        );
                     }
                     Kind::Send => {
                         assert_eq!(a.classes, SEND, "{}.{}", t.name, a.name);
@@ -822,7 +850,10 @@ mod tests {
             std::path::PathBuf::from,
         );
         let Ok(text) = std::fs::read_to_string(&path) else {
-            eprintln!("NOTE: {} is not here (engine submodule not checked out)", path.display());
+            eprintln!(
+                "NOTE: {} is not here (engine submodule not checked out)",
+                path.display()
+            );
             return;
         };
         let spec: serde_json::Value = serde_json::from_str(&text).expect("openapi.json is JSON");
@@ -831,7 +862,14 @@ mod tests {
                 continue;
             }
             let op = &spec["paths"][s.template][s.method.to_ascii_lowercase()];
-            assert!(op.is_object(), "{}.{}: {} {} is not in the engine", t.name, a.name, s.method, s.template);
+            assert!(
+                op.is_object(),
+                "{}.{}: {} {} is not in the engine",
+                t.name,
+                a.name,
+                s.method,
+                s.template
+            );
             assert_eq!(
                 op.get("x-stale").and_then(serde_json::Value::as_str),
                 s.stamp.x_stale(),
