@@ -5,7 +5,6 @@
 //! as numbers, like account numbers).
 
 use cl_api::Tag;
-use cl_model::lists::tags::TagEntry;
 
 /// The tag as every screen shows it.
 #[must_use]
@@ -36,24 +35,9 @@ pub fn label_of(tags: &[Tag], id: cl_core::ids::TagId) -> String {
         .unwrap_or_default()
 }
 
-/// The tag as `cl_model`'s tag rules see it.
-#[must_use]
-pub fn entry(tag: &Tag) -> TagEntry {
-    TagEntry {
-        id: tag.id,
-        number: tag
-            .fields
-            .tag_number
-            .clone()
-            .filter(|n| !n.trim().is_empty()),
-        name: tag.fields.name.clone(),
-        group: tag.fields.group_id,
-        color: tag.fields.color.clone(),
-        description: tag.fields.description.clone(),
-        active: tag.is_active,
-        usage: tag.usage_count,
-    }
-}
+/// The tag as `cl_model`'s tag rules see it (shared with the MCP tools,
+/// A11 D0).
+pub use cl_mcp::forms::tag_gate::entry;
 
 #[cfg(test)]
 mod tests {

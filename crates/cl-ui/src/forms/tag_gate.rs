@@ -1,14 +1,16 @@
 //! The forms' side of the tag gate (P29 WP7, Q-276, Q-180): the forms'
 //! tag list built in one place with the company's rules, and a refusal in
 //! plain words that names each line ("Expenses tab, line 2: Add a tag…").
-//! The rule itself is `cl_model::forms::tag_rule`.
+//! The rule itself is `cl_model::forms::tag_rule`; the gate over the
+//! engine's lists is `cl_mcp::forms::tag_gate` (A11 D0), shared with the
+//! MCP tools.
 
 use cl_api::{Account, Tag};
-use cl_core::ids::AccountId;
-use cl_model::forms::tag_rule::{Place, TagLine, TagRefusal, check_form_tags};
-use cl_model::lists::accounts::AccountKind;
+use cl_model::forms::tag_rule::{Place, TagLine, TagRefusal};
 use cl_model::lists::tags::{LineTagProblem, TagList};
 use eframe::egui;
+
+pub use cl_mcp::forms::tag_gate::kind_in;
 
 use crate::company::CompanyLink;
 use crate::i18n::{t, t_with};
@@ -17,19 +19,7 @@ use crate::i18n::{t, t_with};
 /// tag rules (`CompanyLink::tag_rules`).
 #[must_use]
 pub fn form_list(tags: &[Tag], link: &CompanyLink) -> TagList {
-    TagList::for_forms(
-        tags.iter().map(crate::tag_names::entry).collect(),
-        link.tag_rules(),
-    )
-}
-
-/// An account's type from the chart the form read.
-#[must_use]
-pub fn kind_in(accounts: &[Account], id: AccountId) -> Option<AccountKind> {
-    accounts
-        .iter()
-        .find(|a| a.id == id)
-        .map(|a| crate::screens::lists::accounts::model::kind_of(a.fields.account_type))
+    cl_mcp::forms::tag_gate::form_list(tags, link.tag_rules())
 }
 
 fn problem_text(p: LineTagProblem, list: &TagList) -> String {
@@ -82,7 +72,7 @@ pub fn refusal_texts(r: &TagRefusal, list: &TagList) -> Vec<String> {
 /// # Errors
 /// The refused lines, in words.
 pub fn check(list: &TagList, lines: &[TagLine], accounts: &[Account]) -> Result<(), Vec<String>> {
-    check_form_tags(list, lines, |a| kind_in(accounts, a)).map_err(|r| refusal_texts(&r, list))
+    cl_mcp::forms::tag_gate::check(list, lines, accounts).map_err(|r| refusal_texts(&r, list))
 }
 
 /// Shows a refusal under the form's problems (nothing when empty).

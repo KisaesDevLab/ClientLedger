@@ -106,20 +106,8 @@ pub fn api_type(kind: AccountKind) -> AccountType {
     }
 }
 
-/// The list kind of an engine type.
-#[must_use]
-pub fn kind_of(t: AccountType) -> AccountKind {
-    match t {
-        AccountType::Asset => AccountKind::Asset,
-        AccountType::Liability => AccountKind::Liability,
-        AccountType::Equity => AccountKind::Equity,
-        AccountType::Revenue => AccountKind::Income,
-        AccountType::Cogs => AccountKind::Cogs,
-        AccountType::Expense => AccountKind::Expense,
-        AccountType::OtherRevenue => AccountKind::OtherIncome,
-        AccountType::OtherExpense => AccountKind::OtherExpense,
-    }
-}
+/// The list kind of an engine type (shared with the MCP tools, A11 D0).
+pub use cl_mcp::forms::accounts::kind_of;
 
 /// Text for a detail type: the built-in label, else the stored value in
 /// words (`my_own_type` → "My own type"), never the raw slug.

@@ -59,7 +59,6 @@ use crate::grid_env::EnvParts;
 use crate::i18n::{t, t_with};
 use crate::layout::{Body, FixedFrame, FrameOpts};
 use crate::screens::company::form;
-use crate::screens::lists::accounts::model::kind_of;
 use crate::theme::Tokens;
 use crate::windows::Screen;
 
@@ -79,15 +78,8 @@ pub fn make(
 }
 
 /// The register class of an account (`None` for income and expense
-/// accounts, which have no register).
-#[must_use]
-pub fn class_of(a: &Account) -> Option<AccountClass> {
-    let c = AccountClass::of(
-        kind_of(a.fields.account_type),
-        a.fields.detail_type.as_deref(),
-    );
-    c.has_register().then_some(c)
-}
+/// accounts, which have no register; shared with the MCP tools, A11 D0).
+pub use cl_mcp::forms::accounts::class_of;
 
 /// "1010 · Operating Checking", or the name alone.
 #[must_use]

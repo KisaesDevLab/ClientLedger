@@ -19,6 +19,8 @@ cl-import = { path = "../cl-import" }
 # LAN multi-user (P33).
 cl-lan = { path = "../cl-lan" }
 cl-model = { path = "../cl-model" }
+# A11 D0: the form-to-request mapping shared with the MCP tools.
+cl-mcp = { path = "../cl-mcp" }
 # P19: checks and forms laid out as PDF pages.
 cl-print = { path = "../cl-print" }
 cl-settings = { path = "../cl-settings" }

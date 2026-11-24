@@ -1080,6 +1080,7 @@ dependencies = [
  "cl-host",
  "cl-import",
  "cl-lan",
+ "cl-mcp",
  "cl-model",
  "cl-print",
  "cl-settings",
