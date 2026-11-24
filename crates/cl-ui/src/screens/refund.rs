@@ -20,16 +20,13 @@
 
 use std::sync::Arc;
 
-use cl_api::{
-    ApiError, IdempotencyKey, NewRefund, RefundCheck, RefundMethod, RefundRecord, RefundRefusal,
-    RefundSource, RequestGroup, refund_refusal,
-};
+use cl_api::{ApiError, IdempotencyKey, RefundRecord, RefundRefusal, RequestGroup, refund_refusal};
 use cl_core::ids::{AccountId, ContactId, TenantId, TransactionId};
 use cl_core::{CalendarDate, Money, MoneyStyle, Secret, UserInput};
 use cl_model::closing::needs_password;
 use cl_model::forms::refund::{
-    CheckPlan, RefundContext, RefundForm, RefundMethodChoice, RefundPlan, RefundProblem,
-    RefundSourceChoice, RefundSourceKind,
+    RefundContext, RefundForm, RefundMethodChoice, RefundProblem, RefundSourceChoice,
+    RefundSourceKind,
 };
 use cl_model::{CommandId, Scope};
 use eframe::egui::{self, RichText, Ui};
@@ -159,39 +156,9 @@ impl std::fmt::Debug for RefundScreen {
     }
 }
 
-/// The engine's refund method.
-fn method_of(m: RefundMethodChoice) -> RefundMethod {
-    match m {
-        RefundMethodChoice::Check => RefundMethod::Check,
-        RefundMethodChoice::Cash => RefundMethod::Cash,
-        RefundMethodChoice::Card => RefundMethod::CreditCard,
-        RefundMethodChoice::BankTransfer => RefundMethod::Ach,
-        RefundMethodChoice::Other => RefundMethod::Other,
-    }
-}
-
-/// The checked refund as the engine's request (field by field).
-pub(crate) fn new_refund(p: &RefundPlan) -> NewRefund {
-    NewRefund {
-        customer_id: p.client,
-        date: p.date,
-        from_account: p.from_account,
-        amount: p.amount,
-        source: match p.source.kind {
-            RefundSourceKind::PaymentCredit => RefundSource::Payment(p.source.id),
-            RefundSourceKind::CreditMemo => RefundSource::CreditMemo(p.source.id),
-            RefundSourceKind::HeldDeposit => RefundSource::Deposit(p.source.id),
-        },
-        method: method_of(p.method),
-        check: match &p.check {
-            CheckPlan::NotACheck => RefundCheck::NotACheck,
-            CheckPlan::PrintLater => RefundCheck::PrintLater,
-            CheckPlan::Number(n) => RefundCheck::Number(n.clone()),
-        },
-        ref_no: None,
-        memo: p.memo.clone(),
-    }
-}
+/// The checked refund as the engine's request (A11 D0: shared with the MCP
+/// tools).
+pub(crate) use cl_mcp::forms::refund::new_refund;
 
 impl RefundScreen {
     /// A new, empty refund.
