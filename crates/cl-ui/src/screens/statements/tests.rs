@@ -81,7 +81,7 @@ fn formats_change_the_preview_and_show_the_start() {
     settle(&mut s);
     assert_eq!(s.state()["shows_start"], true);
     let p = s.preview.as_ref().expect("preview");
-    assert_eq!(p.format, StatementFormat::BalanceForward);
+    assert_eq!(p.format, cl_api::StatementFormat::BalanceForward);
     assert_eq!(p.amount_due.format(MoneyStyle::default()), "750.00");
 }
 

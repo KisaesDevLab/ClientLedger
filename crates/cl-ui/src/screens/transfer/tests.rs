@@ -182,7 +182,7 @@ fn p33_use_theirs_shows_their_transfer() {
 #[test]
 fn a_retry_reuses_the_key_only_for_the_same_save() {
     let (mut s, _link, _dir) = screen();
-    let posting = BankPosting::transfer(TransferDraft {
+    let posting = BankPosting::transfer(cl_api::TransferDraft {
         from: account(1010),
         to: account(2050),
         date: s.today,
