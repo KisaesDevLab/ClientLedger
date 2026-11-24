@@ -35,26 +35,9 @@ impl BulkEntryScreen {
     pub(crate) fn tag_gate(&self) -> Result<(), Vec<String>> {
         // The company's rules as they are now (Preferences may have changed
         // them since this window read its lists).
-        use cl_model::forms::tag_rule::{Place, TagLine};
         let list = crate::forms::tag_gate::form_list(&self.books.tags, &self.link);
-        let lines: Vec<TagLine> = self
-            .batch()
-            .sections
-            .iter()
-            .enumerate()
-            .flat_map(|(s, sec)| {
-                sec.rows
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, r)| !r.is_blank())
-                    .map(move |(i, r)| TagLine {
-                        place: Place::Row(s, i),
-                        account: r.account,
-                        tags: sec.row_tag(r).into_iter().collect(),
-                    })
-            })
-            .collect();
-        crate::forms::tag_gate::check(&list, &lines, &self.books.accounts)
+        cl_mcp::forms::batch::tag_gate(self.batch(), &list, &self.books.accounts)
+            .map_err(|r| crate::forms::tag_gate::refusal_texts(&r, &list))
     }
 
     /// Save all. True when the batch saved at once.
