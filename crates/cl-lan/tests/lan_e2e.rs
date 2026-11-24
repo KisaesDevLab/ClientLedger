@@ -731,3 +731,98 @@ async fn event_stream_flows_through_both_hops_without_buffering() {
     assert!(ok.is_ok() && got.contains("data: one"), "{got}");
     assert!(got.starts_with("HTTP/1.1 200"), "{got}");
 }
+
+/// What the host app's MCP bridge was given (A11, S12).
+#[derive(Default)]
+struct McpSeen(Mutex<Vec<(String, Vec<u8>)>>);
+
+impl cl_lan::host::LanMcp for McpSeen {
+    fn answer(&self, device: &str, frame: &[u8]) -> Vec<u8> {
+        self.0
+            .lock()
+            .expect("lock")
+            .push((device.to_string(), frame.to_vec()));
+        br#"{"v":1,"ok":true}"#.to_vec()
+    }
+}
+
+fn mcp_post(body: &str) -> String {
+    format!(
+        "POST {} HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        cl_lan::host::MCP_PATH,
+        body.len()
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_paired_device_reaches_the_mcp_bridge_with_its_own_fingerprint() {
+    let lab = lab().await;
+    let seen = Arc::new(McpSeen::default());
+    lab.gate.set_mcp(Some(seen.clone()));
+    let device = pair(&lab).await;
+    let mut s = tls_to_proxy(&lab, &device).await;
+    let resp = raw(&mut s, mcp_post(r#"{"v":1,"kind":"probe"}"#).as_bytes()).await;
+    assert!(resp.starts_with("HTTP/1.1 200"), "{resp}");
+    assert_eq!(body_json(&resp)["ok"], true);
+    let got = seen.0.lock().expect("lock").clone();
+    assert_eq!(got.len(), 1);
+    assert_eq!(
+        got[0].0,
+        device.fingerprint().hex(),
+        "the pinned device, not a header"
+    );
+    assert_eq!(got[0].1, br#"{"v":1,"kind":"probe"}"#.to_vec());
+    // Answered in this process: the engine never sees the path.
+    assert_eq!(lab.seen.lock().expect("lock").requests.len(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn an_unpaired_device_never_reaches_the_mcp_bridge() {
+    let lab = lab().await;
+    let seen = Arc::new(McpSeen::default());
+    lab.gate.set_mcp(Some(seen.clone()));
+    let stranger = Identity::generate().expect("id");
+    let mut s = tls_to_proxy(&lab, &stranger).await;
+    let resp = raw(&mut s, mcp_post("{}").as_bytes()).await;
+    assert!(resp.starts_with("HTTP/1.1 403"), "{resp}");
+    assert!(resp.contains("LAN_NOT_PAIRED"));
+    assert_eq!(seen.0.lock().expect("lock").len(), 0);
+    assert_eq!(lab.seen.lock().expect("lock").requests.len(), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_mcp_bridge_and_oversized_frames_are_refused() {
+    let lab = lab().await;
+    let device = pair(&lab).await;
+    let mut s = tls_to_proxy(&lab, &device).await;
+    let resp = raw(&mut s, mcp_post("{}").as_bytes()).await;
+    assert!(resp.starts_with("HTTP/1.1 404"), "{resp}");
+    let seen = Arc::new(McpSeen::default());
+    lab.gate.set_mcp(Some(seen.clone()));
+    let big = "x".repeat(cl_lan::host::MCP_BODY_MAX + 1);
+    let s = tls_to_proxy(&lab, &device).await;
+    let (mut rd, mut wr) = tokio::io::split(s);
+    let req = mcp_post(&big);
+    // The host stops reading at the limit and closes; the rest of the body
+    // may meet a reset, which can swallow the 413 on some systems.
+    let writer = tokio::spawn(async move {
+        let _ = wr.write_all(req.as_bytes()).await;
+    });
+    let mut out = Vec::new();
+    let _ = tokio::time::timeout(Duration::from_secs(10), rd.read_to_end(&mut out)).await;
+    let _ = writer.await;
+    let resp = String::from_utf8_lossy(&out);
+    assert!(
+        resp.is_empty() || resp.starts_with("HTTP/1.1 413"),
+        "{resp}"
+    );
+    let mut s = tls_to_proxy(&lab, &device).await;
+    let resp = raw(
+        &mut s,
+        format!("GET {} HTTP/1.1\r\nHost: x\r\n\r\n", cl_lan::host::MCP_PATH).as_bytes(),
+    )
+    .await;
+    assert!(resp.starts_with("HTTP/1.1 405"), "{resp}");
+    assert_eq!(seen.0.lock().expect("lock").len(), 0);
+    assert_eq!(lab.seen.lock().expect("lock").requests.len(), 0);
+}

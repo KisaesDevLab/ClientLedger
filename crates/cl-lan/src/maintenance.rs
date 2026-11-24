@@ -14,22 +14,47 @@
 //! engine start (review B1).
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError};
 
-use crate::host::{HostUpstream, Upstream, UpstreamState};
+use crate::host::{HostUpstream, LanMcp, Upstream, UpstreamState};
 
 /// A settable [`HostUpstream`]: the host app publishes the engine here
 /// (from its supervisor).
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Gate {
     upstream: Mutex<Option<Upstream>>,
     /// The host app holds the engine's maintenance (restore, import): the
     /// workstations' hello says so, so they show the maintenance banner
     /// (QA-9). Nothing is refused here; the engine refuses itself.
     maintenance: AtomicBool,
+    /// The host app's MCP bridge for paired workstations (A11), once it
+    /// serves one.
+    mcp: Mutex<Option<Arc<dyn LanMcp>>>,
+}
+
+impl std::fmt::Debug for Gate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Gate")
+            .field("upstream", &self.upstream)
+            .field("maintenance", &self.maintenance)
+            .field(
+                "mcp",
+                &self
+                    .mcp
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .is_some(),
+            )
+            .finish()
+    }
 }
 
 impl Gate {
+    /// Serves (or stops serving) MCP to paired workstations (A11).
+    pub fn set_mcp(&self, mcp: Option<Arc<dyn LanMcp>>) {
+        *self.mcp.lock().unwrap_or_else(PoisonError::into_inner) = mcp;
+    }
+
     /// Publishes the running engine (or `None` while it is down).
     pub fn set_upstream(&self, up: Option<Upstream>) {
         *self.upstream.lock().unwrap_or_else(PoisonError::into_inner) = up;
@@ -51,6 +76,13 @@ impl HostUpstream for Gate {
 
     fn maintenance(&self) -> bool {
         self.maintenance.load(Ordering::SeqCst)
+    }
+
+    fn mcp(&self) -> Option<Arc<dyn LanMcp>> {
+        self.mcp
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 }
 

@@ -115,6 +115,30 @@ pub trait HostUpstream: Send + Sync + 'static {
     fn maintenance(&self) -> bool {
         false
     }
+
+    /// The host app's MCP bridge for [`MCP_PATH`] (A11, review S12), when
+    /// it serves one.
+    fn mcp(&self) -> Option<Arc<dyn LanMcp>> {
+        None
+    }
+}
+
+/// The path a paired workstation's MCP relay posts its frames to (A11).
+/// Answered in this process, never relayed to the engine: the relay would
+/// drop the `X-CL-*` headers the bridge needs, and the engine has no such
+/// route ([`forwardable`] is false for it).
+pub const MCP_PATH: &str = "/cl-mcp";
+/// A frame from a workstation may be at most this large (the MCP payload
+/// limit, 256 KiB, plus room for the frame).
+pub const MCP_BODY_MAX: usize = 320 * 1024;
+
+/// The host app's MCP bridge as the proxy calls it (implemented over
+/// `cl-mcp`, which cl-lan never depends on).
+pub trait LanMcp: Send + Sync + 'static {
+    /// Answer one frame from the paired device `device` (its pinned
+    /// fingerprint, hex), which the bridge binds the connection's token to.
+    /// Blocking: the proxy calls it off its async threads.
+    fn answer(&self, device: &str, frame: &[u8]) -> Vec<u8>;
 }
 
 /// The proxy's settings.
@@ -641,6 +665,9 @@ async fn handle(
             "This computer is not set up to use the host. Pair it again.",
         );
     }
+    if path == MCP_PATH {
+        return mcp(&sh, req, fp).await;
+    }
     if !forwardable(req.method(), &path) {
         return relay::error_response(404, "NOT_FOUND", "Not found.");
     }
@@ -686,6 +713,26 @@ async fn handle(
         Err(UpstreamError::Sent) => {
             relay::error_response(502, "LAN_UPSTREAM_FAILED", "The host stopped answering.")
         }
+    }
+}
+
+/// A paired device's MCP frame, answered by the host app's bridge in this
+/// process (A11, S12). The device is this connection's pinned certificate.
+async fn mcp(sh: &Shared, req: Request<Incoming>, fp: Fingerprint) -> Response<Body> {
+    let Some(handler) = sh.upstream.mcp() else {
+        return relay::error_response(404, "NOT_FOUND", "Not found.");
+    };
+    if req.method() != Method::POST {
+        return relay::error_response(405, "LAN_BAD_REQUEST", "The request was refused.");
+    }
+    let body: Bytes = match Limited::new(req.into_body(), MCP_BODY_MAX).collect().await {
+        Ok(b) => b.to_bytes(),
+        Err(_) => return relay::error_response(413, "LAN_BAD_REQUEST", "The request was refused."),
+    };
+    let device = fp.hex();
+    match tokio::task::spawn_blocking(move || handler.answer(&device, &body)).await {
+        Ok(out) => relay::json_response(200, String::from_utf8_lossy(&out).into_owned()),
+        Err(_) => relay::error_response(500, "LAN_MCP_FAILED", "The host could not answer."),
     }
 }
 
